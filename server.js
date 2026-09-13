@@ -1,5 +1,5 @@
 /**
- * 拾穗集 —— 后端服务（原「蛋记 danji」扩展而来）
+ * 拾穗集 shisuiji —— 后端服务
  * 仅用 Node 标准库，无任何 npm 依赖。
  * 职责：1) 托管 public/ 静态前端  2) 提供 /api 数据接口
  *       3) 读写 data/eggs.json（赛博鸡蛋）与 data/papers.json（文献）
@@ -16,6 +16,9 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const PORT = process.env.PORT || 8642;
+// 只监听本机回环：局域网/外网不可达（API 无鉴权，不能暴露给同网段）。
+// 确需局域网访问时显式设 DANJI_HOST=0.0.0.0
+const HOST = process.env.DANJI_HOST || '127.0.0.1';
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -149,7 +152,7 @@ function route(method, pattern, handler) {
   routes.push({ method, regex, keys, handler });
 }
 
-route('GET', '/api/health', async (ctx) => ctx.json({ ok: true, app: 'shiji' }));
+route('GET', '/api/health', async (ctx) => ctx.json({ ok: true, app: 'shisuiji' }));
 
 route('GET', '/api/activities', async (ctx) => ctx.json(db.activities));
 
@@ -367,7 +370,7 @@ function httpGetText(url, { timeout = 2000, maxBytes = 256 * 1024, redirects = 3
       const mod = parsed.protocol === 'https:' ? https : http;
       const req = mod.get(target, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (shiji-link-title)',
+          'User-Agent': 'Mozilla/5.0 (shisuiji-link-title)',
           Accept: 'text/html,application/xhtml+xml',
         },
       }, (res) => {
@@ -1177,7 +1180,8 @@ async function serveStatic(req, res, pathname) {
   // 解析到 public/ 内，拒绝越权路径
   const safePath = path.normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, '');
   let filePath = path.join(PUBLIC_DIR, safePath);
-  if (!filePath.startsWith(PUBLIC_DIR)) {
+  const rel = path.relative(PUBLIC_DIR, filePath);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
   const stat = await fsp.stat(filePath).catch(() => null);
@@ -1202,6 +1206,15 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
+  // 防浏览器跨域伪造写请求（CSRF）：带 Origin 头的 API 请求必须来自本机页面；
+  // curl 等本地工具不带 Origin，不受影响
+  if (pathname.startsWith('/api/') && req.headers.origin
+      && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.origin)) {
+    console.error(`[shisuiji] 已拒绝非本机来源的 API 请求: Origin=${req.headers.origin}`);
+    sendJson(res, 403, { error: 'Forbidden' });
+    return;
+  }
+
   if (pathname.startsWith('/api/')) {
     for (const r of routes) {
       if (r.method !== req.method) continue;
@@ -1216,7 +1229,7 @@ const server = http.createServer(async (req, res) => {
           json: (data, code = 200) => sendJson(res, code, data),
         });
       } catch (err) {
-        console.error('[danji] 接口错误:', err.message);
+        console.error('[shisuiji] 接口错误:', err.message);
         sendJson(res, err.message.includes('JSON') || err.message.includes('过大') ? 400 : 500, { error: err.message });
       }
       return;
@@ -1228,29 +1241,29 @@ const server = http.createServer(async (req, res) => {
   try {
     await serveStatic(req, res, pathname === '/' ? '/index.html' : pathname);
   } catch (err) {
-    console.error('[danji] 静态服务错误:', err.message);
+    console.error('[shisuiji] 静态服务错误:', err.message);
     res.writeHead(500); res.end('Internal Error');
   }
 });
 
 if (!fs.existsSync(PUBLIC_DIR)) {
-  console.error('[danji] 缺少 public 目录，请确认程序完整性');
+    console.error('[shisuiji] 缺少 public 目录，请确认程序完整性');
   process.exit(1);
 }
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[shiji] 端口 ${PORT} 被占用，拾穗集可能已经在运行了，直接访问 http://localhost:${PORT}`);
+    console.error(`[shisuiji] 端口 ${PORT} 被占用，拾穗集可能已经在运行了，直接访问 http://localhost:${PORT}`);
     process.exit(1);
   }
   throw err;
 });
 
 Promise.all([loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses()]).then(() => {
-  server.listen(PORT, () => {
-    console.log(`\n  🧺 拾穗集 已启动`);
+  server.listen(PORT, HOST, () => {
+    console.log(`\n  🧺 拾穗集 已启动（监听 ${HOST}:${PORT}）`);
     console.log(`  ➜  本机访问:  http://localhost:${PORT}`);
-    console.log(`  ➜  蛋记数据:  ${DATA_FILE}`);
+    console.log(`  ➜  鸡蛋数据:  ${DATA_FILE}`);
     console.log(`  ➜  文献数据:  ${PAPERS_FILE}`);
     console.log(`  ➜  网页数据:  ${SITES_FILE}`);
     console.log(`  ➜  花销数据:  ${EXPENSES_FILE}`);

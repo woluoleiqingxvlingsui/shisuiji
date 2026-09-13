@@ -1,11 +1,3 @@
----
-feature: platform-combobox
-status: delivered
-updated: 2026-02-26
-branch: in-place
-commits: n/a
----
-
 # 记蛋表单 · 平台自定义下拉
 
 ## Report
@@ -18,7 +10,6 @@ commits: n/a
 - 原生 datalist 嵌在 `<label>` 里 + 按当前文本过滤，输入不在配置中的 `minimax` 时点箭头列表为空，看起来像按钮坏了。
 - Review 抓到两个 E2E 漏网：`fill` 会保持输入框已聚焦，掩盖「选中后 focus 再 open」；无条件 `.stop` 会吞掉关着时的抽屉 Esc。
 - 箭头打开应显示全量（`showAll`），输入才过滤——否则已有值时几乎点不到别的平台。
-- 本目录不是 git 仓库，无 worktree/commit；改动直接落在工作区。
 
 ## [S1] Problem
 

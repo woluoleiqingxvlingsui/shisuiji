@@ -46,10 +46,10 @@ Set-Location $Base
 
 switch ($Action.ToLower()) {
   "start" {
-    if (Start-Server) { Write-Host "shiji is up at $Url" } else { Write-Host "shiji failed to start"; exit 1 }
+    if (Start-Server) { Write-Host "shisuiji is up at $Url" } else { Write-Host "shisuiji failed to start"; exit 1 }
   }
   "stop" {
-    if (Stop-Server) { Write-Host "shiji stopped" } else { Write-Host "shiji is not running"; exit 1 }
+    if (Stop-Server) { Write-Host "shisuiji stopped" } else { Write-Host "shisuiji is not running"; exit 1 }
   }
   "status" {
     if ($null -ne (Get-ServerPid)) { Write-Host "running" } else { Write-Host "stopped" }

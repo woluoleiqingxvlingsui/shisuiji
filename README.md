@@ -7,6 +7,15 @@
 - **🌐 网页**：待读网页（技术文 / 杂项知识都收）的收藏与笔记。记链接就能存，点「🌐 打开」在浏览器打开并**把卡片顶到最前**，读完按类型引导你记下能复用的要点。
 - **💰 花销**：学习、办公相关的开销记账（内容 + 金额 + 日期 + 备注）。按月看每一笔，按年按「📦 套餐 / 🔌 API」归纳，点类别可下钻看明细，列表跟着所选期间走。
 
+| 🥚 赛博鸡蛋 | ✍️ 记蛋 | 💰 花销 |
+|---|---|---|
+| ![赛博鸡蛋](assets/screenshots/eggs.png) | ![记蛋](assets/screenshots/editor.png) | ![花销](assets/screenshots/expenses.png) |
+
+## 环境要求
+
+- **Node.js ≥ 18**（只用标准库，无需 npm install）——没有的话去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版即可
+- Windows（启动脚本/桌面提醒按 Windows 设计；`node server.js` 本体其他平台也能跑）
+
 ## 快速开始
 
 双击 **`start.bat`** 或桌面「拾穗集」快捷方式，会弹出一个**图形控制台窗口**：自动在后台启动服务并打开 `http://localhost:8642`。
@@ -25,7 +34,7 @@ node server.js
 
 - 零依赖：只用到 Node.js 标准库，**无需 npm install**
 - 内存占用约 30MB，可以一直挂着
-- 换端口：`set PORT=9000 && node server.js`，或改 `server.js` 第一行的 `PORT`
+- 换端口：`set PORT=9000 && node server.js`（`PORT` 定义在 `server.js` 开头）
 
 首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
 
@@ -137,7 +146,16 @@ papers\
 3. **加接口** → `server.js` 里的 `route()` 表，加一行就是一个新端点
 4. **数据字段变更** → `server.js` 里的 `normalizeActivity()` / `normalizePaper()` / `normalizeSite()` / `normalizeExpense()` 和 `migrate()`（配合 `schema_version` 做平滑迁移）
 
-一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、同局域网手机访问（`server.listen` 绑定 `0.0.0.0`）、接入通知机器人、定时抓取活动页。
+一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、同局域网手机访问（默认只监听本机 `127.0.0.1`，设环境变量 `DANJI_HOST=0.0.0.0` 后重启即可——注意 API 没有鉴权，仅在可信网络这么做）、接入通知机器人、定时抓取活动页。
+
+## 常见问题
+
+| 现象 | 处理 |
+|---|---|
+| 提示「端口被占用」/ 打不开 8642 | 拾穗集可能已经在运行了，直接访问 `http://localhost:8642`；确实要换端口就设环境变量 `PORT`（如 `set PORT=9000 && node server.js`） |
+| 双击脚本报「无法加载文件……执行策略」 | 管理员 PowerShell 跑一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`；或者直接 `node server.js` |
+| 页面显示「无法连接拾穗集服务」 | 后台服务没在运行：双击 `start.bat` 启动，然后点页面上的「重试」 |
+| 记了内容保存没反应 | 看按钮：显示「⏳ 保存中…」是在等网络；弹出「无法连接服务」说明服务停了，重启服务后再保存，已填内容不会丢 |
 
 ## 开机自启（可选）
 
@@ -145,7 +163,7 @@ papers\
 
 ## 技术栈
 
-Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端约 600 行、后端约 200 行，全部代码人类可读，适合随手改。
+Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端约 3300 行、后端约 1300 行，全部代码人类可读，适合随手改。
 
 ## License
 

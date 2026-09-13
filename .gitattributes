@@ -1,0 +1,7 @@
+# 统一换行符：Windows 专属脚本固定 CRLF，图片为二进制
+* text=auto
+*.bat text eol=crlf
+*.vbs text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.ico binary

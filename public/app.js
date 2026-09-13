@@ -3264,11 +3264,11 @@ const describeError = (e) => (e instanceof TypeError)
   ? '网络请求失败：无法连接服务，请确认拾穗集服务已启动'
   : ('操作失败：' + ((e && e.message) ? e.message : e));
 app.config.errorHandler = (err) => {
-  console.error('[danji] 前端错误:', err);
+  console.error('[shisuiji] 前端错误:', err);
   if (toastBridge) toastBridge(describeError(err), 'warn');
 };
 window.addEventListener('unhandledrejection', (e) => {
-  console.error('[danji] 未处理的请求错误:', e.reason);
+  console.error('[shisuiji] 未处理的请求错误:', e.reason);
   if (toastBridge) toastBridge(describeError(e.reason), 'warn');
 });
 

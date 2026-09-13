@@ -1,4 +1,4 @@
-' shiji graphical console launcher.
+' shisuiji graphical console launcher.
 ' Runs control-ui.ps1 fully hidden: no console window ever appears.
 Set fso = CreateObject("Scripting.FileSystemObject")
 base = fso.GetParentFolderName(WScript.ScriptFullName)

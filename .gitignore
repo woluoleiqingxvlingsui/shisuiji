@@ -1,6 +1,9 @@
 # 个人运行数据（本地自动生成，不上传）
 data/
 
+# 论文库：首次使用自动创建，里面是你的 PDF，不入库
+papers/
+
 # 依赖（本工具零依赖，仅作保险）
 node_modules/
 
@@ -13,7 +16,6 @@ temp/
 .zcode/
 .playwright-cli/
 output/
-check-move.js
 
 # 系统文件
 Thumbs.db
