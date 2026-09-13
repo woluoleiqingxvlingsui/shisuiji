@@ -1947,12 +1947,16 @@ const MessageCard = {
 };
 
 /* ---------------- 根应用 ---------------- */
+// 全局兜底用的 toast 引用：toast 定义在 setup 里，挂载后由 setup 回填
+let toastBridge = null;
+
 const app = createApp({
   setup() {
     const state = reactive({
       board: localStorage.getItem('danji.board') || 'eggs',
       activities: [],
       loaded: false,
+      loadError: false, // 首屏加载失败（服务未启动等）：页面显示错误态和重试按钮，而不是永远「加载中…」
       search: '',
       statusFilter: 'pending',
       platformFilter: '',
@@ -2024,6 +2028,7 @@ const app = createApp({
       toastTimer = setTimeout(() => { state.toast.show = false; }, 2200);
     }
     provide('toast', toast); // 子组件（卡片等）通过 inject 使用
+    toastBridge = toast;     // 回填给全局兜底，服务异常时也能给出可见提示
 
     /* ---- 主题：跟随系统 → 浅色 → 深色（首屏由 index.html 的内联脚本先定好，避免闪白） ---- */
     const THEME_KEY = 'danji.theme';
@@ -2080,21 +2085,33 @@ const app = createApp({
 
     /* ---- 数据加载与提交 ---- */
     async function load() {
-      const res = await fetch('/api/activities');
-      state.activities = await res.json();
-      state.loaded = true;
+      try {
+        const res = await fetch('/api/activities');
+        state.activities = await res.json();
+        state.loaded = true;
+        state.loadError = false;
+      } catch (e) {
+        // 服务连不上：标记错误态让页面显示重试按钮；不向上抛，避免中断 onMounted 后续初始化
+        state.loadError = true;
+      }
     }
 
     async function saveActivity(payload) {
       const isEdit = !!state.editing;
       const url = isEdit ? `/api/activities/${state.editing.id}` : '/api/activities';
-      const res = await fetch(url, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) return toast('保存失败：' + res.status, 'warn');
-      const saved = await res.json();
+      let saved;
+      try {
+        const res = await fetch(url, {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return toast('保存失败：' + res.status, 'warn');
+        saved = await res.json();
+      } catch (e) {
+        // 服务连不上：抽屉保持打开，已填内容不丢
+        return toast('保存失败：无法连接服务，请确认拾穗集服务已启动', 'warn');
+      }
       if (isEdit) {
         const idx = state.activities.findIndex((a) => a.id === saved.id);
         if (idx !== -1) state.activities.splice(idx, 1, saved);
@@ -3168,7 +3185,11 @@ const app = createApp({
       syncTopbarHeight();
 
       await load();
-      await loadMessages(); // 必须先加载完消息，再扫过期，否则新消息会被加载结果覆盖
+      try {
+        await loadMessages(); // 必须先加载完消息，再扫过期，否则新消息会被加载结果覆盖
+      } catch (e) {
+        // 服务不可用时不中断初始化：否则重试成功后提醒定时器也不会跑
+      }
       settleOverdue();
       loadPapers();
       loadSites();
@@ -3190,7 +3211,7 @@ const app = createApp({
     return {
       state, statusTabs, filteredActivities, urgentItems, platformOptions, toast,
       openEditor, saveActivity, setStatus, removeActivity, jumpTo,
-      loadSamples, toggleNotify,
+      loadSamples, toggleNotify, load,
       paperCounts, filteredPapers, switchBoard,
       openPaperEditor, savePaper, setPaperStatus, openPaper, openPaperReveal, removePaper,
       logPaper, startPaperRead, openPaperLog, savePaperLog, removePaperLog, editPaperLog, newPaperLog,
@@ -3230,5 +3251,18 @@ app.component('expense-stats', ExpenseStats);
 app.component('expense-card', ExpenseCard);
 app.component('expense-editor', ExpenseEditor);
 app.component('message-card', MessageCard);
+
+// 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）
+const describeError = (e) => (e instanceof TypeError)
+  ? '网络请求失败：无法连接服务，请确认拾穗集服务已启动'
+  : ('操作失败：' + ((e && e.message) ? e.message : e));
+app.config.errorHandler = (err) => {
+  console.error('[danji] 前端错误:', err);
+  if (toastBridge) toastBridge(describeError(err), 'warn');
+};
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[danji] 未处理的请求错误:', e.reason);
+  if (toastBridge) toastBridge(describeError(e.reason), 'warn');
+});
 
 app.mount('#app');

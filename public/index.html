@@ -87,7 +87,14 @@
     </div>
 
     <!-- 空状态 -->
-    <div class="empty" v-if="!state.loaded">
+    <div class="empty" v-if="state.loadError">
+      <p>⚠️ 无法连接拾穗集服务</p>
+      <p class="empty-sub">服务可能没在运行：双击 <code>start.bat</code> 启动，或运行 <code>powershell -File control.ps1 start</code></p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="load">重试</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!state.loaded">
       <p>加载中…</p>
     </div>
     <div class="empty" v-else-if="!state.activities.length">
