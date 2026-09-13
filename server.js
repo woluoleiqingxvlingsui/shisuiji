@@ -71,6 +71,11 @@ const EXPENSE_PLAN_KEYWORDS = ['套餐', '会员', '订阅', '包月', '年费',
 const EXPENSE_API_KEYWORDS = ['api', '接口', '调用'];
 const EXPENSE_COMPUTE_KEYWORDS = ['算力', '租用', 'autodl', 'gpu'];
 
+// 花销体感评价：只存用户敲定的结论（主体识别与摘录凝练在 config.js + 前端做），按 subject 唯一
+// decision 是「后续打算」：continue 继续 / reduce 减少 / hold 观望 / stop 停掉
+const INSIGHTS_FILE = path.join(DATA_DIR, 'insights.json');
+const INSIGHT_DECISIONS = ['continue', 'reduce', 'hold', 'stop'];
+
 // 消息中心：目前有「已过期」（过了使用截止）与「已错过」（过了领取截止）两个来源
 const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until', 'claim_deadline'];
 
@@ -1034,6 +1039,76 @@ route('DELETE', '/api/expenses/:id', async (ctx) => {
   ctx.json({ ok: true, deleted: removed.id });
 });
 
+// ---------- 花销体感评价：数据层 ----------
+let insightDb = null;
+
+function defaultInsightData() {
+  return { schema_version: SCHEMA_VERSION, verdicts: [] };
+}
+
+async function loadInsights() {
+  try {
+    const raw = await fsp.readFile(INSIGHTS_FILE, 'utf8');
+    insightDb = JSON.parse(raw);
+    if (!Array.isArray(insightDb.verdicts)) insightDb.verdicts = [];
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    insightDb = defaultInsightData();
+    await saveInsights();
+  }
+}
+
+async function saveInsights() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  const tmp = INSIGHTS_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(insightDb, null, 2), 'utf8');
+  await fsp.rename(tmp, INSIGHTS_FILE);
+}
+
+// 评价清洗：verdict 是用户敲定的总评；rating 收敛成 1-5 整数或 null；
+// decision 必须是四个枚举之一（没传保留旧值，非法一律清空）；subject 作唯一键，由路由层校验非空
+function normalizeInsight(input, existing = {}) {
+  const insight = { ...existing, subject: input.subject };
+  if ('verdict' in input) {
+    insight.verdict = input.verdict === null || input.verdict === undefined ? '' : String(input.verdict).trim();
+  }
+  if ('decision' in input) {
+    insight.decision = INSIGHT_DECISIONS.includes(input.decision) ? input.decision : '';
+  }
+  if ('rating' in input) {
+    const r = Number(input.rating);
+    insight.rating = Number.isInteger(r) && r >= 1 && r <= 5 ? r : null;
+  }
+  if (!insight.id) insight.id = crypto.randomUUID();
+  insight.created_at = existing.created_at || new Date().toISOString();
+  insight.updated_at = new Date().toISOString();
+  return insight;
+}
+
+// ---------- 花销体感评价：路由 ----------
+// subject 直接当 URL 一段（前端 encodeURIComponent，这里对应解码）；按 subject upsert，省得前端先查 id
+route('GET', '/api/insights', async (ctx) => ctx.json(insightDb.verdicts));
+
+route('PUT', '/api/insights/:subject', async (ctx) => {
+  const subject = decodeURIComponent(ctx.params.subject || '').trim();
+  if (!subject) return ctx.json({ error: '缺少主体' }, 400);
+  const idx = insightDb.verdicts.findIndex((v) => v.subject === subject);
+  const insight = normalizeInsight({ ...ctx.body, subject }, idx === -1 ? {} : insightDb.verdicts[idx]);
+  if (idx === -1) insightDb.verdicts.push(insight);
+  else insightDb.verdicts[idx] = insight;
+  await saveInsights();
+  ctx.json(insight);
+});
+
+route('DELETE', '/api/insights/:subject', async (ctx) => {
+  const subject = decodeURIComponent(ctx.params.subject || '').trim();
+  const idx = insightDb.verdicts.findIndex((v) => v.subject === subject);
+  if (idx === -1) return ctx.json({ error: '评价不存在' }, 404);
+  const [removed] = insightDb.verdicts.splice(idx, 1);
+  await saveInsights();
+  ctx.json({ ok: true, deleted: removed.subject });
+});
+
 // ---------- 消息中心：数据层 ----------
 let messageDb = null;
 
@@ -1271,7 +1346,7 @@ server.on('error', (err) => {
   throw err;
 });
 
-Promise.all([loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses()]).then(() => {
+Promise.all([loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights()]).then(() => {
   server.listen(PORT, HOST, () => {
     console.log(`\n  🧺 拾穗集 已启动（监听 ${HOST}:${PORT}）`);
     console.log(`  ➜  本机访问:  http://localhost:${PORT}`);
@@ -1279,6 +1354,7 @@ Promise.all([loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses
     console.log(`  ➜  文献数据:  ${PAPERS_FILE}`);
     console.log(`  ➜  网页数据:  ${SITES_FILE}`);
     console.log(`  ➜  花销数据:  ${EXPENSES_FILE}`);
+    console.log(`  ➜  评价数据:  ${INSIGHTS_FILE}`);
     console.log(`  ➜  消息数据:  ${MESSAGES_FILE}`);
     console.log(`  ➜  论文库:    ${PAPERS_DIR}`);
     console.log(`  按 Ctrl+C 停止服务\n`);

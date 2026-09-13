@@ -588,6 +588,63 @@ input, select, textarea { font: inherit; color: inherit; }
 .deadline.lv-unknown { color: var(--muted); }
 .urgent-chip.lv-unknown { border-style: dashed; color: var(--muted); }
 
+/* ---------- 花销：体感评价 ---------- */
+/* 评价卡：素材区（记录说）+ 结论区（我的评价），全历史视角不跟期间切换 */
+.insight-card .card-head { align-items: baseline; }
+.insight-total { margin-left: auto; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.insight-total .money { color: var(--text); font-variant-numeric: tabular-nums; }
+.insight-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.insight-last { font-size: 12px; color: var(--muted); }
+.insight-label { margin: 14px 0 6px; font-size: 13px; font-weight: 700; }
+.insight-label sup { margin-left: 6px; font-weight: 400; font-size: 11px; color: var(--muted); }
+
+/* 原话摘录：左侧竖线 + 灰底，标出这句话来自哪笔花销 */
+.insight-quote {
+  margin-bottom: 6px; padding: 7px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--card-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.quote-text { margin: 0; font-size: 13px; line-height: 1.55; word-break: break-word; }
+.quote-tag {
+  display: inline-block; margin-right: 6px; padding: 0 8px;
+  font-size: 11px; font-weight: 600; line-height: 1.7;
+  color: var(--accent-strong); background: var(--accent-soft); border-radius: 999px;
+  vertical-align: 1px;
+}
+.quote-src { margin: 3px 0 0; font-size: 11px; color: var(--muted); }
+
+/* 我的评价：评分星 + 后续打算 chips + 总评输入框，一行放不下就换行 */
+.insight-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.star-row { display: flex; align-items: center; gap: 2px; }
+.star-row .star {
+  padding: 0 1px; border: none; background: none;
+  font-size: 19px; line-height: 1; color: var(--border);
+  transition: color .12s ease, transform .12s ease;
+}
+.star-row .star:hover { transform: scale(1.15); }
+.star-row .star.on { color: var(--yellow); }
+.star-num { margin-left: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.insight-decisions { margin: 0; }
+.insight-mine textarea {
+  width: 100%; margin-top: 10px; padding: 8px 10px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card);
+}
+.insight-mine textarea:focus { border-color: var(--accent); outline: none; }
+.insight-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.insight-actions .spacer { flex: 1; }
+
+/* 没认出主体的花销：提示去 config.js 加关键词，别让体感悄悄漏掉 */
+.unmatched-hint {
+  margin: 14px 0 0; padding: 10px 12px;
+  font-size: 12px; color: var(--muted); line-height: 1.6;
+  background: var(--card-2); border: 1px dashed var(--border); border-radius: var(--radius);
+}
+.unmatched-hint code {
+  padding: 0 5px; font-size: 11px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+
 /* ---------- 轻提示 ---------- */
 .toast {
   position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);

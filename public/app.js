@@ -414,6 +414,84 @@ function buildPieSlices(items, maxSlices) {
   return { slices, total, merged };
 }
 
+/* ---- 花销：体感评价（主体识别与摘录凝练全在前端算，server 只存用户敲定的结论） ---- */
+// 一笔花销是否认领到某个主体：标题或备注（小写化）包含任一关键词即命中
+function expenseHitsSubject(expense, subject) {
+  const text = `${expense.title || ''}\n${expense.notes || ''}`.toLowerCase();
+  return (subject.keywords || []).some((k) => text.includes(k.toLowerCase()));
+}
+// 一笔花销命中了 config 里的哪些主体（一笔可以同时喂多家，备注里点名谁就算谁的）
+function matchSubjects(expense) {
+  return CONFIG.expenses.subjects.filter((s) => expenseHitsSubject(expense, s));
+}
+// 把备注切成句子：按中英文句读和换行切开，太短的碎片丢掉（不然「嗯」「好」也占一行）
+function splitSentences(text) {
+  return String(text || '')
+    .split(/[。！？!?；;\n\r]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4);
+}
+// 摘录打标：按 config 的顺序先中先用（价格 → 决策），都没命中归「体验」；
+// 目的是把「token 价格 / 划不划算」这类句子一眼扫出来
+function quoteTagOf(sentence) {
+  const s = String(sentence).toLowerCase();
+  for (const t of CONFIG.expenses.insightTags) {
+    if ((t.keywords || []).some((k) => s.includes(k))) return t;
+  }
+  return CONFIG.expenses.insightDefaultTag;
+}
+// 从一笔花销里挑出与主体相关的句子：
+//   句子本身提到主体关键词 → 必收（哪怕标题不是它，备注里点名了也算数）；
+//   标题命中主体时 → 提到价格 / 决策词的句子也收；实在没有就收首句兜底，保证有话可看
+function pickQuotes(expense, subject) {
+  const sentences = splitSentences(expense.notes);
+  if (!sentences.length) return [];
+  const titleHit = (subject.keywords || []).some((k) => String(expense.title || '').toLowerCase().includes(k.toLowerCase()));
+  const picked = sentences.filter((s) => {
+    const low = s.toLowerCase();
+    if ((subject.keywords || []).some((k) => low.includes(k.toLowerCase()))) return true;
+    if (!titleHit) return false;
+    return CONFIG.expenses.insightTags.some((t) => (t.keywords || []).some((k) => low.includes(k)));
+  });
+  if (!picked.length && titleHit) picked.push(sentences[0]);
+  return picked.map((s) => ({ sentence: s, tag: quoteTagOf(s).id }));
+}
+// 汇总一个主体的全部素材：累计花费、笔数、类别拆分、最近一笔、原话摘录（新 → 旧，封顶 6 条）
+function buildSubjectInsight(subject, expenses) {
+  const matched = (expenses || []).filter((e) => expenseHitsSubject(e, subject));
+  const byCategory = new Map();
+  let total = 0;
+  let last = null;
+  const quotes = [];
+  for (const e of matched) {
+    const amount = Number(e.amount) || 0;
+    total += amount;
+    byCategory.set(e.category, (byCategory.get(e.category) || 0) + amount);
+    if (!last || String(e.date).localeCompare(String(last.date)) > 0) last = e;
+    for (const q of pickQuotes(e, subject)) {
+      quotes.push({ ...q, date: e.date, amount, title: e.title });
+    }
+  }
+  quotes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return {
+    subject,
+    total,
+    count: matched.length,
+    categorySplit: [...byCategory].map(([id, amount]) => ({ id, amount })),
+    lastDate: last ? last.date : '',
+    quotes: quotes.slice(0, CONFIG.expenses.maxQuotes || 6),
+    quoteTotal: quotes.length,
+  };
+}
+// 由素材拼一段总评草稿：一句合计 + 带日期的要点摘录，填进总评框让用户改成自己的话
+function buildVerdictDraft(insight) {
+  if (!insight.count) return '';
+  const head = `累计 ${formatMoney(insight.total)} / ${insight.count} 笔`
+    + (insight.lastDate ? `，最近 ${formatDate(insight.lastDate)}` : '') + '。';
+  const points = insight.quotes.slice(0, 4).map((q) => `- ${String(q.date).slice(5)}：${q.sentence}`);
+  return [head, ...points].join('\n');
+}
+
 /* ---------------- 组件：蛋卡片 ---------------- */
 const EggCard = {
   name: 'EggCard',
@@ -1915,6 +1993,114 @@ const ExpenseEditor = {
   `,
 };
 
+/* ---------------- 组件：体感评价卡（主体素材 + 我的评价） ---------------- */
+const InsightCard = {
+  name: 'InsightCard',
+  props: {
+    insight: { type: Object, required: true },  // 自动凝练的素材：花费 / 类别拆分 / 原话摘录
+    verdict: { type: Object, default: null },   // 已保存的我的评价（没保存过是 null）
+  },
+  emits: ['save', 'clear'],
+  setup(props, { emit }) {
+    const { reactive, computed, watch } = Vue;
+
+    // 本地可编辑副本：保存成功后根组件会换上 server 返回的新 verdict，watch 到了就同步，
+    // 保证卡片上看到的永远是已保存的内容
+    const form = reactive({ rating: null, decision: '', verdict: '' });
+    function syncFromVerdict(v) {
+      form.rating = v ? v.rating : null;
+      form.decision = v ? v.decision || '' : '';
+      form.verdict = v ? v.verdict || '' : '';
+    }
+    syncFromVerdict(props.verdict);
+    watch(() => props.verdict, syncFromVerdict);
+
+    const hasSaved = computed(() => !!props.verdict);
+    const catSplits = computed(() => props.insight.categorySplit
+      .map((c) => ({ ...c, meta: expenseCategoryMeta(c.id) })));
+
+    function pickStar(n) {
+      form.rating = form.rating === n ? null : n;
+    }
+    function pickDecision(id) {
+      form.decision = form.decision === id ? '' : id;
+    }
+    // 没写过总评时，把凝练好的要点填进框里当草稿，改两笔就是自己的话了
+    function fillDraft() {
+      form.verdict = buildVerdictDraft(props.insight);
+    }
+    function save() {
+      emit('save', {
+        subject: props.insight.subject.id,
+        rating: form.rating,
+        decision: form.decision,
+        verdict: form.verdict.trim(),
+      });
+    }
+
+    return {
+      form, hasSaved, catSplits, pickStar, pickDecision, fillDraft, save,
+      decisions: CONFIG.expenses.decisions,
+      defaultTag: CONFIG.expenses.insightDefaultTag,
+      tagLabel(id) {
+        return (CONFIG.expenses.insightTags.find((t) => t.id === id) || CONFIG.expenses.insightDefaultTag).label;
+      },
+      formatMoney, formatDate,
+      clear: () => emit('clear'),
+    };
+  },
+  template: `
+  <article class="card insight-card">
+    <div class="card-head">
+      <h3 class="title">🧭 {{ insight.subject.label }}</h3>
+      <span class="insight-total" v-if="insight.count">
+        累计 <b class="money">{{ formatMoney(insight.total) }}</b> · {{ insight.count }} 笔
+      </span>
+      <span class="insight-total" v-else>还没有相关花销</span>
+    </div>
+
+    <div class="insight-facts" v-if="insight.count">
+      <span class="cat-chip" v-for="c in catSplits" :key="c.id" :style="{ '--h': c.meta.hue }">
+        {{ c.meta.emoji }} {{ formatMoney(c.amount) }}
+      </span>
+      <span class="insight-last">最近一笔 {{ formatDate(insight.lastDate) }}</span>
+    </div>
+
+    <div class="insight-quotes" v-if="insight.quotes.length">
+      <p class="insight-label">📎 记录里的原话<sup v-if="insight.quoteTotal > insight.quotes.length">共 {{ insight.quoteTotal }} 句，显示最近的 {{ insight.quotes.length }} 句</sup></p>
+      <div class="insight-quote" v-for="(q, i) in insight.quotes" :key="i"
+           :title="'来自：' + q.title + ' · ' + formatDate(q.date)">
+        <p class="quote-text"><span class="quote-tag">{{ tagLabel(q.tag) }}</span>“{{ q.sentence }}”</p>
+        <p class="quote-src">{{ formatDate(q.date) }} · {{ q.title }} · {{ formatMoney(q.amount) }}</p>
+      </div>
+    </div>
+
+    <div class="insight-mine">
+      <p class="insight-label">🧠 我的评价</p>
+      <div class="insight-controls">
+        <div class="star-row" title="体感评分：点星打分，再点同一颗取消">
+          <button v-for="n in 5" :key="n" type="button" class="star"
+                  :class="{ on: form.rating >= n }" @click="pickStar(n)">★</button>
+          <span class="star-num" v-if="form.rating">{{ form.rating }} / 5</span>
+        </div>
+        <div class="chip-picks insight-decisions">
+          <button v-for="d in decisions" :key="d.id" type="button" class="chip-pick"
+                  :class="{ on: form.decision === d.id }" @click="pickDecision(d.id)">{{ d.label }}</button>
+        </div>
+      </div>
+      <textarea v-model="form.verdict" rows="4"
+                placeholder="这家值不值、价格怎样、下次还买不买……点「✨ 依记录生成草稿」再改成自己的话"></textarea>
+      <div class="insight-actions">
+        <button class="btn small ghost" v-if="!form.verdict && insight.quotes.length" @click="fillDraft">✨ 依记录生成草稿</button>
+        <button class="btn small ghost" v-if="hasSaved" @click="clear">🧹 清除</button>
+        <span class="spacer"></span>
+        <button class="btn small primary" @click="save">💾 保存</button>
+      </div>
+    </div>
+  </article>
+  `,
+};
+
 /* ---------------- 组件：消息卡片 ---------------- */
 const MessageCard = {
   name: 'MessageCard',
@@ -1996,6 +2182,12 @@ const app = createApp({
       expenseEditorOpen: false,
       editingExpense: null,
       expenseCategory: '', // 年视图下钻的类别（'' = 套餐 / API 总览）；同时作用于列表筛选
+      // 花销板块视图：明细记账 / 体感评价，选择记在本地，刷新后保持
+      expenseView: localStorage.getItem('danji.expenseView') === 'insight' ? 'insight' : 'list',
+      // 体感评价：用户敲定的评价（rating / verdict / decision）存在 server；
+      // 主体识别与摘录凝练是纯前端计算，每次都从花销记录现算
+      insights: [],
+      insightsLoaded: false,
       // 统计期间：默认当前月；「按月 / 按年」的选择记在本地，刷新后保持
       expensePeriod: {
         mode: localStorage.getItem('danji.expenseMode') === 'year' ? 'year' : 'month',
@@ -2730,6 +2922,45 @@ const app = createApp({
       toast('已删除 🗑');
     }
 
+    /* ---- 花销板块：体感评价 ---- */
+    async function loadInsights() {
+      try {
+        state.insights = await fetch('/api/insights').then((r) => r.json());
+      } catch {
+        toast('评价数据加载失败', 'warn');
+      }
+      state.insightsLoaded = true;
+    }
+
+    function setExpenseView(view) {
+      state.expenseView = view === 'insight' ? 'insight' : 'list';
+      localStorage.setItem('danji.expenseView', state.expenseView);
+    }
+
+    // 保存某个主体的评价：按 subject upsert，卡片上的本地编辑在保存成功后由组件自己同步
+    async function saveInsightVerdict(payload) {
+      const res = await fetch(`/api/insights/${encodeURIComponent(payload.subject)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating: payload.rating, decision: payload.decision, verdict: payload.verdict }),
+      });
+      const saved = await res.json().catch(() => ({}));
+      if (!res.ok) return toast('保存失败：' + (saved.error || res.status), 'warn');
+      const i = state.insights.findIndex((v) => v.subject === saved.subject);
+      if (i === -1) state.insights.push(saved);
+      else state.insights.splice(i, 1, saved);
+      toast('评价已保存 🧭');
+    }
+
+    // 清除评价 = 回到纯记录视角：只删我的结论，花销记录和凝练出来的原话都不动
+    async function clearInsightVerdict(row) {
+      if (!confirm(`清空「${row.subject.label}」的评价吗？（记录原话还在，随时能重新写）`)) return;
+      const res = await fetch(`/api/insights/${encodeURIComponent(row.subject.id)}`, { method: 'DELETE' });
+      if (!res.ok) return toast('删除失败：' + res.status, 'warn');
+      state.insights = state.insights.filter((v) => v.subject !== row.subject.id);
+      toast('已清除 🧹');
+    }
+
     function setExpenseMode(mode) {
       state.expensePeriod.mode = mode;
       // 类别下钻只属于「按年」：按月是按条目看的，切过去就把筛选清掉，别把年视图的类别带进月视图
@@ -2926,6 +3157,28 @@ const app = createApp({
       years.add(new Date().getFullYear());
       years.add(state.expensePeriod.year);
       return [...years].sort((a, b) => b - a);
+    });
+
+    /* ---- 花销板块：体感评价（全量历史视角，不随月 / 年期间切换） ---- */
+    const expenseInsights = computed(() => {
+      const verdictOf = new Map(state.insights.map((v) => [v.subject, v]));
+      const rows = [];
+      for (const subject of CONFIG.expenses.subjects) {
+        const insight = buildSubjectInsight(subject, state.expenses);
+        const verdict = verdictOf.get(subject.id) || null;
+        // 有匹配花销、或用户写过评价的主体才上板；只写了评价没花过钱的排后面
+        if (insight.count || verdict) rows.push({ subject, insight, verdict });
+      }
+      rows.sort((a, b) => b.insight.total - a.insight.total);
+      // 没认领到任何主体的花销：提示用户去 config.js 加关键词，免得体感悄悄漏掉
+      const unmatched = state.expenses.filter((e) => !matchSubjects(e).length);
+      return { rows, unmatched };
+    });
+    // 未识别提示条的文字：列前 5 个标题，多了用「等 N 笔」收尾
+    const expenseUnmatchedText = computed(() => {
+      const list = expenseInsights.value.unmatched;
+      const titles = list.slice(0, 5).map((e) => String(e.title || '未命名'));
+      return titles.join('、') + (list.length > 5 ? ` 等 ${list.length} 笔` : '');
     });
 
     // 横幅：待领取且领取截止 ≤7 天（含已超时） + 已领取且使用截止 ≤48 小时 + 截止待确认的蛋
@@ -3201,6 +3454,7 @@ const app = createApp({
       loadPapers();
       loadSites();
       loadExpenses();
+      loadInsights();
       tickTimer = setInterval(() => { state.now = Date.now(); settleOverdue(); }, 30 * 1000);
       remindTimer = setInterval(checkReminders, CONFIG.remind.checkIntervalSec * 1000);
       document.addEventListener('visibilitychange', onVisibility);
@@ -3229,8 +3483,10 @@ const app = createApp({
       backToSiteNoteList, closeSiteNote, saveSiteNoteDraft, discardSiteNoteDraft,
       expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories,
       expensePeriodLabel, expenseYearOptions,
+      expenseInsights, expenseUnmatchedText,
       openExpenseEditor, saveExpense, removeExpense, setExpenseMode, setExpenseYear, setExpenseMonth,
       stepExpensePeriod, formatMoney, defaultExpenseDate, pickExpenseCategory, clearExpenseCategory,
+      setExpenseView, saveInsightVerdict, clearInsightVerdict,
       unreadCount, gotoActivity, markMessageRead, removeMessage, markAllRead, clearReadMessages,
       cycleTheme, themeIcon, themeTitle,
       notifActive: computed(() => state.notifPermission === 'granted' && state.notifyOn),
@@ -3257,6 +3513,7 @@ app.component('site-note-drawer', SiteNoteDrawer);
 app.component('expense-stats', ExpenseStats);
 app.component('expense-card', ExpenseCard);
 app.component('expense-editor', ExpenseEditor);
+app.component('insight-card', InsightCard);
 app.component('message-card', MessageCard);
 
 // 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）

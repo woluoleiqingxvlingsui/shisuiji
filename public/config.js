@@ -91,6 +91,7 @@ window.DANJI_CONFIG = {
   expenses: {
     currency: '¥',   // 金额前缀，想换币种改这里
     maxSlices: 24,   // 饼图最多几个扇区；超出时把最小的若干笔合并成「其余 N 笔」
+    maxQuotes: 6,    // 体感评价里每个主体最多显示几句原话（按日期取最近的）
     // 类别：id 或关键词改动时，记得同步 server.js 的 EXPENSE_CATEGORIES 与关键词表
     // 自动归类规则：套餐关键词优先（token 包、资源包算套餐），再匹配 API、算力租用，都没命中就归套餐
     categories: [
@@ -106,6 +107,48 @@ window.DANJI_CONFIG = {
         id: 'compute', label: '算力租用', emoji: '🖥️', hue: 275,
         keywords: ['算力', '租用', 'autodl', 'gpu'],
       },
+    ],
+    // 体感评价：把花销的标题 + 备注认领到「主体」（各家模型 / 厂商），凝练使用体感。
+    // 匹配规则：标题或备注（小写化）包含任一关键词即命中，一笔花销可以同时喂多个主体；
+    // 想收录新厂商就往这里添一条（id 用英文小写 slug），前端专用，server 不需要同步。
+    // 关键词尽量具体，别用 'api'、'调用' 这种泛词，不然谁都会被认领。
+    subjects: [
+      { id: 'deepseek', label: 'DeepSeek', keywords: ['deepseek', '深度求索'] },
+      { id: 'qwen', label: '通义 Qwen', keywords: ['qwen', 'qoder', '通义', '千问'] },
+      { id: 'kimi', label: 'Kimi', keywords: ['kimi', 'moonshot', '月之暗面'] },
+      { id: 'claude', label: 'Claude', keywords: ['claude', 'anthropic'] },
+      { id: 'openai', label: 'ChatGPT / OpenAI', keywords: ['chatgpt', 'openai', 'gpt-5', 'gpt5', 'gpt-4'] },
+      { id: 'gemini', label: 'Gemini', keywords: ['gemini', 'google ai'] },
+      { id: 'longcat', label: 'LongCat', keywords: ['longcat', '龙猫'] },
+      { id: 'doubao', label: '豆包', keywords: ['豆包', 'doubao', '火山方舟', '火山引擎'] },
+      { id: 'glm', label: '智谱 GLM', keywords: ['glm', '智谱', 'zhipu', 'chatglm'] },
+      { id: 'minimax', label: 'MiniMax', keywords: ['minimax', '海螺', 'abab'] },
+      { id: 'grok', label: 'Grok', keywords: ['grok', 'xai'] },
+      { id: 'autodl', label: 'AutoDL 算力', keywords: ['autodl', '算力', 'gpu', '租用'] },
+    ],
+    // 摘录打标：一句话属于哪个侧面（按顺序匹配，先中先用；都没命中算「体验」），
+    // 目的是把「token 价格 / 划不划算」这类句子一眼扫出来
+    insightTags: [
+      {
+        id: 'price', label: '💰 价格',
+        keywords: ['价格', '调价', '降价', '涨价', '划算', '便宜', '贵', '成本', '性价比',
+          '优惠', '折扣', '积分', '费用', '花费', 'token', '额度', '白嫖', '波谷'],
+      },
+      {
+        id: 'decision', label: '🧭 决策',
+        keywords: ['下次', '续费', '回购', '观望', '推荐', '不推荐', '建议', '考虑',
+          '打算', '后续', '以后', '活动', '学生优惠'],
+      },
+    ],
+    // 都没命中时的默认标签（体验向），不参与关键词匹配
+    insightDefaultTag: { id: 'exp', label: '🧠 体验' },
+    // 后续打算：体感评价卡上的快捷选项，id 会存进 data/insights.json（改 label 随意，改 id 要想着老数据；
+    // 四个 id 与 server.js 的 INSIGHT_DECISIONS 同步）
+    decisions: [
+      { id: 'continue', label: '➕ 继续' },
+      { id: 'reduce', label: '➖ 减少' },
+      { id: 'hold', label: '⏸ 观望' },
+      { id: 'stop', label: '⛔ 停掉' },
     ],
   },
 };

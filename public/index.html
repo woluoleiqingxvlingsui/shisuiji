@@ -234,40 +234,78 @@
 
   <!-- ===== 花销板块 ===== -->
   <main class="container" v-if="state.board === 'expenses'">
-    <!-- 统计卡：期间切换 + 饼图 + 图例 -->
-    <expense-stats :period="state.expensePeriod" :slices="expenseChart.slices" :total="expenseTotal"
-                   :count="expenseVisibleItems.length" :year-options="expenseYearOptions" :label="expensePeriodLabel"
-                   :level="expenseChart.level" :selected-category="state.expenseCategory" :categories="expenseCategories"
-                   @mode="setExpenseMode" @year="setExpenseYear" @month="setExpenseMonth" @step="stepExpensePeriod"
-                   @pick="pickExpenseCategory" @clear="clearExpenseCategory">
-    </expense-stats>
-
-    <!-- 空状态 -->
-    <div class="empty" v-if="!state.expensesLoaded">
-      <p>加载中…</p>
-    </div>
-    <div class="empty" v-else-if="!state.expenses.length">
-      <div class="empty-egg">💰</div>
-      <p class="empty-title">还没有记过花销</p>
-      <p class="empty-sub">学习、办公相关的开销都记进来，月底一眼看清花在哪</p>
-      <div class="empty-actions">
-        <button class="btn primary" @click="openExpenseEditor(null)">＋ 记第一笔</button>
+    <!-- 视图切换：明细记账 / 体感评价（从记录里凝练各家模型、套餐的使用体感） -->
+    <div class="filters">
+      <div class="tabs">
+        <button class="tab" :class="{ active: state.expenseView === 'list' }" @click="setExpenseView('list')">📋 明细</button>
+        <button class="tab" :class="{ active: state.expenseView === 'insight' }" @click="setExpenseView('insight')">🧭 体感评价</button>
       </div>
     </div>
-    <div class="empty" v-else-if="!expenseVisibleItems.length">
-      <div class="empty-egg">🔍</div>
-      <p class="empty-title">{{ state.expenseCategory ? '这个类别下没有记录' : '这个期间没有记录' }}</p>
-      <p class="empty-sub">{{ state.expenseCategory
-        ? '点统计卡上的「正在看 … ✕」回到套餐 / API 总览'
-        : '换个月份 / 年份，或点右上角「＋ 记一笔」' }}</p>
-    </div>
 
-    <!-- 花销卡片列表 -->
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <expense-card v-for="e in expenseVisibleItems" :key="e.id" :expense="e"
-                    @edit="openExpenseEditor(e)" @remove="removeExpense(e)">
-      </expense-card>
-    </transition-group>
+    <template v-if="state.expenseView === 'list'">
+      <!-- 统计卡：期间切换 + 饼图 + 图例 -->
+      <expense-stats :period="state.expensePeriod" :slices="expenseChart.slices" :total="expenseTotal"
+                     :count="expenseVisibleItems.length" :year-options="expenseYearOptions" :label="expensePeriodLabel"
+                     :level="expenseChart.level" :selected-category="state.expenseCategory" :categories="expenseCategories"
+                     @mode="setExpenseMode" @year="setExpenseYear" @month="setExpenseMonth" @step="stepExpensePeriod"
+                     @pick="pickExpenseCategory" @clear="clearExpenseCategory">
+      </expense-stats>
+
+      <!-- 空状态 -->
+      <div class="empty" v-if="!state.expensesLoaded">
+        <p>加载中…</p>
+      </div>
+      <div class="empty" v-else-if="!state.expenses.length">
+        <div class="empty-egg">💰</div>
+        <p class="empty-title">还没有记过花销</p>
+        <p class="empty-sub">学习、办公相关的开销都记进来，月底一眼看清花在哪</p>
+        <div class="empty-actions">
+          <button class="btn primary" @click="openExpenseEditor(null)">＋ 记第一笔</button>
+        </div>
+      </div>
+      <div class="empty" v-else-if="!expenseVisibleItems.length">
+        <div class="empty-egg">🔍</div>
+        <p class="empty-title">{{ state.expenseCategory ? '这个类别下没有记录' : '这个期间没有记录' }}</p>
+        <p class="empty-sub">{{ state.expenseCategory
+          ? '点统计卡上的「正在看 … ✕」回到套餐 / API 总览'
+          : '换个月份 / 年份，或点右上角「＋ 记一笔」' }}</p>
+      </div>
+
+      <!-- 花销卡片列表 -->
+      <transition-group name="list" tag="div" class="egg-list" v-else>
+        <expense-card v-for="e in expenseVisibleItems" :key="e.id" :expense="e"
+                      @edit="openExpenseEditor(e)" @remove="removeExpense(e)">
+        </expense-card>
+      </transition-group>
+    </template>
+
+    <template v-else>
+      <!-- 体感评价：按主体（厂商 / 模型）凝练记录里的原话；评分、总评、后续打算由用户敲定。
+           看的是全部历史，不随上面的月 / 年期间切换 -->
+      <div class="empty" v-if="!state.expensesLoaded || !state.insightsLoaded">
+        <p>加载中…</p>
+      </div>
+      <div class="empty" v-else-if="!expenseInsights.rows.length">
+        <div class="empty-egg">🧭</div>
+        <p class="empty-title">还没有可凝练的体感</p>
+        <p class="empty-sub">先在「明细」里记几笔带备注的花销，这里就会按厂商 / 模型把体感拢起来</p>
+        <div class="empty-actions">
+          <button class="btn primary" @click="setExpenseView('list')">📋 去记一笔</button>
+        </div>
+      </div>
+      <template v-else>
+        <transition-group name="list" tag="div" class="egg-list">
+          <insight-card v-for="row in expenseInsights.rows" :key="row.subject.id"
+                        :insight="row.insight" :verdict="row.verdict"
+                        @save="saveInsightVerdict" @clear="clearInsightVerdict(row)">
+          </insight-card>
+        </transition-group>
+        <p class="unmatched-hint" v-if="expenseInsights.unmatched.length">
+          还有 {{ expenseInsights.unmatched.length }} 笔没认出主体：{{ expenseUnmatchedText }}。
+          想收录就去 <code>config.js</code> 的 expenses.subjects 加关键词
+        </p>
+      </template>
+    </template>
   </main>
 
   <!-- ===== 消息板块 ===== -->
