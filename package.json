@@ -3,6 +3,19 @@
   "version": "1.0.0",
   "description": "拾穗集 shisuiji —— 赛博鸡蛋 / 文献 / 网页 / 花销，捡到什么就记什么",
   "main": "server.js",
+  "author": "woluoleiqingxvlingsui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/woluoleiqingxvlingsui/shisuiji.git"
+  },
+  "keywords": [
+    "nodejs",
+    "vue3",
+    "personal-tool",
+    "notes",
+    "expense-tracker",
+    "windows"
+  ],
   "scripts": {
     "start": "node server.js",
     "test": "node --check server.js && node --check public/app.js"

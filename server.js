@@ -1202,15 +1202,27 @@ async function serveStatic(req, res, pathname) {
   res.end(data);
 }
 
+// Origin 白名单：防浏览器跨域伪造写请求（CSRF）。放行三类：
+// 1) 不带 Origin（curl 等本地工具）；2) 本机回环来源；
+// 3) 同源局域网访问（DANJI_HOST 开放后手机访问：Origin 的 host 与请求 Host 一致，
+//    且 Host 必须是 IP/localhost 形式——Host 是域名意味着 DNS rebinding，拒绝）
+function originAllowed(origin, reqHost) {
+  if (!origin) return true;
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(parsed.host)) return true;
+  if (!reqHost) return false;
+  const host = String(reqHost).toLowerCase();
+  return parsed.host === host
+    && /^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(host);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
-  // 防浏览器跨域伪造写请求（CSRF）：带 Origin 头的 API 请求必须来自本机页面；
-  // curl 等本地工具不带 Origin，不受影响
-  if (pathname.startsWith('/api/') && req.headers.origin
-      && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.origin)) {
-    console.error(`[shisuiji] 已拒绝非本机来源的 API 请求: Origin=${req.headers.origin}`);
+  if (pathname.startsWith('/api/') && !originAllowed(req.headers.origin, req.headers.host)) {
+    console.error(`[shisuiji] 已拒绝非本机来源的 API 请求: Origin=${req.headers.origin || '(无)'} Host=${req.headers.host || '(无)'}`);
     sendJson(res, 403, { error: 'Forbidden' });
     return;
   }
