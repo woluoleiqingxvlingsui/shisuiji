@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🧺 拾穗集 · 赛博鸡蛋与文献</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧺</text></svg>">
+  <script>
+    // 首屏渲染前定好明暗，避免闪白/闪黑：auto 时看系统偏好，其余用上次的选择
+    // ?theme=light|dark 可临时强制某个明暗（只为调试/截图方便，不写入偏好）
+    try {
+      var q = new URLSearchParams(location.search).get('theme');
+      var m = (q === 'light' || q === 'dark') ? q : (localStorage.getItem('danji.theme') || 'auto');
+      var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <span class="logo">🧺 拾穗集</span>
+    <nav class="board-tabs">
+      <button :class="{ active: state.board === 'eggs' }" @click="switchBoard('eggs')">🥚 赛博鸡蛋</button>
+      <button :class="{ active: state.board === 'papers' }" @click="switchBoard('papers')">📄 文献</button>
+      <button :class="{ active: state.board === 'sites' }" @click="switchBoard('sites')">🌐 网页</button>
+      <button :class="{ active: state.board === 'expenses' }" @click="switchBoard('expenses')">💰 花销</button>
+    </nav>
+    <button class="btn ghost theme-btn" @click="cycleTheme" :title="themeTitle">{{ themeIcon }}</button>
+    <template v-if="state.board === 'eggs'">
+      <input class="search" type="search" v-model.trim="state.search" placeholder="搜索活动 / 平台 / 备注…">
+      <button class="btn ghost msg-btn" @click="switchBoard('messages')" title="消息中心：蛋过期的记录都在这里">
+        💬 消息<span class="badge" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+      </button>
+      <button class="btn ghost notif" :class="{ off: !notifActive }" @click="toggleNotify" :title="notifTitle">
+        {{ notifActive ? '🔔' : '🔕' }}
+        <span v-if="state.notifPermission === 'default'" class="dot"></span>
+      </button>
+      <button class="btn primary" @click="openEditor(null)">＋ 记蛋</button>
+    </template>
+    <template v-else-if="state.board === 'papers'">
+      <input class="search" type="search" v-model.trim="state.paperSearch" placeholder="搜索论文 / 类别 / 备注…">
+      <button class="btn primary" @click="openPaperEditor(null)">＋ 记论文</button>
+    </template>
+    <template v-else-if="state.board === 'sites'">
+      <input class="search" type="search" v-model.trim="state.siteSearch" placeholder="搜索网页 / 域名 / 笔记…">
+      <button class="btn primary" @click="openSiteEditor(null)">＋ 记网页</button>
+    </template>
+    <template v-else-if="state.board === 'expenses'">
+      <input class="search" type="search" v-model.trim="state.expenseSearch" placeholder="搜索花销内容 / 备注…">
+      <button class="btn primary" @click="openExpenseEditor(null)">＋ 记一笔</button>
+    </template>
+    <template v-else>
+      <span class="board-hint">蛋过了使用截止，会自动记一条到这里</span>
+    </template>
+  </header>
+
+  <!-- 紧急横幅：即将到期的蛋（仅赛博鸡蛋板块） -->
+  <div class="urgent-bar" v-if="state.board === 'eggs' && urgentItems.length">
+    <span class="urgent-label">⏰ 快过期了</span>
+    <button v-for="u in urgentItems" :key="u.key" class="urgent-chip" :class="'lv-' + u.level"
+            @click="jumpTo(u.id)"
+            :title="u.title + ' · ' + u.statusLabel + '，点击跳到「' + u.statusLabel + '」并高亮'">
+      <span class="urgent-st">{{ u.statusEmoji }}</span><b>{{ u.platform }}</b> · {{ u.shortTitle }} — {{ u.label }}{{ u.remainingText }}
+    </button>
+  </div>
+
+  <!-- ===== 赛博鸡蛋板块 ===== -->
+  <main class="container" v-if="state.board === 'eggs'">
+    <!-- 筛选栏 -->
+    <div class="filters">
+      <div class="tabs">
+        <button v-for="t in statusTabs" :key="t.id" class="tab" :class="{ active: state.statusFilter === t.id }"
+                @click="state.statusFilter = t.id">
+          {{ t.label }}<sup v-if="t.count">{{ t.count }}</sup>
+        </button>
+      </div>
+      <div class="filter-right">
+        <select class="platform-select" v-model="state.platformFilter">
+          <option value="">全部平台</option>
+          <option v-for="p in platformOptions" :key="p" :value="p">{{ p }}</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div class="empty" v-if="!state.loaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.activities.length">
+      <div class="empty-egg">🥚</div>
+      <p class="empty-title">还没有记录，篮子是空的</p>
+      <p class="empty-sub">把看到的优惠活动都记进来，一颗都不漏</p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="openEditor(null)">＋ 记第一颗蛋</button>
+        <button class="btn ghost" @click="loadSamples">填入示例数据看看效果</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredActivities.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的记录</p>
+      <p class="empty-sub">换个筛选条件或搜索词试试</p>
+    </div>
+
+    <!-- 蛋卡片列表 -->
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <egg-card v-for="a in filteredActivities" :key="a.id" :id="'card-' + a.id"
+                :activity="a" :now="state.now" :flash="state.flashId === a.id"
+                @edit="openEditor(a)" @remove="removeActivity(a)" @status="setStatus(a, $event)">
+      </egg-card>
+    </transition-group>
+  </main>
+
+  <!-- ===== 文献板块 ===== -->
+  <main class="container" v-if="state.board === 'papers'">
+    <!-- 筛选栏 -->
+    <div class="filters">
+      <div class="tabs">
+        <button class="tab" :class="{ active: state.paperFilter.status === 'all' }" @click="state.paperFilter.status = 'all'">
+          全部<sup v-if="paperCounts.all">{{ paperCounts.all }}</sup>
+        </button>
+        <button class="tab" :class="{ active: state.paperFilter.status === 'to_read' }" @click="state.paperFilter.status = 'to_read'">
+          📖 待读<sup v-if="paperCounts.to_read">{{ paperCounts.to_read }}</sup>
+        </button>
+        <button class="tab" :class="{ active: state.paperFilter.status === 'read' }" @click="state.paperFilter.status = 'read'">
+          ✅ 已读<sup v-if="paperCounts.read">{{ paperCounts.read }}</sup>
+        </button>
+      </div>
+      <div class="filter-right">
+        <select class="platform-select" v-model="state.paperFilter.category">
+          <option value="">全部类别</option>
+          <option v-for="c in paperCategories" :key="c" :value="c">{{ c }}</option>
+        </select>
+        <select class="platform-select" v-model="state.paperFilter.note">
+          <option value="">笔记：全部</option>
+          <option value="has">笔记：已记 {{ paperCounts.noted }}</option>
+          <option value="none">笔记：未记 {{ paperCounts.unnoted }}</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div class="empty" v-if="!state.papersLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.papers.length">
+      <div class="empty-egg">📄</div>
+      <p class="empty-title">书架还是空的</p>
+      <p class="empty-sub">下载好的论文丢进「论文」文件夹，再来这里记一笔，自动归档分类</p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="openPaperEditor(null)">＋ 记第一篇论文</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredPapers.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的论文</p>
+      <p class="empty-sub">换个筛选条件或搜索词试试</p>
+    </div>
+
+    <!-- 论文卡片列表 -->
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <paper-card v-for="p in filteredPapers" :key="p.id" :paper="p" :flash="state.flashId === p.id"
+                  @open="openPaper(p)" @reveal="openPaperReveal(p)" @status="setPaperStatus(p, $event)"
+                  @read="startPaperRead(p)" @log="openPaperLog(p, $event)"
+                  @edit="openPaperEditor(p)" @remove="removePaper(p)">
+      </paper-card>
+    </transition-group>
+  </main>
+
+  <!-- ===== 网页板块 ===== -->
+  <main class="container" v-if="state.board === 'sites'">
+    <!-- 筛选栏 -->
+    <div class="filters">
+      <div class="tabs">
+        <button class="tab" :class="{ active: state.siteFilter.status === 'all' }" @click="state.siteFilter.status = 'all'">
+          全部<sup v-if="siteCounts.all">{{ siteCounts.all }}</sup>
+        </button>
+        <button class="tab" :class="{ active: state.siteFilter.status === 'to_read' }" @click="state.siteFilter.status = 'to_read'">
+          📖 待读<sup v-if="siteCounts.to_read">{{ siteCounts.to_read }}</sup>
+        </button>
+        <button class="tab" :class="{ active: state.siteFilter.status === 'read' }" @click="state.siteFilter.status = 'read'">
+          ✅ 已读<sup v-if="siteCounts.read">{{ siteCounts.read }}</sup>
+        </button>
+      </div>
+      <div class="filter-right">
+        <select class="platform-select" v-model="state.siteFilter.kind">
+          <option value="">全部类型</option>
+          <option v-for="k in siteKindOptions" :key="k.id" :value="k.id">{{ k.emoji }} {{ k.label }}</option>
+        </select>
+        <select class="platform-select" v-model="state.siteFilter.usage">
+          <option value="">用得上：全部</option>
+          <option v-for="u in siteUsageOptions" :key="u.id" :value="u.id">{{ u.emoji }} {{ u.label }}</option>
+          <option value="none">未记笔记 {{ siteCounts.unnoted }}</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div class="empty" v-if="!state.sitesLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.sites.length">
+      <div class="empty-egg">🌐</div>
+      <p class="empty-title">还没有待读的网页</p>
+      <p class="empty-sub">看到值得读的链接就记进来，读完写一条笔记，以后能搜回来复用</p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="openSiteEditor(null)">＋ 记第一个网页</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredSites.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的网页</p>
+      <p class="empty-sub">换个筛选条件或搜索词试试</p>
+    </div>
+
+    <!-- 网页卡片列表 -->
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <site-card v-for="s in filteredSites" :key="s.id" :site="s" :flash="state.flashId === s.id"
+                 @open="openSite(s)" @status="setSiteStatus(s, $event)" @read="startSiteRead(s)"
+                 @note="openSiteNote(s, $event)" @edit="openSiteEditor(s)" @remove="removeSite(s)">
+      </site-card>
+    </transition-group>
+  </main>
+
+  <!-- ===== 花销板块 ===== -->
+  <main class="container" v-if="state.board === 'expenses'">
+    <!-- 统计卡：期间切换 + 饼图 + 图例 -->
+    <expense-stats :period="state.expensePeriod" :slices="expenseChart.slices" :total="expenseTotal"
+                   :count="expenseVisibleItems.length" :year-options="expenseYearOptions" :label="expensePeriodLabel"
+                   :level="expenseChart.level" :selected-category="state.expenseCategory" :categories="expenseCategories"
+                   @mode="setExpenseMode" @year="setExpenseYear" @month="setExpenseMonth" @step="stepExpensePeriod"
+                   @pick="pickExpenseCategory" @clear="clearExpenseCategory">
+    </expense-stats>
+
+    <!-- 空状态 -->
+    <div class="empty" v-if="!state.expensesLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.expenses.length">
+      <div class="empty-egg">💰</div>
+      <p class="empty-title">还没有记过花销</p>
+      <p class="empty-sub">学习、办公相关的开销都记进来，月底一眼看清花在哪</p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="openExpenseEditor(null)">＋ 记第一笔</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!expenseVisibleItems.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">{{ state.expenseCategory ? '这个类别下没有记录' : '这个期间没有记录' }}</p>
+      <p class="empty-sub">{{ state.expenseCategory
+        ? '点统计卡上的「正在看 … ✕」回到套餐 / API 总览'
+        : '换个月份 / 年份，或点右上角「＋ 记一笔」' }}</p>
+    </div>
+
+    <!-- 花销卡片列表 -->
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <expense-card v-for="e in expenseVisibleItems" :key="e.id" :expense="e"
+                    @edit="openExpenseEditor(e)" @remove="removeExpense(e)">
+      </expense-card>
+    </transition-group>
+  </main>
+
+  <!-- ===== 消息板块 ===== -->
+  <main class="container" v-if="state.board === 'messages'">
+    <div class="filters">
+      <div class="tabs">
+        <span class="msg-summary">
+          {{ unreadCount ? `${unreadCount} 条未读 / ` : '' }}共 {{ state.messages.length }} 条
+        </span>
+      </div>
+      <div class="filter-right">
+        <button class="btn ghost small" v-if="unreadCount" @click="markAllRead">全部已读</button>
+        <button class="btn ghost small" v-if="state.messages.length > unreadCount" @click="clearReadMessages">清空已读</button>
+      </div>
+    </div>
+
+    <div class="empty" v-if="!state.messagesLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.messages.length">
+      <div class="empty-egg">💬</div>
+      <p class="empty-title">还没有消息</p>
+      <p class="empty-sub">已领取的蛋过了使用截止，会自动记一条到这里，不怕一闪而过漏掉</p>
+    </div>
+
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <message-card v-for="m in state.messages" :key="m.id" :message="m"
+                    @read="markMessageRead(m)" @remove="removeMessage(m)" @goto="gotoActivity(m.activity_id)">
+      </message-card>
+    </transition-group>
+  </main>
+
+  <!-- 新增 / 编辑抽屉 -->
+  <egg-editor v-if="state.board === 'eggs' && state.editorOpen" :initial="state.editing" :known-platforms="platformOptions" @save="saveActivity" @close="state.editorOpen = false"></egg-editor>
+  <paper-editor v-if="state.board === 'papers' && state.paperEditorOpen" :initial="state.editingPaper" @save="savePaper" @close="state.paperEditorOpen = false"></paper-editor>
+  <paper-log-drawer v-if="state.board === 'papers' && state.logOpen && logPaper" :paper="logPaper" :editing="state.logEditing"
+                    :pending-read="state.logPendingRead" :restored="state.logRestored"
+                    @save="savePaperLog" @draft="saveLogDraft" @discard-draft="discardLogDraft"
+                    @remove="removePaperLog" @edit="editPaperLog" @new="newPaperLog"
+                    @back="backToLogList" @empty="toast('这条记录还是空的，写点内容再保存', 'warn')" @close="closePaperLog">
+  </paper-log-drawer>
+
+  <site-editor v-if="state.board === 'sites' && state.siteEditorOpen" :initial="state.editingSite"
+               :known-urls="siteUrls" @save="saveSite" @close="state.siteEditorOpen = false"></site-editor>
+  <site-note-drawer v-if="state.board === 'sites' && state.siteNoteOpen && siteNoteItem" :site="siteNoteItem"
+                    :editing="state.siteNoteEditing" :pending-read="state.siteNotePendingRead" :restored="state.siteNoteRestored"
+                    @save="saveSiteNote" @draft="saveSiteNoteDraft" @discard-draft="discardSiteNoteDraft"
+                    @remove="removeSiteNote" @edit="editSiteNote" @new="newSiteNote"
+                    @back="backToSiteNoteList" @empty="toast('这条笔记还是空的，写点内容再保存', 'warn')" @close="closeSiteNote">
+  </site-note-drawer>
+
+  <expense-editor v-if="state.board === 'expenses' && state.expenseEditorOpen" :initial="state.editingExpense"
+                  :default-date="defaultExpenseDate(state.expensePeriod)"
+                  @save="saveExpense" @close="state.expenseEditorOpen = false"></expense-editor>
+
+  <!-- 轻提示 -->
+  <transition name="toast">
+    <div v-if="state.toast.show" class="toast" :class="state.toast.type">{{ state.toast.msg }}</div>
+  </transition>
+</div>
+
+<script src="config.js"></script>
+<script src="vendor/vue.global.prod.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
