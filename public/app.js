@@ -529,6 +529,8 @@ const EggEditor = {
     initial: { type: Object, default: null },
     // 已在数据里出现过的平台，和 config 常用列表合并做建议
     knownPlatforms: { type: Array, default: () => [] },
+    // 保存请求进行中（父组件 saveActivity 在 fetch 期间置 true）
+    saving: Boolean,
   },
   emits: ['save', 'close'],
   setup(props, { emit }) {
@@ -831,7 +833,7 @@ const EggEditor = {
           <textarea v-model="form.notes" rows="2" placeholder="额度多少、注意事项…"></textarea></label>
         <footer class="drawer-foot">
           <button type="button" class="btn ghost" @click="close">取消</button>
-          <button type="submit" class="btn primary">💾 保存</button>
+          <button type="submit" class="btn primary" :disabled="saving">{{ saving ? '⏳ 保存中…' : '💾 保存' }}</button>
         </footer>
       </form>
     </aside>
@@ -1962,6 +1964,7 @@ const app = createApp({
       platformFilter: '',
       editorOpen: false,
       editing: null,
+      saving: false, // 保存请求进行中：按钮立即显示「保存中…」并禁用，网络再慢也有即时反馈，且防重复提交
       papers: [],
       papersLoaded: false,
       paperCategories: [],
@@ -2097,6 +2100,8 @@ const app = createApp({
     }
 
     async function saveActivity(payload) {
+      if (state.saving) return; // 请求进行中忽略重复提交（连点按钮 / 表单里按回车）
+      state.saving = true;      // 同步置位：按钮立即变「保存中…」，不等网络结论
       const isEdit = !!state.editing;
       const url = isEdit ? `/api/activities/${state.editing.id}` : '/api/activities';
       let saved;
@@ -2111,6 +2116,8 @@ const app = createApp({
       } catch (e) {
         // 服务连不上：抽屉保持打开，已填内容不丢
         return toast('保存失败：无法连接服务，请确认拾穗集服务已启动', 'warn');
+      } finally {
+        state.saving = false;
       }
       if (isEdit) {
         const idx = state.activities.findIndex((a) => a.id === saved.id);

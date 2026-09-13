@@ -301,7 +301,7 @@
   </main>
 
   <!-- 新增 / 编辑抽屉 -->
-  <egg-editor v-if="state.board === 'eggs' && state.editorOpen" :initial="state.editing" :known-platforms="platformOptions" @save="saveActivity" @close="state.editorOpen = false"></egg-editor>
+  <egg-editor v-if="state.board === 'eggs' && state.editorOpen" :initial="state.editing" :known-platforms="platformOptions" :saving="state.saving" @save="saveActivity" @close="state.editorOpen = false"></egg-editor>
   <paper-editor v-if="state.board === 'papers' && state.paperEditorOpen" :initial="state.editingPaper" @save="savePaper" @close="state.paperEditorOpen = false"></paper-editor>
   <paper-log-drawer v-if="state.board === 'papers' && state.logOpen && logPaper" :paper="logPaper" :editing="state.logEditing"
                     :pending-read="state.logPendingRead" :restored="state.logRestored"
