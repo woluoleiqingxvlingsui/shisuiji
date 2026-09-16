@@ -15,13 +15,33 @@ const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
-const PORT = process.env.PORT || 8642;
-// 只监听本机回环：局域网/外网不可达（API 无鉴权，不能暴露给同网段）。
-// 确需局域网访问时显式设 DANJI_HOST=0.0.0.0
-const HOST = process.env.DANJI_HOST || '127.0.0.1';
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
+
+// 共用配置：根目录 config.json（port/host）。优先级：环境变量 > config.json > 内置默认。
+// lib.ps1 读同一份文件，保证图形控制台与服务端端口一致。
+function validPort(n) {
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : null;
+}
+function loadAppConfig() {
+  try {
+    // 容忍 Windows 记事本/PowerShell 写入的 UTF-8 BOM
+    const raw = fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8').replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw);
+    return {
+      port: validPort(Number(parsed.port)) || 8642,
+      host: String(parsed.host || '127.0.0.1').trim() || '127.0.0.1',
+    };
+  } catch {
+    return { port: 8642, host: '127.0.0.1' };
+  }
+}
+const APP_CONFIG = loadAppConfig();
+const PORT = validPort(Number(process.env.PORT)) || APP_CONFIG.port;
+// 只监听本机回环：局域网/外网不可达（API 无鉴权，不能暴露给同网段）。
+// 确需局域网访问时显式设 DANJI_HOST=0.0.0.0（或改 config.json 的 host）
+const HOST = process.env.DANJI_HOST || APP_CONFIG.host;
 const DATA_FILE = path.join(DATA_DIR, 'eggs.json');
 const PAPERS_FILE = path.join(DATA_DIR, 'papers.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
@@ -217,6 +237,12 @@ function safeCategory(raw) {
   return clean || '未分类';
 }
 
+// 文件名清洗：去掉路径分隔符与穿越前缀，避免 file_name 被用来写出论文库
+function safeFileName(raw) {
+  const s = String(raw || '').trim();
+  return s.replace(/[\\/:*?"<>|]/g, '').replace(/^\.+/, '').slice(0, 200).trim();
+}
+
 // 一条阅读记录：按 id 合并既有内容，便于单独编辑/删除
 function normalizePaperLog(input, existing = {}) {
   const log = { ...existing };
@@ -259,6 +285,7 @@ function normalizePaper(input, existing = {}) {
   if (!paper.id) paper.id = crypto.randomUUID();
   if (!PAPER_STATUSES.includes(paper.status)) paper.status = 'to_read';
   paper.category = safeCategory(paper.category);
+  paper.file_name = safeFileName(paper.file_name);
   paper.created_at = existing.created_at || new Date().toISOString();
   paper.updated_at = new Date().toISOString();
   return paper;
@@ -584,13 +611,14 @@ async function listCategories() {
 
 // 定位记录的文件：当前状态/类别 → 收件箱 → 各状态根 → 各状态的其他类别
 function findPaperFile(paper, prevCategory) {
-  if (!paper.file_name) return null;
+  const fileName = safeFileName(paper && paper.file_name);
+  if (!fileName) return null;
   const dirs = [categoryDir(paper.status, safeCategory(paper.category)), PAPERS_DIR];
   for (const st of PAPER_STATUSES) {
     dirs.push(paperDir(st), categoryDir(st, safeCategory(prevCategory || paper.category)));
   }
   for (const dir of dirs) {
-    const p = path.join(dir, paper.file_name);
+    const p = path.join(dir, fileName);
     if (fs.existsSync(p)) return p;
   }
   return null;
@@ -608,26 +636,27 @@ function fsError(err, action, target) {
 // 归档：把文件挪到 目标状态/目标类别/ 下；找不到不报错，返回 missing 让前端提示
 async function filePaper(fileName, prevCategory, targetStatus, targetCategory) {
   const cat = safeCategory(targetCategory);
-  if (!fileName) return { file_name: '', category: cat, moved: false, missing: false };
+  const safeName = safeFileName(fileName);
+  if (!safeName) return { file_name: '', category: cat, moved: false, missing: false };
   const targetDir = categoryDir(targetStatus, cat);
   try {
     await fsp.mkdir(targetDir, { recursive: true });
   } catch (err) {
     throw new Error(fsError(err, '创建目录', targetDir));
   }
-  const target = path.join(targetDir, fileName);
-  if (fs.existsSync(target)) return { file_name: fileName, category: cat, moved: false, missing: false };
+  const target = path.join(targetDir, safeName);
+  if (fs.existsSync(target)) return { file_name: safeName, category: cat, moved: false, missing: false };
   const dirs = [PAPERS_DIR];
   for (const st of PAPER_STATUSES) {
     dirs.push(paperDir(st), categoryDir(st, safeCategory(prevCategory || cat)));
   }
-  const source = dirs.map((d) => path.join(d, fileName)).find((p) => fs.existsSync(p));
-  if (!source) return { file_name: fileName, category: cat, moved: false, missing: true };
-  let name = fileName;
+  const source = dirs.map((d) => path.join(d, safeName)).find((p) => fs.existsSync(p));
+  if (!source) return { file_name: safeName, category: cat, moved: false, missing: true };
+  let name = safeName;
   const ext = path.extname(name);
   let n = 2;
   while (fs.existsSync(path.join(targetDir, name))) {
-    name = `${path.basename(fileName, ext)} ${n}${ext}`;
+    name = `${path.basename(safeName, ext)} ${n}${ext}`;
     n += 1;
   }
   try {
@@ -727,7 +756,7 @@ route('GET', '/api/papers/match', async (ctx) => {
 route('POST', '/api/papers', async (ctx) => {
   await ensurePaperDirs();
   const paper = normalizePaper(ctx.body);
-  const res = await filePaper(ctx.body.file_name, paper.category, paper.status, paper.category);
+  const res = await filePaper(paper.file_name, paper.category, paper.status, paper.category);
   Object.assign(paper, { file_name: res.file_name, category: res.category });
   paperDb.papers.push(paper);
   await savePapers();

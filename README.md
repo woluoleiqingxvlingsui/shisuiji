@@ -34,7 +34,7 @@ node server.js
 
 - 零依赖：只用到 Node.js 标准库，**无需 npm install**
 - 内存占用约 30MB，可以一直挂着
-- 换端口：`set PORT=9000 && node server.js`（`PORT` 定义在 `server.js` 开头）
+- 换端口：改根目录 `config.json` 里的 `"port"`（服务端和图形控制台会一起生效）；临时覆盖可用环境变量 `PORT`（如 `set PORT=9000 && node server.js`）
 
 首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
 
@@ -163,7 +163,7 @@ papers\
 
 | 现象 | 处理 |
 |---|---|
-| 提示「端口被占用」/ 打不开 8642 | 拾穗集可能已经在运行了，直接访问 `http://localhost:8642`；确实要换端口就设环境变量 `PORT`（如 `set PORT=9000 && node server.js`） |
+| 提示「端口被占用」/ 打不开 8642 | 拾穗集可能已经在运行了，直接访问 `http://localhost:8642`；确实要换端口就改 `config.json` 的 `"port"`（控制台会跟着变），或临时设环境变量 `PORT` |
 | 双击脚本报「无法加载文件……执行策略」 | 管理员 PowerShell 跑一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`；或者直接 `node server.js` |
 | 页面显示「无法连接拾穗集服务」 | 后台服务没在运行：双击 `start.bat` 启动，然后点页面上的「重试」 |
 | 记了内容保存没反应 | 看按钮：显示「⏳ 保存中…」是在等网络；弹出「无法连接服务」说明服务停了，重启服务后再保存，已填内容不会丢 |
