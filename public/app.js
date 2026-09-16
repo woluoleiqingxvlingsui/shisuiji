@@ -630,7 +630,8 @@ const EggEditor = {
       valid_until: props.initial?.valid_until || '',
       claim_steps: props.initial?.claim_steps || '',
       link: props.initial?.link || '',
-      status: props.initial?.status || 'pending',
+      // 新建时状态与顶部模式对齐（use→已领取），避免上次选了「待使用」直接保存却落成待领取
+      status: props.initial?.status || (mode.value === 'use' ? 'claimed' : 'pending'),
       tagsText: (props.initial?.tags || []).join(', '),
       notes: props.initial?.notes || '',
     });
@@ -742,10 +743,14 @@ const EggEditor = {
       closeCombo();
     }
 
-    // 切换记蛋类型：待领取 ↔ 待使用，联动状态；被隐藏字段的已有值保留不丢
+    // 切换记蛋类型：待领取 ↔ 待使用；被隐藏字段的已有值保留不丢。
+    // 新建：模式决定初始状态。编辑：只切字段显隐，状态交给状态下拉，
+    // 避免手滑点到「待领取」把已领取/已用完等静默改回待领取。
     function switchMode(next) {
       mode.value = next;
-      form.status = next === 'claim' ? 'pending' : 'claimed';
+      if (!props.initial) {
+        form.status = next === 'claim' ? 'pending' : 'claimed';
+      }
     }
     // 编辑时的状态下拉与切换器联动
     function onStatusChange() {
