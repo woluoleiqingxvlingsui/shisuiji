@@ -16,6 +16,8 @@ temp/
 .zcode/
 .playwright-cli/
 output/
+__pycache__/
+docs/
 
 # 系统文件
 Thumbs.db
