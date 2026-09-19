@@ -586,11 +586,17 @@ const EggCard = {
         <!-- 自动移入「已错过」可能误判（其实领到了只是没记），留个一键改回的口子 -->
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
       </template>
+      <template v-else-if="activity.status === 'expired'">
+        <!-- 同理：自动或手动移入「已过期」也可能不准（日期记错 / 其实还能用），留个改回的口子 -->
+        <button class="btn small ghost" @click="emitStatus('claimed')">↩️ 还能用</button>
+      </template>
       <template v-else>
         <button class="btn small" :class="activity.link ? 'ghost' : 'primary'"
                 v-if="activity.status === 'pending'" @click="emitStatus('claimed')">🧺 已领取</button>
         <button class="btn small ghost" v-if="canMissManually" @click="emitStatus('missed')">😢 错过了</button>
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('used')">🏁 用完了</button>
+        <!-- 不限量畅用的蛋永远不会「用完」，收尾只能走「已过期」，所以这个出口常驻 -->
+        <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('expired')">💤 标为过期</button>
       </template>
       <span class="spacer"></span>
       <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
