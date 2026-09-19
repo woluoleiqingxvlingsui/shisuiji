@@ -213,7 +213,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .card.lv-orange { border-left-color: var(--orange); }
 .card.lv-yellow { border-left-color: var(--yellow); }
 .card.lv-over { border-left-color: var(--muted); background: var(--card-2); }
-.card.st-used, .card.st-expired, .card.st-missed { opacity: .66; }
+.card.st-used, .card.st-expired, .card.st-closed { opacity: .66; }
 
 /* 定位高亮：颜色跟随该蛋的紧急度，双层光晕 + 轻微放大 + 背景染色 */
 .card { --flash: var(--accent); }
@@ -236,8 +236,8 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 @keyframes flash-tint { 0%, 100% { opacity: 0; } 18%, 60% { opacity: 1; } }
 
-/* 已过期/已用完/已错过默认 opacity:.62，高亮时先全亮，否则效果会被压暗 */
-.card.flash, .card.st-used.flash, .card.st-expired.flash, .card.st-missed.flash { opacity: 1; }
+/* 已过期/已用完/已截止默认 opacity:.62，高亮时先全亮，否则效果会被压暗 */
+.card.flash, .card.st-used.flash, .card.st-expired.flash, .card.st-closed.flash { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
   .card.flash { animation: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--flash) 55%, transparent); }
@@ -261,7 +261,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .status-badge.st-pending { background: var(--accent-soft); color: var(--accent-strong); }
 .status-badge.st-claimed { background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue); }
 .status-badge.st-used { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
-.status-badge.st-expired, .status-badge.st-missed { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
+.status-badge.st-expired, .status-badge.st-closed { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
 
 .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .chip {

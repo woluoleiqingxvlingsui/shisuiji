@@ -18,13 +18,13 @@ window.DANJI_CONFIG = {
     { id: 'other', label: '其他', icon: '🥚' },
   ],
 
-  // 状态流转：待领取 → 已领取 → 已用完；没赶上就是 已过期 / 已错过
+  // 状态流转：待领取 → 已领取 → 已用完；没赶上就是 已过期 / 已截止
   statuses: [
     { id: 'pending', label: '待领取', emoji: '🥚' },
     { id: 'claimed', label: '已领取', emoji: '🧺' },
     { id: 'used', label: '已用完', emoji: '✅' },
     { id: 'expired', label: '已过期', emoji: '💤' },
-    { id: 'missed', label: '已错过', emoji: '😢' },
+    { id: 'closed', label: '已截止', emoji: '⏳' },
   ],
 
   // 紧急度阈值（小时）：≤red 红 / ≤orange 橙 / ≤yellow 黄

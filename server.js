@@ -53,7 +53,9 @@ const MAX_BODY = 2 * 1024 * 1024; // 请求体上限 2MB，防止误传大文件
 const PAPERS_DIR = process.env.DANJI_PAPERS_DIR || path.join(ROOT, 'papers');
 
 const SCHEMA_VERSION = 1;
-const STATUSES = ['pending', 'claimed', 'used', 'expired', 'missed'];
+const STATUSES = ['pending', 'claimed', 'used', 'expired', 'closed'];
+// 老数据里的状态名 → 现在的名字，遇到就顺手升级，别把它当非法值打回 pending
+const LEGACY_STATUS = { missed: 'closed' };
 const ACTIVITY_FIELDS = [
   'platform', 'title', 'type', 'value',
   'claim_deadline', 'valid_until', 'claim_steps', 'link',
@@ -96,7 +98,7 @@ const EXPENSE_COMPUTE_KEYWORDS = ['算力', '租用', 'autodl', 'gpu'];
 const INSIGHTS_FILE = path.join(DATA_DIR, 'insights.json');
 const INSIGHT_DECISIONS = ['continue', 'reduce', 'hold', 'stop'];
 
-// 消息中心：目前有「已过期」（过了使用截止）与「已错过」（过了领取截止）两个来源
+// 消息中心：目前有「已过期」（过了使用截止）与「已截止」（过了领取截止）两个来源
 const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until', 'claim_deadline'];
 
 // ---------- 数据层 ----------
@@ -151,6 +153,8 @@ function normalizeActivity(input, existing = {}) {
     activity[field] = value;
   }
   if (!activity.id) activity.id = newId();
+  const legacy = LEGACY_STATUS[activity.status];
+  if (legacy) activity.status = legacy;
   if (!activity.status || !STATUSES.includes(activity.status)) {
     activity.status = 'pending';
   }

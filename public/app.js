@@ -505,13 +505,6 @@ const EggCard = {
     const status = computed(() => statusMeta(props.activity.status));
     const type = computed(() => typeMeta(props.activity.type));
     const isOverdue = computed(() => props.activity.status === 'pending' && urgency.value.level === 'over');
-    // 没有明确领取截止（为空 /「待定」/ 看不懂）的待领取蛋永远不会自动流转，
-    // 常驻一个「错过了」按钮，什么时候想清掉它都行
-    const canMissManually = computed(() => {
-      if (props.activity.status !== 'pending') return false;
-      const d = props.activity.claim_deadline;
-      return !d || d === '待定' || isNaN(parseStoredDate(d).getTime());
-    });
 
     const deadlineText = computed(() => {
       if (!props.activity.claim_deadline) return '';
@@ -540,7 +533,7 @@ const EggCard = {
     }
 
     return {
-      expanded, urgency, status, type, isOverdue, canMissManually, deadlineText, validText,
+      expanded, urgency, status, type, isOverdue, deadlineText, validText,
       linkUrl, linkLabel, openLink, platformStyle, formatDate,
       emitEdit: () => emit('edit'), emitRemove: () => emit('remove'),
       emitStatus: (s) => emit('status', s),
@@ -564,7 +557,7 @@ const EggCard = {
     <div class="deadline-lines">
       <div class="deadline" :class="'lv-' + (urgency.level || 'none')" v-if="deadlineText">
         {{ deadlineText }}
-        <span class="overdue-warn" v-if="isOverdue">⚠️ 可能已过期，点下方按钮确认</span>
+        <span class="overdue-warn" v-if="isOverdue">⚠️ 可能已截止，点下方按钮确认</span>
       </div>
       <div class="deadline" v-if="validText" :class="{ soon: activity.status === 'claimed' && urgency.level && urgency.level !== 'unknown' }">{{ validText }}</div>
     </div>
@@ -580,10 +573,10 @@ const EggCard = {
       <button class="btn small primary" v-if="activity.link" @click="openLink">{{ linkLabel }}</button>
       <template v-if="isOverdue">
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
-        <button class="btn small ghost" @click="emitStatus('missed')">😢 错过了</button>
+        <button class="btn small ghost" @click="emitStatus('closed')">⏳ 已截止</button>
       </template>
-      <template v-else-if="activity.status === 'missed'">
-        <!-- 自动移入「已错过」可能误判（其实领到了只是没记），留个一键改回的口子 -->
+      <template v-else-if="activity.status === 'closed'">
+        <!-- 自动移入「已截止」可能误判（其实领到了只是没记），留个一键改回的口子 -->
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
       </template>
       <template v-else-if="activity.status === 'expired'">
@@ -593,7 +586,7 @@ const EggCard = {
       <template v-else>
         <button class="btn small" :class="activity.link ? 'ghost' : 'primary'"
                 v-if="activity.status === 'pending'" @click="emitStatus('claimed')">🧺 已领取</button>
-        <button class="btn small ghost" v-if="canMissManually" @click="emitStatus('missed')">😢 错过了</button>
+        <button class="btn small ghost" v-if="activity.status === 'pending'" @click="emitStatus('closed')">⏳ 已截止</button>
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('used')">🏁 用完了</button>
         <!-- 不限量畅用的蛋永远不会「用完」，收尾只能走「已过期」，所以这个出口常驻 -->
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('expired')">💤 标为过期</button>
@@ -2410,8 +2403,8 @@ const app = createApp({
       if (!state.messages.some((m) => m.id === saved.id)) state.messages.unshift(saved);
     }
 
-    // 蛋错过领取截止时写一条消息，claim_deadline 参与服务端去重
-    async function pushMissedMessage(activity) {
+    // 蛋过了领取截止时写一条消息，claim_deadline 参与服务端去重
+    async function pushClosedMessage(activity) {
       const res = await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2419,7 +2412,7 @@ const app = createApp({
           activity_id: activity.id,
           platform: activity.platform,
           title: activity.title,
-          body: `领取截止 ${formatDate(activity.claim_deadline)} 已过，已自动移入「已错过」`,
+          body: `领取截止 ${formatDate(activity.claim_deadline)} 已过，已自动移入「已截止」`,
           valid_until: '',
           claim_deadline: activity.claim_deadline || '',
           read: false,
@@ -3317,7 +3310,7 @@ const app = createApp({
       }
     }
 
-    // 到点的蛋自动流转：已领取的过了使用截止 →「已过期」；待领取的过了领取截止 →「已错过」。
+    // 到点的蛋自动流转：已领取的过了使用截止 →「已过期」；待领取的过了领取截止 →「已截止」。
     // 只有填了明确截止时间才能自动判；没填 /「待定」/ 看不懂的仍留给用户手动确认。
     // 串行提交：服务端每次写盘都用同一个临时文件
     let settleRunning = false;
@@ -3332,26 +3325,26 @@ const app = createApp({
           const d = parseStoredDate(a.valid_until);
           return !isNaN(d.getTime()) && d.getTime() <= now;
         });
-        const missedDue = state.activities.filter((a) => {
+        const closedDue = state.activities.filter((a) => {
           if (a.status !== 'pending' || !a.claim_deadline || isEditing(a)) return false;
           const d = parseStoredDate(a.claim_deadline);
           return !isNaN(d.getTime()) && d.getTime() <= now;
         });
-        if (!expiredDue.length && !missedDue.length) return;
+        if (!expiredDue.length && !closedDue.length) return;
         const expired = [];
-        const missed = [];
+        const closed = [];
         for (const a of expiredDue) {
           if (await patchActivity(a, { status: 'expired' })) expired.push(a);
         }
-        for (const a of missedDue) {
-          if (await patchActivity(a, { status: 'missed' })) missed.push(a);
+        for (const a of closedDue) {
+          if (await patchActivity(a, { status: 'closed' })) closed.push(a);
         }
         // toast 是单例，多条必须聚合成一条，否则只看到最后一条
         const parts = [];
-        if (missed.length) {
-          parts.push(missed.length === 1
-            ? `😢 ${missed[0].platform} · ${missed[0].title} 过了领取截止，已自动移入「已错过」`
-            : `😢 ${missed.length} 颗蛋过了领取截止，已自动移入「已错过」`);
+        if (closed.length) {
+          parts.push(closed.length === 1
+            ? `⏳ ${closed[0].platform} · ${closed[0].title} 过了领取截止，已自动移入「已截止」`
+            : `⏳ ${closed.length} 颗蛋过了领取截止，已自动移入「已截止」`);
         }
         if (expired.length) {
           parts.push(expired.length === 1
@@ -3360,7 +3353,7 @@ const app = createApp({
         }
         if (!parts.length) return;
         toast(parts.join('；'), 'warn');
-        for (const a of missed) { notifyMissed(a); pushMissedMessage(a); }
+        for (const a of closed) { notifyClosed(a); pushClosedMessage(a); }
         for (const a of expired) { notifyExpired(a); pushExpiredMessage(a); }
       } finally {
         settleRunning = false;
@@ -3380,14 +3373,14 @@ const app = createApp({
       n.onclick = () => { window.focus(); jumpTo(activity.id); n.close(); };
     }
 
-    function notifyMissed(activity) {
+    function notifyClosed(activity) {
       if (!state.notifyOn) return;
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-      const key = `missed|${activity.id}|${activity.claim_deadline}`;
+      const key = `closed|${activity.id}|${activity.claim_deadline}`;
       if (notifiedKeys.has(key)) return;
       rememberNotified(key);
-      const n = new Notification(`😢 蛋错过了 · ${activity.platform}`, {
-        body: `${activity.title}\n领取截止 ${formatDate(activity.claim_deadline)} 已过，已移入「已错过」`,
+      const n = new Notification(`⏳ 蛋已截止 · ${activity.platform}`, {
+        body: `${activity.title}\n领取截止 ${formatDate(activity.claim_deadline)} 已过，已移入「已截止」`,
         tag: activity.id,
       });
       n.onclick = () => { window.focus(); jumpTo(activity.id); n.close(); };
