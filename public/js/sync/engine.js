@@ -53,6 +53,16 @@ function forceMobileFromQuery() {
   }
 }
 
+/** 布局视口：只影响样式密度，不参与权限判断 */
+function syncIsPhone() {
+  try {
+    state.isPhone = window.matchMedia('(max-width: 640px)').matches;
+  } catch {
+    state.isPhone = false;
+  }
+  return state.isPhone;
+}
+
 function refreshPendingCount() {
   return listOutbox().then((ops) => {
     state.sync.pendingCount = ops.length;
@@ -88,15 +98,20 @@ async function detectRole() {
   }
 }
 
-/** 初始化：决定是否启用同步层（仅 mobile）。电脑端直接返回 false。 */
+/** 初始化：探测角色；仅 mobile 启用同步层。电脑端不走 IDB/outbox。 */
 async function initSync() {
   const force = forceMobileFromQuery();
   const { role, needToken } = await detectRole();
-  const enabled = force || role === 'mobile';
-  state.sync.role = force ? 'mobile' : role;
+  // 权限用 role：health 为准；?danji-mobile=1 仅调试时强制 mobile
+  const effectiveRole = force ? 'mobile' : role;
+  state.role = effectiveRole;
+  state.sync.role = effectiveRole;
   state.sync.needToken = needToken && !getToken();
-  state.sync.enabled = enabled;
-  if (!enabled) {
+  state.sync.enabled = force || role === 'mobile';
+  // 桌面端也要维护 isPhone（窄窗布局）；监听在所有角色下都挂上
+  bindIsPhoneMq();
+  syncIsPhone();
+  if (!state.sync.enabled) {
     setStatus('idle');
     return false;
   }
@@ -115,11 +130,23 @@ async function initSync() {
   return true;
 }
 
+function bindIsPhoneMq() {
+  try {
+    const mq = window.matchMedia('(max-width: 640px)');
+    if (mq._danjiPhoneBound) return;
+    mq._danjiPhoneBound = true;
+    if (mq.addEventListener) mq.addEventListener('change', syncIsPhone);
+    else if (mq.addListener) mq.addListener(syncIsPhone);
+  } catch { /* 老环境忽略 */ }
+}
+
 function bindListeners() {
   if (listenersBound) return;
   listenersBound = true;
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('online', onOnline);
+  bindIsPhoneMq();
+  syncIsPhone();
 }
 
 function unbindListeners() {
@@ -127,6 +154,11 @@ function unbindListeners() {
   listenersBound = false;
   document.removeEventListener('visibilitychange', onVisibility);
   window.removeEventListener('online', onOnline);
+  try {
+    const mq = window.matchMedia('(max-width: 640px)');
+    if (mq.removeEventListener) mq.removeEventListener('change', syncIsPhone);
+    else if (mq.removeListener) mq.removeListener(syncIsPhone);
+  } catch { /* ignore */ }
 }
 
 function onVisibility() {
@@ -437,4 +469,5 @@ export {
   reloadIdeasDisplay,
   disposeSync,
   refreshPendingCount,
+  syncIsPhone,
 };

@@ -22,7 +22,7 @@
 
   <!-- 顶栏 -->
   <header class="topbar">
-    <span class="logo">🧺 拾穗集</span>
+    <span class="logo"><span class="logo-mark">🧺</span><span class="logo-text">拾穗集</span></span>
     <nav class="board-tabs">
       <button :class="{ active: state.board === 'ideas' }" @click="switchBoard('ideas')">💡 想法</button>
       <button :class="{ active: state.board === 'eggs' }" @click="switchBoard('eggs')">🥚 赛博鸡蛋</button>
@@ -45,7 +45,7 @@
     </template>
     <template v-else-if="state.board === 'papers'">
       <input class="search" type="search" v-model.trim="state.paperSearch" placeholder="搜索论文 / 类别 / 备注…">
-      <button class="btn primary" @click="openPaperEditor(null)">＋ 记论文</button>
+      <button class="btn primary" v-if="state.role === 'desktop'" @click="openPaperEditor(null)">＋ 记论文</button>
     </template>
     <template v-else-if="state.board === 'sites'">
       <input class="search" type="search" v-model.trim="state.siteSearch" placeholder="搜索网页 / 域名 / 笔记…">
@@ -190,7 +190,7 @@
       <p class="empty-title">书架还是空的</p>
       <p class="empty-sub">下载好的论文丢进「论文」文件夹，再来这里记一笔，自动归档分类</p>
       <div class="empty-actions">
-        <button class="btn primary" @click="openPaperEditor(null)">＋ 记第一篇论文</button>
+        <button class="btn primary" v-if="state.role === 'desktop'" @click="openPaperEditor(null)">＋ 记第一篇论文</button>
       </div>
     </div>
     <div class="empty" v-else-if="!filteredPapers.length">

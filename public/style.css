@@ -78,6 +78,8 @@ input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .logo { font-size: 16px; font-weight: 700; letter-spacing: .3px; margin-right: 6px; white-space: nowrap; }
+.logo-mark { margin-right: 4px; }
+.logo-text { letter-spacing: .3px; }
 .search {
   flex: 1; max-width: 260px; min-width: 120px;
   padding: 7px 12px; border-radius: var(--radius);
@@ -708,11 +710,72 @@ input, select, textarea { font: inherit; color: inherit; }
 .toast-enter-active, .toast-leave-active { transition: all .2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 
-/* ---------- 小屏适配 ---------- */
+/* ---------- 小屏 / 触控适配 ---------- */
+/* iOS：input/select/textarea 必须 ≥16px，否则聚焦会整页放大 */
+input, select, textarea { font-size: 16px; }
+
+@media (hover: none) {
+  .card:hover { transform: none; box-shadow: none; }
+  .pie.clickable:hover { transform: none; }
+  .btn.primary:hover, .btn.ghost:hover, .btn.danger:hover {
+    /* 触控设备用 :active 反馈即可，避免 sticky hover */
+    filter: none;
+  }
+}
+
 @media (max-width: 640px) {
   .topbar { padding: 8px 12px; }
-  .search { max-width: none; flex-basis: 100%; order: 9; }
+  .logo-text { display: none; } /* 手机顶栏只留 🧺 */
+  .board-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+  .board-tabs::-webkit-scrollbar { display: none; }
+  .board-tabs button { min-height: 38px; padding: 8px 12px; }
+  .btn, .btn.small, .tab, .chip-pick, .seg button,
+  .urgent-chip, .filter-chip, .platform-select { min-height: 38px; }
+  .btn.small { padding: 8px 12px; }
+  .search { max-width: none; flex-basis: 100%; order: 9; font-size: 16px; }
   .topbar .btn.primary { margin-left: 0; }
   .container { padding: 12px; }
+
+  /* 卡片标题允许两行，长论文名/想法题不再只剩省略号 */
+  .title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  /* 筛选栏 / 状态页签 / 紧急横幅：横向滚动，不把顶栏撑爆 */
+  .filters { flex-wrap: nowrap; overflow-x: auto; gap: 8px; scrollbar-width: thin; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .filter-right { flex: none; }
+  .urgent-bar { flex-wrap: nowrap; overflow-x: auto; }
+
+  /* 抽屉全屏 + 刘海安全区 */
+  .drawer {
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
   .drawer-form .row { flex-direction: column; gap: 0; }
+  .drawer-form textarea.tall { min-height: 40vh; }
+
+  /* 花销饼图改竖排，图例宽度放开 */
+  .stat-body { flex-direction: column; align-items: stretch; gap: 12px; }
+  .pie { align-self: center; }
+  .pie-legend { min-width: 0; max-width: none; width: 100%; max-height: 220px; }
+
+  .conflict-sides { grid-template-columns: 1fr; }
 }
