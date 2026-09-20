@@ -297,8 +297,6 @@ async function syncNow(opts = {}) {
     state.sync.lastError = '';
     if (state.sync.conflicts.length) {
       setStatus('conflicts');
-    } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setStatus('offline');
     } else if (state.sync.pendingCount > 0) {
       setStatus('offline');
     } else {

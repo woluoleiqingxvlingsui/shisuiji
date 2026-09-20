@@ -104,7 +104,9 @@ async function removeIdea(idea) {
       op: 'delete',
       id: idea.id,
       payload: null,
-      baseUpdatedAt: idea.updated_at || idea.base_updated_at || '',
+      // 与 save 同一优先级：base_updated_at 是最后一次服务端时间，
+      // display 叠加后的 updated_at 是本地编辑时间，不能当乐观锁基线
+      baseUpdatedAt: idea.base_updated_at || idea.updated_at || '',
     });
     toast('已加入删除队列 🗑');
     return;

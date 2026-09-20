@@ -20,9 +20,9 @@ function collapseOutboxOp(prev, next) {
     id: next.id,
     op,
     payload: next.payload != null ? next.payload : (prev && prev.payload) || null,
-    base_updated_at: next.base_updated_at != null
-      ? next.base_updated_at
-      : (prev && prev.base_updated_at) || '',
+    base_updated_at: next.base_updated_at
+      || (prev && prev.base_updated_at)
+      || '',
     // 服务端是否已见过这条：见过则后续改/删是 update/delete，而不是 create
     confirmed: next.confirmed != null ? next.confirmed : (prev ? !!prev.confirmed : false),
     updated_at: next.updated_at || new Date().toISOString(),
@@ -54,12 +54,11 @@ function collapseOutboxOp(prev, next) {
     return { ...base, op: 'create', confirmed: false };
   }
 
-  // update 后 update / create 后 create：保留最新 payload
-  // 未确认 create 保持 create，已确认则走 update
+  // update / create 的连续改：保留最新 payload；未确认 create 仍是 create
   if (op === 'create' || op === 'update') {
     return {
       ...base,
-      op: prev.confirmed ? (op === 'create' ? 'update' : 'update') : (prev.op === 'create' ? 'create' : base.op),
+      op: prev.confirmed ? 'update' : (prev.op === 'create' ? 'create' : op),
     };
   }
 

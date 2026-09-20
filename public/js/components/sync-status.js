@@ -34,7 +34,7 @@ const SyncStatus = {
       if (s.status === 'offline' || (pending.value > 0 && s.status !== 'synced')) {
         return pending.value > 0 ? `离线 · ${pending.value} 条待同步` : '离线';
       }
-      if (s.status === 'error') return s.lastError ? '同步异常' : '同步异常';
+      if (s.status === 'error') return '同步异常';
       return '已同步';
     });
 
