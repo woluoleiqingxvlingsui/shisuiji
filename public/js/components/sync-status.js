@@ -1,6 +1,6 @@
 /* 拾穗集 —— 顶栏同步状态胶囊（仅手机端同步层启用时渲染） */
 
-import { computed, ref } from '../vue-globals.js';
+import { computed, ref, watch } from '../vue-globals.js';
 import { state } from '../state.js';
 import { syncNow, resolveConflict, submitToken } from '../sync/engine.js';
 
@@ -13,6 +13,14 @@ const SyncStatus = {
     const visible = computed(() => !!(state.sync && state.sync.enabled));
     const pending = computed(() => state.sync.pendingCount || 0);
     const conflictCount = computed(() => (state.sync.conflicts || []).length);
+
+    // push 返回 conflict 时按规格自动弹出二选一，不必等用户点胶囊
+    watch(conflictCount, (n, prev) => {
+      if (n > 0 && n !== prev && !resolving.value) {
+        const first = state.sync.conflicts[0];
+        if (first) resolving.value = first.id;
+      }
+    });
 
     const label = computed(() => {
       const s = state.sync;

@@ -50,6 +50,23 @@ ok('create + delete 整条丢掉', () => {
   assert.equal(b, null);
 });
 
+ok('无 prev + 未确认 delete 直接丢（本地幽灵删除）', () => {
+  const b = collapseOutboxOp(null, {
+    id: 'ghost', op: 'delete', payload: null, confirmed: false, updated_at: t(0),
+  });
+  assert.equal(b, null);
+});
+
+ok('无 prev + 已确认 delete 必须入队（同步后离线删）', () => {
+  const b = collapseOutboxOp(null, {
+    id: 'synced-del', op: 'delete', payload: null, confirmed: true,
+    base_updated_at: t(-1000), updated_at: t(0),
+  });
+  assert.ok(b, 'confirmed delete 不能被折叠丢掉');
+  assert.equal(b.op, 'delete');
+  assert.equal(b.id, 'synced-del');
+});
+
 ok('已确认 update + delete 保留 delete', () => {
   const a = collapseOutboxOp(null, {
     id: 'i3', op: 'update', confirmed: true,
@@ -123,6 +140,32 @@ ok('pull 后本地未同步想法不会消失', () => {
   assert.equal(list.length, 2);
   assert.ok(list.some((i) => i.id === 'offline1'));
   assert.ok(list.some((i) => i.id === 'server1'));
+});
+
+ok('镜像缺失的 update 也会出现在显示列表', () => {
+  const list = mergeDisplayItems([], [{
+    id: 'orphan',
+    op: 'update',
+    payload: { id: 'orphan', title: '镜像没有', content: '', updated_at: t(5) },
+  }]);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, 'orphan');
+});
+
+ok('叠加显示保留服务端乐观锁基线 base_updated_at', () => {
+  const serverTime = t(-5000);
+  const list = mergeDisplayItems(
+    [{ id: 'm', title: '旧', content: '', updated_at: serverTime }],
+    [{
+      id: 'm',
+      op: 'update',
+      payload: { id: 'm', title: '新', content: '本地改', updated_at: t(99) },
+      base_updated_at: serverTime,
+    }],
+  );
+  assert.equal(list[0].title, '新');
+  assert.equal(list[0].base_updated_at, serverTime, '不能被本地 updated_at 覆盖');
+  assert.notEqual(list[0].updated_at, serverTime);
 });
 
 ok('toPushPayload 形状正确', () => {

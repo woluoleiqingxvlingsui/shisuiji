@@ -221,7 +221,9 @@ async function applyPushResult(entry, result) {
 }
 
 async function pushOnce() {
-  const ops = await listOutbox();
+  // 冲突中且未解决的条目先不重复推，避免每 60 秒打一轮同样的 conflict
+  const conflictIds = new Set((state.sync.conflicts || []).map((c) => c.id));
+  const ops = (await listOutbox()).filter((o) => !conflictIds.has(o.id));
   if (!ops.length) return { pushed: 0, results: [] };
   const payload = ops.map(toPushPayload).filter(Boolean);
   if (!payload.length) return { pushed: 0, results: [] };
@@ -267,9 +269,7 @@ async function syncNow(opts = {}) {
   try {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       await refreshPendingCount();
-      setStatus(state.sync.pendingCount > 0 ? 'offline' : 'offline', {
-        lastError: '',
-      });
+      setStatus('offline', { lastError: '' });
       await reloadIdeasDisplay();
       return { skipped: true, reason: 'offline' };
     }
@@ -368,6 +368,16 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
     confirmed = !!(mirror.items || []).some((i) => i.id === entryId);
   } catch { /* 镜像读失败时按未确认处理 */ }
   if (op === 'delete' || op === 'update') confirmed = true;
+  // 乐观锁基线：优先用调用方传入的「最后一次服务端 updated_at」；
+  // 其次才回落到镜像里的服务端版本。绝不能用本地编辑时间。
+  let serverBase = baseUpdatedAt || '';
+  if (!serverBase) {
+    try {
+      const mirror = await readCollection('ideas');
+      const hit = (mirror.items || []).find((i) => i.id === entryId);
+      if (hit) serverBase = hit.updated_at || '';
+    } catch { /* ignore */ }
+  }
   const merged = {
     id: entryId,
     op,
@@ -381,7 +391,7 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
         updated_at: now,
       }
       : null,
-    base_updated_at: baseUpdatedAt || '',
+    base_updated_at: serverBase,
     confirmed,
     origin: 'mobile',
     updated_at: now,

@@ -145,19 +145,15 @@ async function main() {
       }
     }
 
-    // 附带：手机端强制模式应出现同步胶囊（服务端本机仍是 desktop 权限）
+    // 手机端强制模式必须渲染同步胶囊（服务端本机仍是 desktop 权限）
     const mobileUrl = `${BASE}/?board=ideas&danji-mobile=1&theme=light`;
     const mobileHtml = await dumpDom(browser, mobileUrl);
-    if (mobileHtml.includes('data-testid="sync-status"') || mobileHtml.includes('sync-pill')) {
+    if (mobileHtml.includes('data-testid="sync-status"') || mobileHtml.includes('sync-pill-btn')) {
       console.log('  ✓ mobile-force (danji-mobile=1) 渲染同步胶囊');
     } else {
-      // 胶囊文案节点可能 class 不同，放宽：至少 ideas 主区在
-      if (mobileHtml.includes('想法') || mobileHtml.includes('记想法')) {
-        console.log('  ✓ mobile-force 页面可渲染（未捕获到胶囊 DOM，可能是异步未完成）');
-      } else {
-        failed += 1;
-        console.error('  ✗ mobile-force 页面未正常渲染');
-      }
+      failed += 1;
+      console.error('  ✗ mobile-force 未渲染同步胶囊 data-testid=sync-status');
+      console.error(`      DOM: ${mobileHtml.replace(/\s+/g, ' ').slice(0, 240)}`);
     }
   } finally {
     server.kill();

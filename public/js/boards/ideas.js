@@ -50,6 +50,8 @@ async function saveIdea(payload) {
 
   if (mobileSyncOn()) {
     const id = isEdit ? state.editingIdea.id : null;
+    // 乐观锁基线必须是「最后一次服务端时间」：优先 base_updated_at
+    // （镜像∪队列叠加时写回），其次才是镜像/服务端 updated_at
     const base = isEdit
       ? (state.editingIdea.base_updated_at || state.editingIdea.updated_at || '')
       : '';

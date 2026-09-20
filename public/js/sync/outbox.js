@@ -30,10 +30,9 @@ function collapseOutboxOp(prev, next) {
   };
 
   if (!prev) {
-    if (op === 'delete') {
-      // 从未上过服务端的删除：本地本来就不存在，直接丢
-      return null;
-    }
+    // 从未上过服务端的本地删除：整条不存在，直接丢。
+    // 已同步/镜像里有的删除必须入队，否则 push 永远发不出去。
+    if (op === 'delete' && !base.confirmed) return null;
     return base;
   }
 
@@ -95,18 +94,31 @@ function mergeDisplayItems(mirrorItems, outboxOps) {
     const op = ops.get(id);
     if (op && op.op === 'delete') continue; // 本地已删
     if (op && (op.op === 'create' || op.op === 'update') && op.payload) {
-      out.push({ ...item, ...op.payload, id });
+      // 叠加本地版本时保留乐观锁基线：base_updated_at 必须仍是最后一次
+      // 服务端时间，不能被本地编辑时的 updated_at 覆盖
+      out.push({
+        ...item,
+        ...op.payload,
+        id,
+        base_updated_at: op.base_updated_at || item.base_updated_at || item.updated_at || '',
+      });
     } else {
       out.push(item);
     }
     seen.add(id);
   }
 
-  // 镜像里没有、但队列里是 create 的，插到前面（本地新想法优先看见）
+  // 镜像里没有、但队列里是 create/update 且带 payload 的，插到前面
+  // （本地新想法；或服务端镜像暂时缺失但本地仍有待发版本）
   for (const op of outboxOps || []) {
     if (seen.has(op.id)) continue;
-    if (op.op !== 'create' || !op.payload) continue;
-    out.unshift({ ...op.payload, id: op.id });
+    if (op.op === 'delete' || !op.payload) continue;
+    if (op.op !== 'create' && op.op !== 'update') continue;
+    out.unshift({
+      ...op.payload,
+      id: op.id,
+      base_updated_at: op.base_updated_at || '',
+    });
     seen.add(op.id);
   }
 
