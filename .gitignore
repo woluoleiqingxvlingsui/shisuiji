@@ -1,6 +1,13 @@
 # 个人运行数据（本地自动生成，不上传）
 data/
 
+# 本地配置与密钥：公开仓库只保留 config.example.json
+config.json
+local.env.ps1
+*.pem
+danji-key.pem
+danji-cert.pem
+
 # 论文库：首次使用自动创建，里面是你的 PDF，不入库
 papers/
 

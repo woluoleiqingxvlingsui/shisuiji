@@ -34,7 +34,14 @@ node server.js
 
 - 零依赖：只用到 Node.js 标准库，**无需 npm install**
 - 内存占用约 30MB，可以一直挂着
-- 换端口：改根目录 `config.json` 里的 `"port"`（服务端和图形控制台会一起生效）；临时覆盖可用环境变量 `PORT`（如 `set PORT=9000 && node server.js`）
+- 配置：复制 `config.example.json` 为根目录 `config.json`（**已在 .gitignore，不会进仓库**）改端口/监听/论文库路径
+- **口令与本机私密项用环境变量**，不要写进会提交的文件：
+  - `DANJI_TOKEN`：局域网访问口令（手机同步）
+  - `DANJI_HOST`：监听地址，局域网用 `0.0.0.0`（默认 `127.0.0.1`）
+  - `DANJI_PAPERS_DIR`：论文库绝对路径（覆盖 config）
+  - `DANJI_TLS_CERT` / `DANJI_TLS_KEY`：HTTPS 证书路径
+  - 本地可参考未跟踪的 `local.env.ps1`：`. .\local.env.ps1` 后再 `node server.js`
+- 临时覆盖端口：环境变量 `PORT`（如 `set PORT=9000 && node server.js`）
 
 首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
 
@@ -66,7 +73,7 @@ node server.js
 
 ## 📄 文献板块
 
-论文库根目录写在根目录 `config.json` 的 `papers_dir` 字段（**相对路径相对项目根目录**，默认 `papers`；也可用环境变量 `DANJI_PAPERS_DIR` 覆盖，本机若要把论文库放在项目外用这个，不必改仓库里的 config）。改完重启服务生效。首次使用自动创建：
+论文库根目录：优先环境变量 `DANJI_PAPERS_DIR`，否则读本地 `config.json` 的 `papers_dir`（相对路径相对项目根；公开仓库请用 `config.example.json` 复制一份本地 config，不要提交自己的路径）。改完重启服务生效。首次使用自动创建：
 
 ```
 papers\
