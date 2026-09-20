@@ -33,13 +33,14 @@ const ExpenseStats = {
     const canPick = computed(() => props.level === 'category');
 
     // 点饼图：按点击位置算角度（12 点方向为 0°、顺时针，与 conic-gradient 的 0% 起点一致），
-    // 落在哪个扇区就下钻到哪个类别；点在圆外忽略
+    // 落在哪个扇区就下钻到哪个类别；圆外容差 +2px，方便手指点到边缘扇区
     function onPieClick(e) {
       if (!canPick.value) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const dx = e.clientX - (rect.left + rect.width / 2);
       const dy = e.clientY - (rect.top + rect.height / 2);
-      if (Math.hypot(dx, dy) > rect.width / 2) return;
+      const hitRadius = rect.width / 2 + 2;
+      if (Math.hypot(dx, dy) > hitRadius) return;
       let deg = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
       if (deg < 0) deg += 360;
       const pct = (deg / 360) * 100;
