@@ -403,6 +403,8 @@
 
 <script src="config.js"></script>
 <script src="vendor/vue.global.prod.js"></script>
-<script src="app.js"></script>
+<!-- 原生 ES module：不用打包也不用装依赖。上面的经典脚本一定先执行完，
+     所以这里 import 时能拿到已经挂在全局的 Vue -->
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

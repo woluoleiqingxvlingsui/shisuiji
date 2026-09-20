@@ -153,7 +153,7 @@ papers\
 架构就是为扩展准备的：
 
 1. **改常量**（平台列表、优惠类型、提醒规则、网页笔记的字段词表、花销类别与饼图扇区上限）→ `public/config.js`（网页的两套引导字段在 `siteNote.fields`，归档门槛在 `siteNote.gate`；花销在 `expenses`，其中类别 id / 关键词要和 `server.js` 的 `EXPENSE_CATEGORIES` 同步）
-2. **改界面/加视图** → `public/app.js`（Vue 3 组件，无需构建）+ `public/style.css`
+2. **改界面/加视图** → `public/js/`（Vue 3 组件，原生 ES module，无需构建）+ `public/style.css`
 3. **加接口** → `server.js` 里的 `route()` 表，加一行就是一个新端点
 4. **数据字段变更** → `server.js` 里的 `normalizeActivity()` / `normalizePaper()` / `normalizeSite()` / `normalizeExpense()` 和 `migrate()`（配合 `schema_version` 做平滑迁移）
 
