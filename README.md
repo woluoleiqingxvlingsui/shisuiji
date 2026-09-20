@@ -47,6 +47,23 @@ node server.js
 
 ## 手机使用（离线优先 + 只读浏览）
 
+### 电脑上怎么启动（推荐）
+
+**方式 A：图形工作台（推荐）**
+
+1. 双击桌面「拾穗集」快捷方式，或项目里的 `start.bat`
+2. 控制台会**自动**加载 `local.env.ps1` 里的口令；若存在 `danji-cert.pem` / `danji-key.pem` 则自动 HTTPS
+3. 点 **🚀 打开网页（电脑）** → `http://localhost:8642`（或 https）
+4. 点 **📋 复制手机访问地址** → 粘贴到手机浏览器（同一 Wi-Fi）
+5. 手机首次访问填口令（`local.env.ps1` 的 `DANJI_TOKEN`）
+
+**方式 B：命令行**
+
+```powershell
+powershell -File start-with-env.ps1
+# 或已在图形控制台里点「启动服务」即可
+```
+
 ### 能力边界（请先读这段）
 
 | 场景 | 行为 |
@@ -60,10 +77,10 @@ node server.js
 
 ### 日常（同网）
 
-1. 电脑：`powershell -File start-with-env.ps1`（加载 `DANJI_TOKEN` 后启动；本地 `config.json` 里 `host` 建议 `0.0.0.0`）
-2. 手机与电脑同一 Wi-Fi，浏览器打开 `http://<电脑IP>:8642`（IP 用电脑上 `ipconfig` 查 WLAN IPv4）
-3. 顶栏同步胶囊处填写访问口令（`local.env.ps1` 里的 `DANJI_TOKEN`）
-4. 电脑本机请用 `http://localhost:8642`（免口令、完整功能）
+1. 用图形工作台启动服务（见上「方式 A」）
+2. 手机与电脑同一 Wi-Fi，打开控制台显示的「手机访问地址」（或 `http://<电脑IP>:8642`）
+3. 顶栏同步胶囊处填写 `local.env.ps1` 里的 `DANJI_TOKEN`
+4. 电脑本机请用控制台上的本机地址（`localhost` 免口令、完整功能）
 
 ### 离线冷启动（推荐配置一次）
 

@@ -1,5 +1,6 @@
 ﻿# 拾穗集 图形控制台 —— 双击桌面快捷方式 / start.bat / launch.vbs 打开的就是这个窗口
 # 深色卡片风：状态灯每 2 秒自动刷新；纯按钮操作；关闭窗口不影响后台服务。
+# 启动会自动加载 local.env.ps1（口令）与目录下 HTTPS 证书（若有）。
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'lib.ps1')
 
 Add-Type -AssemblyName PresentationFramework
@@ -8,15 +9,15 @@ Add-Type -AssemblyName WindowsBase
 
 $ErrorActionPreference = 'Stop'
 
-# 状态机：checking → starting / up / down / failed（由定时器每 2 秒重新判定）
-$script:LaunchPending   = $false   # 这次打开窗口后是否拉起过 node，还没确认它活了
-$script:StartTicks      = 0        # starting 状态持续的 tick 数（24 次 = 48 秒仍未起来视为失败）
-$script:AutoOpenPending = $false   # 拉起服务后要不要自动打开网页（保持"双击就能用"）
+$script:LaunchPending   = $false
+$script:StartTicks      = 0
+$script:AutoOpenPending = $false
+$script:EnvInfo         = Import-LocalEnv
 
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="拾穗集 控制台" Width="440" SizeToContent="Height"
+        Title="拾穗集 控制台" Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
         Background="#17191F" FontFamily="Microsoft YaHei UI" FontSize="13">
   <Window.Resources>
@@ -65,10 +66,13 @@ $xaml = @'
         </StackPanel>
         <TextBlock x:Name="StatusDetail" Text="" FontSize="12" Foreground="#8B93A5" Margin="20,7,0,0" TextWrapping="Wrap"/>
         <TextBlock x:Name="UrlText" Text="" FontSize="13" Foreground="#6EA8FF" Margin="20,3,0,0"/>
+        <TextBlock x:Name="PhoneText" Text="" FontSize="12.5" Foreground="#9B8CFF" Margin="20,3,0,0" TextWrapping="Wrap"/>
+        <TextBlock x:Name="EnvText" Text="" FontSize="11.5" Foreground="#667084" Margin="20,6,0,0" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
 
-    <Button x:Name="BtnOpen" Content="🚀 打开网页" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
+    <Button x:Name="BtnOpen" Content="🚀 打开网页（电脑）" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
+    <Button x:Name="BtnCopyPhone" Content="📋 复制手机访问地址" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
@@ -79,7 +83,7 @@ $xaml = @'
       <Button x:Name="BtnStop"  Grid.Column="2" Content="⏹ 停止服务" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
     </Grid>
 
-    <TextBlock Text="关闭窗口不会停止后台服务；要真正停止请点「停止服务」。"
+    <TextBlock Text="启动时自动加载 local.env.ps1 口令；若目录有 danji-cert.pem / danji-key.pem 则走 HTTPS。关闭窗口不停服务。"
                FontSize="11.5" Foreground="#667084" Margin="2,16,0,0" TextWrapping="Wrap"/>
   </StackPanel>
 </Window>
@@ -94,32 +98,51 @@ $dot          = $win.FindName('Dot')
 $statusText   = $win.FindName('StatusText')
 $statusDetail = $win.FindName('StatusDetail')
 $urlText      = $win.FindName('UrlText')
+$phoneText    = $win.FindName('PhoneText')
+$envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
+$btnCopyPhone = $win.FindName('BtnCopyPhone')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
 
-$urlText.Text = $Url
+function Refresh-AddressLabels {
+  Update-UrlFromEnv
+  $urlText.Text = $Url
+  if ($script:PhoneUrl) {
+    $phoneText.Text = "手机（同一 Wi-Fi）：$($script:PhoneUrl)"
+  } else {
+    $phoneText.Text = "手机地址：未能识别局域网 IP（ipconfig 查 WLAN IPv4）"
+  }
+  $tok = if ($env:DANJI_TOKEN) { "口令已加载（local.env.ps1）" } else { "未配置口令（建议 local.env.ps1 设置 DANJI_TOKEN）" }
+  $tls = if (Get-UseTls) { "HTTPS 已启用 · SW 可注册" } else { "HTTP · 局域网下无离线冷启动（见 README）" }
+  $envText.Text = "$tok · $tls"
+}
+
+Refresh-AddressLabels
 
 try {
   $iconPath = Join-Path $Base 'assets\icon.ico'
   if (Test-Path $iconPath) { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri] $iconPath) }
 } catch { }
 
-# 用后台拉起 node 的方式启动，不阻塞界面；死活由定时器确认
 function Start-ServerFire {
+  $script:EnvInfo = Import-LocalEnv
+  Refresh-AddressLabels
   Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $Base -WindowStyle Hidden
   $script:LaunchPending = $true
   $script:StartTicks = 0
 }
 
 function Update-Status {
+  Refresh-AddressLabels
   $up = Test-Up
   if ($up) {
     $srvPid = Get-ServerPid
     $dot.Fill        = ColorBrush '#3DD68C'
     $statusText.Text = "服务运行中" + $(if ($srvPid) { " · PID $srvPid" } else { '' })
-    $statusDetail.Text = "后台独立运行，关闭本窗口不受影响"
+    $statusDetail.Text = "后台独立运行 · 启动时已加载 local.env / TLS（若有）"
     $btnOpen.IsEnabled  = $true
+    $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = $true
     $script:LaunchPending = $false
@@ -138,14 +161,16 @@ function Update-Status {
       $statusText.Text   = "启动失败"
       $statusDetail.Text = "请在项目文件夹运行 node server.js 查看具体报错"
       $btnOpen.IsEnabled  = $true
+      $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
       $btnStart.IsEnabled = $true
       $btnStop.IsEnabled  = $false
       return
     }
     $dot.Fill          = ColorBrush '#F5A623'
     $statusText.Text   = "正在启动服务…"
-    $statusDetail.Text = "正在拉起 node server.js，几秒内就好"
-    $btnOpen.IsEnabled  = $true   # 服务没起时点它会先启动再打开
+    $statusDetail.Text = "正在拉起 node server.js（含口令/HTTPS 环境）"
+    $btnOpen.IsEnabled  = $true
+    $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = $false
     return
@@ -153,8 +178,9 @@ function Update-Status {
 
   $dot.Fill          = ColorBrush '#FF5C5C'
   $statusText.Text   = "服务已停止"
-  $statusDetail.Text = "点「启动服务」或「打开网页」都可以把它拉起来"
+  $statusDetail.Text = "点「启动服务」或「打开网页」都可以把它拉起来（会自动加载口令）"
   $btnOpen.IsEnabled  = $true
+  $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
   $btnStart.IsEnabled = $true
   $btnStop.IsEnabled  = $false
 }
@@ -165,6 +191,17 @@ $btnOpen.Add_Click({
   } elseif (-not $script:LaunchPending) {
     Start-ServerFire
     $script:AutoOpenPending = $true
+  }
+})
+
+$btnCopyPhone.Add_Click({
+  Refresh-AddressLabels
+  if (-not $script:PhoneUrl) { return }
+  try {
+    Set-Clipboard -Value $script:PhoneUrl
+    $statusDetail.Text = "已复制：$($script:PhoneUrl)"
+  } catch {
+    $statusDetail.Text = "复制失败，请手动选中：$($script:PhoneUrl)"
   }
 })
 
@@ -182,7 +219,6 @@ $timer.Interval = [TimeSpan]::FromSeconds(2)
 $timer.Add_Tick({ Update-Status })
 $timer.Start()
 
-# 窗口画出来的第一件事：服务没在跑就自动拉起（保持"双击就能用"），确认后自动开网页
 $win.Add_ContentRendered({
   if (-not (Test-Up) -and -not $script:LaunchPending) {
     Start-ServerFire
