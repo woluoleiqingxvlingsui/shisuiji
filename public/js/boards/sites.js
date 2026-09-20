@@ -9,6 +9,7 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { CONFIG } from '../../config.js';
 import { SITE_DRAFT_PREFIX, clearDraft, readDraft, writeDraft } from '../util/draft.js';
 import { blankSiteNote, siteNoteFieldLabel, siteNoteIsEmpty, siteNoteKeys, siteNoteMissing } from '../util/site-note.js';
@@ -18,7 +19,7 @@ import { flashCard } from '../ui.js';
 
 async function loadSites() {
   try {
-    state.sites = await fetch('/api/sites').then((r) => r.json());
+    state.sites = await api('/api/sites').then((r) => r.json());
   } catch {
     toast('网页数据加载失败', 'warn');
   }
@@ -31,7 +32,7 @@ function openSiteEditor(site) {
 async function saveSite(payload) {
   const isEdit = !!state.editingSite;
   const url = isEdit ? `/api/sites/${state.editingSite.id}` : '/api/sites';
-  const res = await fetch(url, {
+  const res = await api(url, {
     method: isEdit ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -48,7 +49,7 @@ async function saveSite(payload) {
   toast(isEdit ? '已保存 ✅' : '记好了，一个待读网页 🌐');
 }
 async function setSiteStatus(site, status) {
-  const res = await fetch(`/api/sites/${site.id}`, {
+  const res = await api(`/api/sites/${site.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...site, status }),
@@ -74,7 +75,7 @@ async function openSite(site) {
       toast('浏览器拦截了弹窗，链接已复制 📋', 'warn');
     } catch { toast('浏览器拦截了弹窗，请手动打开链接', 'warn'); }
   }
-  const res = await fetch(`/api/sites/${site.id}/open`, { method: 'POST' });
+  const res = await api(`/api/sites/${site.id}/open`, { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.site) return; // 时间没记上也不打扰你阅读
   const idx = state.sites.findIndex((s) => s.id === data.site.id);
@@ -83,7 +84,7 @@ async function openSite(site) {
 }
 async function removeSite(site) {
   if (!confirm(`确定删除「${site.title}」吗？`)) return;
-  const res = await fetch(`/api/sites/${site.id}`, { method: 'DELETE' });
+  const res = await api(`/api/sites/${site.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.sites = state.sites.filter((s) => s.id !== site.id);
   toast('已删除 🗑');
@@ -168,7 +169,7 @@ async function saveSiteNote(form) {
   const wasPendingRead = state.siteNotePendingRead;
   if (wasPendingRead) patch.status = 'read'; // 笔记与状态同一次 PUT，原子落盘
 
-  const res = await fetch(`/api/sites/${site.id}`, {
+  const res = await api(`/api/sites/${site.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
@@ -193,7 +194,7 @@ async function removeSiteNote(log) {
   if (!site) return;
   if (!confirm(`删除 ${log.read_at || '这条'} 的笔记吗？`)) return;
   const logs = (site.logs || []).filter((l) => l.id !== log.id);
-  const res = await fetch(`/api/sites/${site.id}`, {
+  const res = await api(`/api/sites/${site.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...site, logs }),

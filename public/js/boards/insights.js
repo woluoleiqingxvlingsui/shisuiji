@@ -8,12 +8,13 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { CONFIG } from '../../config.js';
 import { buildSubjectInsight, matchSubjects } from '../util/expense.js';
 
 async function loadInsights() {
   try {
-    state.insights = await fetch('/api/insights').then((r) => r.json());
+    state.insights = await api('/api/insights').then((r) => r.json());
   } catch {
     toast('评价数据加载失败', 'warn');
   }
@@ -24,7 +25,7 @@ function setExpenseView(view) {
   localStorage.setItem('danji.expenseView', state.expenseView);
 }
 async function saveInsightVerdict(payload) {
-  const res = await fetch(`/api/insights/${encodeURIComponent(payload.subject)}`, {
+  const res = await api(`/api/insights/${encodeURIComponent(payload.subject)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rating: payload.rating, decision: payload.decision, verdict: payload.verdict }),
@@ -38,7 +39,7 @@ async function saveInsightVerdict(payload) {
 }
 async function clearInsightVerdict(row) {
   if (!confirm(`清空「${row.subject.label}」的评价吗？（记录原话还在，随时能重新写）`)) return;
-  const res = await fetch(`/api/insights/${encodeURIComponent(row.subject.id)}`, { method: 'DELETE' });
+  const res = await api(`/api/insights/${encodeURIComponent(row.subject.id)}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.insights = state.insights.filter((v) => v.subject !== row.subject.id);
   toast('已清除 🧹');

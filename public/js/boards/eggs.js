@@ -12,6 +12,7 @@
 import { computed, nextTick } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { flashCard } from '../ui.js';
 import { CONFIG } from '../../config.js';
 import { FLASH_MS, HOUR } from '../util/const.js';
@@ -29,7 +30,7 @@ function rememberNotified(key) {
 }
 async function load() {
   try {
-    const res = await fetch('/api/activities');
+    const res = await api('/api/activities');
     state.activities = await res.json();
     state.loaded = true;
     state.loadError = false;
@@ -45,7 +46,7 @@ async function saveActivity(payload) {
   const url = isEdit ? `/api/activities/${state.editing.id}` : '/api/activities';
   let saved;
   try {
-    const res = await fetch(url, {
+    const res = await api(url, {
       method: isEdit ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -68,7 +69,7 @@ async function saveActivity(payload) {
   toast(isEdit ? '已保存 ✅' : '记好了，一颗新蛋 🥚');
 }
 async function patchActivity(activity, patch) {
-  const res = await fetch(`/api/activities/${activity.id}`, {
+  const res = await api(`/api/activities/${activity.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...activity, ...patch }),
@@ -86,7 +87,7 @@ async function setStatus(activity, status) {
 }
 async function removeActivity(activity) {
   if (!confirm(`确定删除「${activity.platform} · ${activity.title}」吗？`)) return;
-  const res = await fetch(`/api/activities/${activity.id}`, { method: 'DELETE' });
+  const res = await api(`/api/activities/${activity.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.activities = state.activities.filter((a) => a.id !== activity.id);
   toast('已删除 🗑');
@@ -332,7 +333,7 @@ async function loadSamples() {
     },
   ];
   for (const s of samples) {
-    await fetch('/api/activities', {
+    await api('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(s),

@@ -1,5 +1,6 @@
 /* ---------------- 组件：论文新增 / 编辑抽屉 ---------------- */
 import { reactive, ref, computed, onMounted, onUnmounted, nextTick, watch } from '../vue-globals.js';
+import { api } from '../api.js';
 
 const PaperEditor = {
   name: 'PaperEditor',
@@ -44,9 +45,9 @@ const PaperEditor = {
     async function loadMeta() {
       try {
         const [inb, cats, rs] = await Promise.all([
-          fetch('/api/papers/inbox').then((r) => r.json()),
-          fetch('/api/papers/categories').then((r) => r.json()),
-          fetch('/api/papers/readers').then((r) => r.json()).catch(() => ({ readers: [] })),
+          api('/api/papers/inbox').then((r) => r.json()),
+          api('/api/papers/categories').then((r) => r.json()),
+          api('/api/papers/readers').then((r) => r.json()).catch(() => ({ readers: [] })),
         ]);
         inbox.value = inb;
         categories.value = cats;
@@ -62,7 +63,7 @@ const PaperEditor = {
       if (!val.trim()) { matches.value = null; return; }
       matchTimer = setTimeout(async () => {
         try {
-          matches.value = await fetch('/api/papers/match?name=' + encodeURIComponent(val.trim())).then((r) => r.json());
+          matches.value = await api('/api/papers/match?name=' + encodeURIComponent(val.trim())).then((r) => r.json());
           if (matches.value.auto && !manualPicked.value) {
             form.file_name = matches.value.candidates[0].name;
           }

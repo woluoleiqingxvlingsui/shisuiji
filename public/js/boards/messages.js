@@ -7,11 +7,12 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { formatDate } from '../util/date.js';
 
 async function loadMessages() {
   try {
-    const res = await fetch('/api/messages');
+    const res = await api('/api/messages');
     state.messages = await res.json();
   } catch {
     toast('消息加载失败', 'warn');
@@ -19,7 +20,7 @@ async function loadMessages() {
   state.messagesLoaded = true;
 }
 async function pushExpiredMessage(activity) {
-  const res = await fetch('/api/messages', {
+  const res = await api('/api/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -36,7 +37,7 @@ async function pushExpiredMessage(activity) {
   if (!state.messages.some((m) => m.id === saved.id)) state.messages.unshift(saved);
 }
 async function pushClosedMessage(activity) {
-  const res = await fetch('/api/messages', {
+  const res = await api('/api/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -55,7 +56,7 @@ async function pushClosedMessage(activity) {
 }
 async function markMessageRead(msg) {
   if (msg.read) return;
-  const res = await fetch(`/api/messages/${msg.id}`, {
+  const res = await api(`/api/messages/${msg.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...msg, read: true }),
@@ -66,19 +67,19 @@ async function markMessageRead(msg) {
   if (idx !== -1) state.messages.splice(idx, 1, saved);
 }
 async function removeMessage(msg) {
-  const res = await fetch(`/api/messages/${msg.id}`, { method: 'DELETE' });
+  const res = await api(`/api/messages/${msg.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败', 'warn');
   state.messages = state.messages.filter((m) => m.id !== msg.id);
 }
 async function markAllRead() {
-  const res = await fetch('/api/messages/read-all', { method: 'POST' });
+  const res = await api('/api/messages/read-all', { method: 'POST' });
   if (!res.ok) return toast('操作失败', 'warn');
   const { updated } = await res.json();
   state.messages = state.messages.map((m) => ({ ...m, read: true }));
   toast(updated ? `${updated} 条消息已标为已读 ✅` : '没有未读消息');
 }
 async function clearReadMessages() {
-  const res = await fetch('/api/messages/clear-read', { method: 'POST' });
+  const res = await api('/api/messages/clear-read', { method: 'POST' });
   if (!res.ok) return toast('操作失败', 'warn');
   const { removed } = await res.json();
   state.messages = state.messages.filter((m) => !m.read);

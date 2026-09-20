@@ -8,6 +8,7 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { LOG_DRAFT_PREFIX, clearDraft, readDraft, writeDraft } from '../util/draft.js';
 import { NOTE_FIELD_LABEL, NOTE_TEXT_FIELDS, blankPaperLog, noteBasicMissing, noteIsEmpty, notePartsText } from '../util/paper-note.js';
 import { readSortKey } from '../util/sort.js';
@@ -16,8 +17,8 @@ import { flashCard } from '../ui.js';
 async function loadPapers() {
   try {
     const [papers, cats] = await Promise.all([
-      fetch('/api/papers').then((r) => r.json()),
-      fetch('/api/papers/categories').then((r) => r.json()),
+      api('/api/papers').then((r) => r.json()),
+      api('/api/papers/categories').then((r) => r.json()),
     ]);
     state.papers = papers;
     state.paperCategories = cats;
@@ -33,7 +34,7 @@ function openPaperEditor(paper) {
 async function savePaper(payload) {
   const isEdit = !!state.editingPaper;
   const url = isEdit ? `/api/papers/${state.editingPaper.id}` : '/api/papers';
-  const res = await fetch(url, {
+  const res = await api(url, {
     method: isEdit ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -53,7 +54,7 @@ async function savePaper(payload) {
   else toast(isEdit ? '已保存 ✅' : '记好了，一篇论文 📄');
 }
 async function setPaperStatus(paper, status) {
-  const res = await fetch(`/api/papers/${paper.id}`, {
+  const res = await api(`/api/papers/${paper.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...paper, status }),
@@ -139,7 +140,7 @@ async function savePaperLog(form) {
   const wasPendingRead = state.logPendingRead;
   if (wasPendingRead) patch.status = 'read'; // 笔记与状态同一次 PUT，原子落盘
 
-  const res = await fetch(`/api/papers/${paper.id}`, {
+  const res = await api(`/api/papers/${paper.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
@@ -164,7 +165,7 @@ async function removePaperLog(log) {
   if (!paper) return;
   if (!confirm(`删除 ${log.read_at || '这条'} 的阅读记录吗？`)) return;
   const logs = (paper.logs || []).filter((l) => l.id !== log.id);
-  const res = await fetch(`/api/papers/${paper.id}`, {
+  const res = await api(`/api/papers/${paper.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...paper, logs }),
@@ -177,7 +178,7 @@ async function removePaperLog(log) {
 }
 async function openPaper(paper) {
   toast('正在打开…');
-  const res = await fetch(`/api/papers/${paper.id}/open`, { method: 'POST' });
+  const res = await api(`/api/papers/${paper.id}/open`, { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || '打开失败', 'warn');
   // 服务端已记下 last_read_at，用它替换本地这条 → 列表按阅读时间重排，这张卡升到顶部
@@ -191,13 +192,13 @@ async function openPaper(paper) {
   }
 }
 async function openPaperReveal(paper) {
-  const res = await fetch(`/api/papers/${paper.id}/reveal`, { method: 'POST' });
+  const res = await api(`/api/papers/${paper.id}/reveal`, { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) toast(data.error || '打开失败', 'warn');
 }
 async function removePaper(paper) {
   if (!confirm(`确定删除记录「${paper.title}」吗？（磁盘上的文件不会被删）`)) return;
-  const res = await fetch(`/api/papers/${paper.id}`, { method: 'DELETE' });
+  const res = await api(`/api/papers/${paper.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.papers = state.papers.filter((p) => p.id !== paper.id);
   toast('已删除记录 🗑（文件保留）');

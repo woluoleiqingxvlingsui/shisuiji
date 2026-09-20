@@ -2,6 +2,7 @@
 import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
+import { api } from '../api.js';
 import { normalizeUrl } from '../util/text.js';
 
 const SiteEditor = {
@@ -39,7 +40,7 @@ const SiteEditor = {
       fetching.value = true;
       titleHint.value = '';
       try {
-        const r = await fetch('/api/sites/title?url=' + encodeURIComponent(url)).then((x) => x.json());
+        const r = await api('/api/sites/title?url=' + encodeURIComponent(url)).then((x) => x.json());
         if (r.title) {
           form.title = r.title;
           titleHint.value = '已自动取到网页标题，可以自己改';

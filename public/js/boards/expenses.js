@@ -8,6 +8,7 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 import { CONFIG } from '../../config.js';
 import { pad2 } from '../util/date.js';
 import { buildCategorySlices, buildPieSlices, groupExpenseByTitle } from '../util/expense.js';
@@ -16,7 +17,7 @@ import { formatMoney, monthOf, periodLabel } from '../util/money.js';
 let expensePeriodInit = false; // 只做一次「自动跳到最近有记录的月份」
 async function loadExpenses() {
   try {
-    state.expenses = await fetch('/api/expenses').then((r) => r.json());
+    state.expenses = await api('/api/expenses').then((r) => r.json());
   } catch {
     toast('花销数据加载失败', 'warn');
   }
@@ -42,7 +43,7 @@ function openExpenseEditor(expense) {
 async function saveExpense(payload) {
   const isEdit = !!state.editingExpense;
   const url = isEdit ? `/api/expenses/${state.editingExpense.id}` : '/api/expenses';
-  const res = await fetch(url, {
+  const res = await api(url, {
     method: isEdit ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -66,7 +67,7 @@ async function saveExpense(payload) {
 }
 async function removeExpense(expense) {
   if (!confirm(`确定删除「${expense.title}」这笔 ${formatMoney(expense.amount)} 吗？`)) return;
-  const res = await fetch(`/api/expenses/${expense.id}`, { method: 'DELETE' });
+  const res = await api(`/api/expenses/${expense.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.expenses = state.expenses.filter((e) => e.id !== expense.id);
   toast('已删除 🗑');

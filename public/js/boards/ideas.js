@@ -7,10 +7,11 @@
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
+import { api } from '../api.js';
 
 async function loadIdeas() {
   try {
-    state.ideas = await fetch('/api/ideas').then((r) => r.json());
+    state.ideas = await api('/api/ideas').then((r) => r.json());
   } catch {
     toast('想法加载失败', 'warn');
   }
@@ -30,7 +31,7 @@ function openIdeaEditor(idea) {
 async function saveIdea(payload) {
   const isEdit = !!state.editingIdea;
   const url = isEdit ? `/api/ideas/${state.editingIdea.id}` : '/api/ideas';
-  const res = await fetch(url, {
+  const res = await api(url, {
     method: isEdit ? 'PUT' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -56,7 +57,7 @@ async function saveIdea(payload) {
 async function removeIdea(idea) {
   const name = idea.title || (idea.content || '').slice(0, 20) || '这条想法';
   if (!confirm(`确定删除「${name}」吗？`)) return;
-  const res = await fetch(`/api/ideas/${idea.id}`, { method: 'DELETE' });
+  const res = await api(`/api/ideas/${idea.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.ideas = state.ideas.filter((i) => i.id !== idea.id);
   toast('已删除 🗑');
