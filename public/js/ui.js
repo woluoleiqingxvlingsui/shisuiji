@@ -3,6 +3,8 @@
  */
 
 import { state } from './state.js';
+import { nextTick } from './vue-globals.js';
+import { FLASH_MS } from './util/const.js';
 
 let topbarObserver = null;
 function syncTopbarHeight() {
@@ -28,4 +30,14 @@ export function stopObserveTopbar() {
   if (topbarObserver) topbarObserver.disconnect();
 }
 
-export { switchBoard, syncTopbarHeight };
+export { switchBoard, syncTopbarHeight, flashCard };
+
+let flashTimer = null;
+function flashCard(id) {
+  clearTimeout(flashTimer);
+  const start = () => {
+    state.flashId = id;
+    flashTimer = setTimeout(() => { state.flashId = null; }, FLASH_MS);
+  };
+  if (state.flashId === id) { state.flashId = null; nextTick(start); } else start();
+}
