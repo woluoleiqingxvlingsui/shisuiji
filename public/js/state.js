@@ -65,10 +65,15 @@ const state = reactive({
   ideaSearch: '',
   ideaEditorOpen: false,
   editingIdea: null,
+  // 角色（权限）：desktop/mobile/unknown，来自 /api/health
+  // 电脑上把窗口拖窄只会改 isPhone，不会把 role 变成 mobile
+  role: 'unknown',
+  // 布局视口：matchMedia('(max-width: 640px)')，只影响样式，不决定权限
+  isPhone: false,
   // 手机端同步层：电脑端 enabled=false，界面不渲染胶囊
   sync: {
     enabled: false,
-    role: 'unknown', // desktop | mobile | unknown
+    role: 'unknown', // desktop | mobile | unknown（与 state.role 保持一致）
     needToken: false,
     status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error
     pendingCount: 0,
