@@ -734,8 +734,9 @@ input, select, textarea { font-size: 16px; }
   }
   .board-tabs::-webkit-scrollbar { display: none; }
   .board-tabs button { min-height: 38px; padding: 8px 12px; }
-  .btn, .btn.small, .tab, .chip-pick, .seg button { min-height: 38px; }
-  .btn.small { min-height: 36px; padding: 8px 12px; }
+  .btn, .btn.small, .tab, .chip-pick, .seg button,
+  .urgent-chip, .filter-chip, .platform-select { min-height: 38px; }
+  .btn.small { padding: 8px 12px; }
   .search { max-width: none; flex-basis: 100%; order: 9; font-size: 16px; }
   .topbar .btn.primary { margin-left: 0; }
   .container { padding: 12px; }

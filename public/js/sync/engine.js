@@ -108,7 +108,8 @@ async function initSync() {
   state.sync.role = effectiveRole;
   state.sync.needToken = needToken && !getToken();
   state.sync.enabled = force || role === 'mobile';
-  // 桌面端也要维护 isPhone（窄窗布局），只是不启用同步层
+  // 桌面端也要维护 isPhone（窄窗布局）；监听在所有角色下都挂上
+  bindIsPhoneMq();
   syncIsPhone();
   if (!state.sync.enabled) {
     setStatus('idle');
@@ -129,16 +130,22 @@ async function initSync() {
   return true;
 }
 
+function bindIsPhoneMq() {
+  try {
+    const mq = window.matchMedia('(max-width: 640px)');
+    if (mq._danjiPhoneBound) return;
+    mq._danjiPhoneBound = true;
+    if (mq.addEventListener) mq.addEventListener('change', syncIsPhone);
+    else if (mq.addListener) mq.addListener(syncIsPhone);
+  } catch { /* 老环境忽略 */ }
+}
+
 function bindListeners() {
   if (listenersBound) return;
   listenersBound = true;
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('online', onOnline);
-  try {
-    const mq = window.matchMedia('(max-width: 640px)');
-    if (mq.addEventListener) mq.addEventListener('change', syncIsPhone);
-    else if (mq.addListener) mq.addListener(syncIsPhone);
-  } catch { /* 老环境忽略 */ }
+  bindIsPhoneMq();
   syncIsPhone();
 }
 
