@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check public/app.js"
+    "test": "node --check server.js && node tools/check-syntax.mjs"
   },
   "engines": {
     "node": ">=18"
