@@ -1,4 +1,5 @@
 /* ---------------- 组件：花销卡片 ---------------- */
+import { computed } from '../vue-globals.js';
 
 import { formatDate } from '../util/date.js';
 import { expenseCategoryMeta } from '../util/expense.js';
@@ -9,7 +10,6 @@ const ExpenseCard = {
   props: { expense: { type: Object, required: true } },
   emits: ['edit', 'remove'],
   setup(props, { emit }) {
-    const { computed } = Vue;
     const amountText = computed(() => formatMoney(props.expense.amount));
     const category = computed(() => expenseCategoryMeta(props.expense.category));
     return {

@@ -1,4 +1,5 @@
 /* ---------------- 组件：网页新增 / 编辑抽屉 ---------------- */
+import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { normalizeUrl } from '../util/text.js';
@@ -11,7 +12,6 @@ const SiteEditor = {
   },
   emits: ['save', 'close'],
   setup(props, { emit }) {
-    const { reactive, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
     const urlInput = ref(null);
 
     const form = reactive({

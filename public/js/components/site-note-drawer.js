@@ -1,4 +1,5 @@
 /* ---------------- 组件：网页笔记抽屉（一个网页可记多条） ---------------- */
+import { reactive, computed, watch, onMounted, onUnmounted } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { blankSiteNote, kindMeta, siteNoteFields, siteNoteIsEmpty, siteNoteRows, usageMeta } from '../util/site-note.js';
@@ -13,7 +14,6 @@ const SiteNoteDrawer = {
   },
   emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'close'],
   setup(props, { emit }) {
-    const { reactive, computed, watch, onMounted, onUnmounted } = Vue;
 
     const kindOptions = CONFIG.siteNote.kinds;
     const usageOptions = CONFIG.siteNote.usage;

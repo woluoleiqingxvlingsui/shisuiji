@@ -1,11 +1,11 @@
 /* ---------------- 组件：论文新增 / 编辑抽屉 ---------------- */
+import { reactive, ref, computed, onMounted, onUnmounted, nextTick, watch } from '../vue-globals.js';
 
 const PaperEditor = {
   name: 'PaperEditor',
   props: { initial: { type: Object, default: null } },
   emits: ['save', 'close'],
   setup(props, { emit }) {
-    const { reactive, ref, computed, onMounted, onUnmounted, nextTick, watch } = Vue;
     const titleInput = ref(null);
 
     const form = reactive({

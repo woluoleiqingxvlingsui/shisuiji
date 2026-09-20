@@ -1,4 +1,5 @@
 /* ---------------- 组件：想法新增 / 编辑抽屉 ---------------- */
+import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 
@@ -7,7 +8,6 @@ const IdeaEditor = {
   props: { initial: { type: Object, default: null } },
   emits: ['save', 'close'],
   setup(props, { emit }) {
-    const { reactive, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
     const titleInput = ref(null);
     const form = reactive({
       title: props.initial?.title || '',

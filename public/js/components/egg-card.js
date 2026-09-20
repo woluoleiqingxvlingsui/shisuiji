@@ -1,4 +1,5 @@
 /* ---------------- 组件：蛋卡片 ---------------- */
+import { computed, ref } from '../vue-globals.js';
 
 import { computeUrgency, formatDate, formatRemaining } from '../util/date.js';
 import { statusMeta, typeMeta } from '../util/meta.js';
@@ -9,7 +10,6 @@ const EggCard = {
   props: { activity: { type: Object, required: true }, now: { type: Number, required: true }, flash: Boolean },
   emits: ['edit', 'remove', 'status'],
   setup(props, { emit }) {
-    const { computed, ref } = Vue;
     const expanded = ref(false);
 
     const urgency = computed(() => computeUrgency(props.activity, props.now));

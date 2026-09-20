@@ -1,4 +1,5 @@
 /* ---------------- 组件：体感评价卡（主体素材 + 我的评价） ---------------- */
+import { reactive, computed, watch } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { formatDate } from '../util/date.js';
@@ -13,7 +14,6 @@ const InsightCard = {
   },
   emits: ['save', 'clear'],
   setup(props, { emit }) {
-    const { reactive, computed, watch } = Vue;
 
     // 本地可编辑副本：保存成功后根组件会换上 server 返回的新 verdict，watch 到了就同步，
     // 保证卡片上看到的永远是已保存的内容

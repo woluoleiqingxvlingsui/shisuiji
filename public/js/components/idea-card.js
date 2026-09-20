@@ -1,6 +1,7 @@
 /* ---------------- 组件：想法卡片 ---------------- */
 // 想法只有两个字段：一行点题 + 一段灵感。origin 标明这条是从哪儿来的，
 // 手机记的能改，电脑记的在手机上只能看。
+import { computed } from '../vue-globals.js';
 
 import { formatDate } from '../util/date.js';
 
@@ -9,7 +10,6 @@ const IdeaCard = {
   props: { idea: { type: Object, required: true } },
   emits: ['edit', 'remove'],
   setup(props, { emit }) {
-    const { computed } = Vue;
     const timeText = computed(() => formatDate(props.idea.updated_at || props.idea.created_at));
     return {
       timeText,

@@ -1,4 +1,5 @@
 /* ---------------- 组件：网页卡片 ---------------- */
+import { computed } from '../vue-globals.js';
 
 import { formatDate } from '../util/date.js';
 import { kindMeta, siteNoteSummary, usageMeta } from '../util/site-note.js';
@@ -9,7 +10,6 @@ const SiteCard = {
   props: { site: { type: Object, required: true }, flash: Boolean },
   emits: ['open', 'status', 'edit', 'remove', 'note', 'read'],
   setup(props, { emit }) {
-    const { computed } = Vue;
     const isRead = computed(() => props.site.status === 'read');
     const kind = computed(() => kindMeta(props.site.kind));
     const url = computed(() => normalizeUrl(props.site.url));

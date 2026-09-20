@@ -1,4 +1,5 @@
 /* ---------------- 组件：花销新增 / 编辑抽屉 ---------------- */
+import { reactive, ref, computed, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { formatDate, todayStr } from '../util/date.js';
@@ -13,7 +14,6 @@ const ExpenseEditor = {
   },
   emits: ['save', 'close'],
   setup(props, { emit }) {
-    const { reactive, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
     const titleInput = ref(null);
 
     const form = reactive({

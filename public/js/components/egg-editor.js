@@ -1,4 +1,5 @@
 /* ---------------- 组件：新增 / 编辑抽屉 ---------------- */
+import { reactive, computed, onMounted, onUnmounted, nextTick, ref } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { parseFlexibleDate } from '../util/date.js';
@@ -14,7 +15,6 @@ const EggEditor = {
   },
   emits: ['save', 'close'],
   setup(props, { emit }) {
-    const { reactive, computed, onMounted, onUnmounted, nextTick, ref } = Vue;
     const titleInput = ref(null);
     const lastPlatform = localStorage.getItem('danji.lastPlatform') || CONFIG.platforms[0];
 

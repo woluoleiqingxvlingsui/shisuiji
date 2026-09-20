@@ -1,4 +1,5 @@
 /* ---------------- 组件：花销统计卡（期间切换 + 饼图 + 图例） ---------------- */
+import { computed } from '../vue-globals.js';
 
 import { formatMoney } from '../util/money.js';
 
@@ -17,7 +18,6 @@ const ExpenseStats = {
   },
   emits: ['mode', 'year', 'month', 'step', 'pick', 'clear'],
   setup(props, { emit }) {
-    const { computed } = Vue;
     const MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
     // 饼图：每笔 / 每个类别一个扇区，颜色由 id（或类别自带色相）稳定生成。

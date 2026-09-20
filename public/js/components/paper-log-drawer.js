@@ -1,4 +1,5 @@
 /* ---------------- 组件：阅读记录抽屉（一篇论文可记多条） ---------------- */
+import { reactive, computed, watch, onMounted, onUnmounted } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
 import { blankPaperLog, noteIsEmpty, notePartsText, noteRelMeta } from '../util/paper-note.js';
@@ -13,7 +14,6 @@ const PaperLogDrawer = {
   },
   emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'close'],
   setup(props, { emit }) {
-    const { reactive, computed, watch, onMounted, onUnmounted } = Vue;
 
     const relevance = CONFIG.paperNote.relevance;
     const parts = CONFIG.paperNote.parts;

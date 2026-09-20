@@ -1,4 +1,5 @@
 /* ---------------- 组件：论文卡片 ---------------- */
+import { computed } from '../vue-globals.js';
 
 import { formatDate } from '../util/date.js';
 import { noteRelMeta, noteSummary } from '../util/paper-note.js';
@@ -9,7 +10,6 @@ const PaperCard = {
   props: { paper: { type: Object, required: true }, flash: Boolean },
   emits: ['open', 'reveal', 'status', 'edit', 'remove', 'log', 'read'],
   setup(props, { emit }) {
-    const { computed } = Vue;
     const isRead = computed(() => props.paper.status === 'read');
     const catStyle = computed(() => platformStyle(props.paper.category || '未分类'));
     const fileMissing = computed(() => !!props.paper.file_name && props.paper.file_exists === false);
