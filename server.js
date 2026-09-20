@@ -29,13 +29,21 @@ function loadAppConfig() {
     // 容忍 Windows 记事本/PowerShell 写入的 UTF-8 BOM
     const raw = fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(raw);
+    const sync = parsed.sync || {};
     return {
       port: validPort(Number(parsed.port)) || 8642,
       host: String(parsed.host || '127.0.0.1').trim() || '127.0.0.1',
+      // 手机端访问口令。不配 = 不校验（和以前一样，只靠监听地址保护）；
+      // 配了之后局域网设备每次请求要带 X-Danji-Token，本机回环永远免口令
+      token: readToken(sync) || readToken(process.env),
     };
   } catch {
-    return { port: 8642, host: '127.0.0.1' };
+    return { port: 8642, host: '127.0.0.1', token: readToken(process.env) };
   }
+}
+
+function readToken(source) {
+  return String((source && (source.token || source.DANJI_TOKEN)) || '').trim();
 }
 const APP_CONFIG = loadAppConfig();
 const PORT = validPort(Number(process.env.PORT)) || APP_CONFIG.port;
@@ -47,6 +55,7 @@ const PAPERS_FILE = path.join(DATA_DIR, 'papers.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const SITES_FILE = path.join(DATA_DIR, 'sites.json');
 const EXPENSES_FILE = path.join(DATA_DIR, 'expenses.json');
+const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
 const MAX_BODY = 2 * 1024 * 1024; // 请求体上限 2MB，防止误传大文件
 
 // 论文库根目录：下载的论文直接丢进来，可用环境变量 DANJI_PAPERS_DIR 换位置
@@ -100,6 +109,11 @@ const INSIGHT_DECISIONS = ['continue', 'reduce', 'hold', 'stop'];
 
 // 消息中心：目前有「已过期」（过了使用截止）与「已截止」（过了领取截止）两个来源
 const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until', 'claim_deadline'];
+
+// 想法板块：一行点题 + 一段灵感，手机端唯一能写的板块
+const IDEA_FIELDS = ['title', 'content'];
+// origin 记这条是从哪儿来的：手机写的只有手机能改，电脑全能
+const IDEA_ORIGINS = ['desktop', 'mobile'];
 
 // ---------- 数据层 ----------
 let db = null;
@@ -181,7 +195,15 @@ function route(method, pattern, handler) {
   routes.push({ method, regex, keys, handler });
 }
 
-route('GET', '/api/health', async (ctx) => ctx.json({ ok: true, app: 'shisuiji' }));
+// 健康检查免口令（见 createServer）：手机要先能问「我是什么端、要不要口令」
+route('GET', '/api/health', async (ctx) => ctx.json({
+  ok: true,
+  app: 'shisuiji',
+  schema_version: SCHEMA_VERSION,
+  role: ctx.role,
+  needToken: !!APP_CONFIG.token && ctx.role !== 'desktop',
+  server_time: new Date().toISOString(),
+}));
 
 route('GET', '/api/activities', async (ctx) => ctx.json(db.activities));
 
@@ -1237,6 +1259,192 @@ route('POST', '/api/messages/clear-read', async (ctx) => {
   ctx.json({ ok: true, removed });
 });
 
+// ---------- 想法板块：数据层 ----------
+let ideaDb = null;
+
+function defaultIdeaData() {
+  return { schema_version: SCHEMA_VERSION, ideas: [] };
+}
+
+async function loadIdeas() {
+  try {
+    const raw = await fsp.readFile(IDEAS_FILE, 'utf8');
+    ideaDb = JSON.parse(raw);
+    if (!Array.isArray(ideaDb.ideas)) ideaDb.ideas = [];
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    ideaDb = defaultIdeaData();
+    await saveIdeasNow();
+  }
+}
+
+async function saveIdeasNow() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  const tmp = IDEAS_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(ideaDb, null, 2), 'utf8');
+  await fsp.rename(tmp, IDEAS_FILE);
+}
+
+// 写盘串行化：同一集合并发写会共用同一个 .tmp 文件名，不排队会互相覆盖
+let ioQueue = Promise.resolve();
+function queueWrite(fn) {
+  const run = ioQueue.then(fn, fn);
+  ioQueue = run.catch(() => {}); // 出错不能把队列毒死
+  return run;
+}
+function saveIdeas() {
+  return queueWrite(saveIdeasNow);
+}
+
+// id 可能是客户端自己生成的（离线想法带着 UUID 重放），只认 UUID 形态，别让奇怪的值落进 JSON
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function uuidOrNull(v) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return UUID_RE.test(s) ? s : null;
+}
+
+// 客户端带来的时间：手机时钟可能不准，越界的一律用服务端时间
+function isoOrNow(v) {
+  const t = Date.parse(String(v || ''));
+  if (!Number.isFinite(t)) return new Date().toISOString();
+  const now = Date.now();
+  if (t < now - 30 * 24 * 3600 * 1000 || t > now + 5 * 60 * 1000) return new Date().toISOString();
+  return new Date(t).toISOString();
+}
+
+// 乐观锁：带了 base_updated_at 就必须和服务端现存的字符串完全一致。
+// 比的是字符串而不是时刻，所以两端时钟不准也不影响判定。
+function conflicted(prev, body) {
+  const base = body && body.base_updated_at;
+  if (base === undefined || base === null || base === '') return false;
+  return String(base) !== String(prev.updated_at);
+}
+
+function normalizeIdea(input, existing = {}) {
+  const idea = { ...existing };
+  for (const field of IDEA_FIELDS) {
+    if (!(field in input)) continue;
+    idea[field] = input[field] === null || input[field] === undefined ? '' : String(input[field]).trim();
+  }
+  for (const field of IDEA_FIELDS) if (idea[field] === undefined) idea[field] = '';
+  const incomingId = uuidOrNull(input.id);
+  if (incomingId) idea.id = incomingId;
+  if (!idea.id) idea.id = newId();
+  if (IDEA_ORIGINS.includes(input.origin)) idea.origin = input.origin;
+  if (!IDEA_ORIGINS.includes(idea.origin)) idea.origin = 'desktop';
+  idea.created_at = existing.created_at || isoOrNow(input.created_at);
+  idea.updated_at = new Date().toISOString();
+  return idea;
+}
+
+// ---------- 想法板块：路由 ----------
+route('GET', '/api/ideas', async (ctx) => {
+  ctx.json([...ideaDb.ideas].sort((a, b) =>
+    String(b.updated_at).localeCompare(String(a.updated_at))
+    || String(b.created_at).localeCompare(String(a.created_at))));
+});
+
+// 幂等新增：手机离线时自己生成 id，队列重放遇到同一个 id 就直接返回已有记录
+route('POST', '/api/ideas', async (ctx) => {
+  const id = uuidOrNull(ctx.body.id);
+  const hit = id ? ideaDb.ideas.find((i) => i.id === id) : null;
+  if (hit) return ctx.json(hit, 200);
+  const idea = normalizeIdea(ctx.body);
+  if (ctx.role === 'mobile') idea.origin = 'mobile';
+  ideaDb.ideas.push(idea);
+  await saveIdeas();
+  ctx.json(idea, 201);
+});
+
+route('PUT', '/api/ideas/:id', async (ctx) => {
+  const idx = ideaDb.ideas.findIndex((i) => i.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '想法不存在', code: 'missing' }, 404);
+  const prev = ideaDb.ideas[idx];
+  if (ctx.role === 'mobile' && prev.origin !== 'mobile') {
+    return ctx.json({ error: '这条是电脑端记的，手机上改不了', code: 'forbidden' }, 403);
+  }
+  if (conflicted(prev, ctx.body)) {
+    return ctx.json({ error: '这条想法在别处改过', code: 'conflict', server: prev }, 409);
+  }
+  const idea = normalizeIdea(ctx.body, prev);
+  ideaDb.ideas[idx] = idea;
+  await saveIdeas();
+  ctx.json(idea);
+});
+
+route('DELETE', '/api/ideas/:id', async (ctx) => {
+  const idx = ideaDb.ideas.findIndex((i) => i.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '想法不存在', code: 'missing' }, 404);
+  const prev = ideaDb.ideas[idx];
+  if (ctx.role === 'mobile' && prev.origin !== 'mobile') {
+    return ctx.json({ error: '这条是电脑端记的，手机上删不了', code: 'forbidden' }, 403);
+  }
+  const [removed] = ideaDb.ideas.splice(idx, 1);
+  await saveIdeas();
+  ctx.json({ ok: true, deleted: removed.id });
+});
+
+// ---------- 手机同步 ----------
+// pull 一次返回全部集合：手机要是发 7 个并行 GET，两个请求之间电脑端改的数据会让它拿到撕裂的快照
+route('GET', '/api/sync/pull', async (ctx) => {
+  ctx.json({
+    schema_version: SCHEMA_VERSION,
+    server_time: new Date().toISOString(),
+    activities: db.activities,
+    papers: paperDb.papers.map((p) => ({ ...p, file_exists: !!findPaperFile(p) })),
+    sites: siteDb.sites,
+    expenses: expenseDb.expenses,
+    insights: insightDb.verdicts,
+    messages: [...messageDb.messages].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))),
+    ideas: ideaDb.ideas,
+  });
+});
+
+// push 批量应用手机端的想法变更（目前只有想法能由手机写）。一次 push 只落一次盘。
+route('POST', '/api/sync/push', async (ctx) => {
+  const ops = Array.isArray(ctx.body && ctx.body.ideas) ? ctx.body.ideas : [];
+  const results = [];
+  let changed = false;
+  for (const op of ops) {
+    const r = applyIdeaOp(op, ctx.role);
+    results.push(r);
+    if (r.applied) changed = true;
+  }
+  if (changed) await saveIdeas();
+  ctx.json({ ok: true, results });
+});
+
+// 返回五种 status，前端据此决定出队还是留队：
+// ok（含重放幂等）/ conflict（留队等用户选）/ missing（电脑端删了，弃掉）
+// forbidden（想改电脑端的）/ error（参数不对，重试也没用）
+function applyIdeaOp(op, role) {
+  const id = uuidOrNull(op && op.id);
+  if (!id) return { id: '', status: 'error', error: '缺少合法 id' };
+  const idx = ideaDb.ideas.findIndex((i) => i.id === id);
+  const prev = idx === -1 ? null : ideaDb.ideas[idx];
+  const kind = op.op === 'update' || op.op === 'delete' ? op.op : 'create';
+
+  if (kind === 'create') {
+    // 已经有 = 这次是重放，直接把服务端的版本还回去，别写第二条
+    if (prev) return { id, status: 'ok', applied: false, idea: prev, already: true };
+    const idea = normalizeIdea(op);
+    idea.id = id;
+    if (role === 'mobile') idea.origin = 'mobile';
+    ideaDb.ideas.push(idea);
+    return { id, status: 'ok', applied: true, idea };
+  }
+  if (!prev) return { id, status: 'missing', applied: false };
+  if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
+  if (conflicted(prev, op)) return { id, status: 'conflict', applied: false, server: prev };
+  if (kind === 'delete') {
+    ideaDb.ideas.splice(idx, 1);
+    return { id, status: 'ok', applied: true, deleted: true };
+  }
+  const idea = normalizeIdea(op, prev);
+  ideaDb.ideas[idx] = idea;
+  return { id, status: 'ok', applied: true, idea };
+}
+
 // ---------- HTTP 基础设施 ----------
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
@@ -1325,6 +1533,41 @@ function originAllowed(origin, reqHost) {
     && /^(localhost|(\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:]+\])(:\d+)?$/i.test(host);
 }
 
+// ---------- 访问身份 ----------
+// 本机回环 = 电脑端（免口令、全能）；其余来源 = 手机端（要口令、只读 + 只能写自己的想法）。
+// 按来源 IP 判而不是让客户端自己声明：声明可以撒谎，IP 不行。
+const LOCAL_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+function clientRole(req) {
+  const ip = String(req.socket.remoteAddress || '');
+  if (LOCAL_ADDRS.has(ip) || /^::ffff:127\./.test(ip)) return 'desktop';
+  return 'mobile';
+}
+
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
+// 没配口令 = 不校验（保持原有行为，只靠监听地址保护）；配了则只有本机回环免口令
+function tokenOk(req) {
+  if (!APP_CONFIG.token) return true;
+  if (clientRole(req) === 'desktop') return true;
+  return safeEqual(req.headers['x-danji-token'] || '', APP_CONFIG.token);
+}
+
+// 手机端写白名单：能读全部板块、能写自己记的想法、能处理消息已读，其余一律挡住。
+// 这是「防误操作 + 防同网段邻居」级别，不是防攻击。
+function mobileMayWrite(method, pathname) {
+  if (method === 'GET' || method === 'HEAD') return true;
+  if (method === 'POST' && (pathname === '/api/ideas' || pathname === '/api/sync/push')) return true;
+  if ((method === 'PUT' || method === 'DELETE') && /^\/api\/ideas\/[^/]+$/.test(pathname)) return true;
+  if (method === 'PUT' && /^\/api\/messages\/[^/]+$/.test(pathname)) return true;
+  if (method === 'POST' && (pathname === '/api/messages/read-all' || pathname === '/api/messages/clear-read')) return true;
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
@@ -1336,6 +1579,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname.startsWith('/api/')) {
+    // /api/health 免口令：手机要先能问「我算哪一端、要不要口令」
+    if (pathname !== '/api/health' && !tokenOk(req)) {
+      sendJson(res, 401, { error: '需要访问口令', needToken: true });
+      return;
+    }
+    const role = clientRole(req);
+    if (role === 'mobile' && !mobileMayWrite(req.method, pathname)) {
+      sendJson(res, 403, { error: '手机端只能浏览和新增想法', code: 'forbidden' });
+      return;
+    }
     for (const r of routes) {
       if (r.method !== req.method) continue;
       const match = pathname.match(r.regex);
@@ -1345,7 +1598,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
         await r.handler({
-          req, res, params, body, query: url.searchParams,
+          req, res, params, body, query: url.searchParams, role,
           json: (data, code = 200) => sendJson(res, code, data),
         });
       } catch (err) {
@@ -1379,16 +1632,20 @@ server.on('error', (err) => {
   throw err;
 });
 
-Promise.all([loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights()]).then(() => {
+Promise.all([
+  loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(),
+]).then(() => {
   server.listen(PORT, HOST, () => {
     console.log(`\n  🧺 拾穗集 已启动（监听 ${HOST}:${PORT}）`);
     console.log(`  ➜  本机访问:  http://localhost:${PORT}`);
+    console.log(`  ➜  手机同步:  ${APP_CONFIG.token ? '已开启口令校验' : '未设口令（局域网内可直接读写）'}${HOST === '0.0.0.0' ? ' · 已监听局域网' : ''}`);
     console.log(`  ➜  鸡蛋数据:  ${DATA_FILE}`);
     console.log(`  ➜  文献数据:  ${PAPERS_FILE}`);
     console.log(`  ➜  网页数据:  ${SITES_FILE}`);
     console.log(`  ➜  花销数据:  ${EXPENSES_FILE}`);
-    console.log(`  ➜  评价数据:  ${INSIGHTS_FILE}`);
-    console.log(`  ➜  消息数据:  ${MESSAGES_FILE}`);
+  console.log(`  ➜  评价数据:  ${INSIGHTS_FILE}`);
+  console.log(`  ➜  消息数据:  ${MESSAGES_FILE}`);
+  console.log(`  ➜  想法数据:  ${IDEAS_FILE}`);
     console.log(`  ➜  论文库:    ${PAPERS_DIR}`);
     console.log(`  按 Ctrl+C 停止服务\n`);
   });
