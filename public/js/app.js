@@ -14,6 +14,7 @@ import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, 
 import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea } from './boards/ideas.js';
 import { SyncStatus } from './components/sync-status.js';
 import { installSync, disposeSync } from './sync/engine.js';
+import { canWrite, canMarkMessages, mobileReadOnlyHint } from './perm.js';
 
 import { CONFIG } from '../config.js';
 import { HOUR, FLASH_MS } from './util/const.js';
@@ -330,6 +331,12 @@ const app = createApp({
       setExpenseView, saveInsightVerdict, clearInsightVerdict,
       unreadCount, gotoActivity, markMessageRead, removeMessage, markAllRead, clearReadMessages,
       filteredIdeas, openIdeaEditor, saveIdea, removeIdea,
+      canWriteEggs: computed(() => canWrite('eggs')),
+      canWritePapers: computed(() => canWrite('papers')),
+      canWriteSites: computed(() => canWrite('sites')),
+      canWriteExpenses: computed(() => canWrite('expenses')),
+      canMarkMessages: computed(() => canMarkMessages()),
+      mobileHint: computed(() => mobileReadOnlyHint()),
       cycleTheme, themeIcon, themeTitle,
       notifActive: computed(() => state.notifPermission === 'granted' && state.notifyOn),
       notifTitle: computed(() => {

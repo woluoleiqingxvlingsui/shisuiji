@@ -75,6 +75,7 @@ const state = reactive({
     enabled: false,
     role: 'unknown', // desktop | mobile | unknown（与 state.role 保持一致）
     needToken: false,
+    offline: false, // health 不可达时的离线优先模式
     status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error
     pendingCount: 0,
     conflicts: [], // [{ id, op, entry, server, local }]

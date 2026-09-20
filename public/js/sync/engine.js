@@ -91,26 +91,59 @@ function setStatus(status, extra = {}) {
 async function detectRole() {
   try {
     const { ok, data } = await apiJson('/api/health');
-    if (!ok || !data) return { role: 'unknown', needToken: false };
-    return { role: data.role || 'unknown', needToken: !!data.needToken };
+    if (!ok || !data) return { role: 'unknown', needToken: false, reachable: false };
+    return { role: data.role || 'unknown', needToken: !!data.needToken, reachable: true };
   } catch {
-    return { role: 'unknown', needToken: false };
+    return { role: 'unknown', needToken: false, reachable: false };
   }
 }
 
-/** 初始化：探测角色；仅 mobile 启用同步层。电脑端不走 IDB/outbox。 */
+function lastKnownRole() {
+  try {
+    return localStorage.getItem('danji.lastRole') || '';
+  } catch {
+    return '';
+  }
+}
+
+function rememberRole(role) {
+  try {
+    if (role === 'desktop' || role === 'mobile') localStorage.setItem('danji.lastRole', role);
+  } catch { /* ignore */ }
+}
+
+/**
+ * 初始化（离线优先）：
+ * - health 成功：按 role 决定是否启用同步层
+ * - health 失败：若上次是 mobile / 强制 mobile / 视口像手机 → 进入离线 mobile，
+ *   IndexedDB 镜像∪队列仍可记想法；服务恢复后自动同步
+ */
 async function initSync() {
   const force = forceMobileFromQuery();
-  const { role, needToken } = await detectRole();
-  // 权限用 role：health 为准；?danji-mobile=1 仅调试时强制 mobile
-  const effectiveRole = force ? 'mobile' : role;
-  state.role = effectiveRole;
-  state.sync.role = effectiveRole;
-  state.sync.needToken = needToken && !getToken();
-  state.sync.enabled = force || role === 'mobile';
-  // 桌面端也要维护 isPhone（窄窗布局）；监听在所有角色下都挂上
+  const { role, needToken, reachable } = await detectRole();
   bindIsPhoneMq();
   syncIsPhone();
+
+  let effectiveRole;
+  let offline = false;
+  if (force) {
+    effectiveRole = 'mobile';
+  } else if (reachable && (role === 'desktop' || role === 'mobile')) {
+    effectiveRole = role;
+    rememberRole(role);
+  } else {
+    // 服务不可达：离线优先
+    offline = true;
+    const prev = lastKnownRole();
+    effectiveRole = prev || 'mobile';
+  }
+
+  state.role = effectiveRole;
+  state.sync.role = effectiveRole;
+  state.sync.offline = offline;
+  state.sync.needToken = reachable && needToken && !getToken();
+  state.sync.enabled = force || effectiveRole === 'mobile';
+
   if (!state.sync.enabled) {
     setStatus('idle');
     return false;
@@ -119,13 +152,19 @@ async function initSync() {
     setStatus('error', { lastError: '当前环境不支持 IndexedDB，无法离线同步' });
     return false;
   }
-  if (state.sync.needToken) {
+  if (offline) {
+    setStatus('offline');
+  } else if (state.sync.needToken) {
     setStatus('need_token');
   }
   bindListeners();
   startInterval();
   await refreshPendingCount();
   await reloadIdeasDisplay();
+  if (offline) {
+    // 不发起网络请求，避免离线启动时弹一串失败
+    return true;
+  }
   await syncNow({ reason: 'init' });
   return true;
 }
@@ -327,6 +366,7 @@ async function syncNow(opts = {}) {
 
     state.sync.lastSyncAt = new Date().toISOString();
     state.sync.lastError = '';
+    state.sync.offline = false;
     if (state.sync.conflicts.length) {
       setStatus('conflicts');
     } else if (state.sync.pendingCount > 0) {
@@ -337,12 +377,9 @@ async function syncNow(opts = {}) {
     return { ok: true, push, pull, reason: opts.reason };
   } catch (e) {
     state.sync.lastError = (e && e.message) || String(e);
+    state.sync.offline = true;
     await refreshPendingCount();
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setStatus('offline');
-    } else {
-      setStatus('error', { lastError: state.sync.lastError });
-    }
+    setStatus('offline');
     if (opts.reason === 'manual') {
       toast('同步失败：' + state.sync.lastError, 'warn');
     }
