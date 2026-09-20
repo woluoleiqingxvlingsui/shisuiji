@@ -142,7 +142,7 @@
       <p class="empty-sub">把看到的优惠活动都记进来，一颗都不漏</p>
       <div class="empty-actions">
         <button class="btn primary" v-if="canWriteEggs" @click="openEditor(null)">＋ 记第一颗蛋</button>
-        <button class="btn ghost" @click="loadSamples">填入示例数据看看效果</button>
+        <button class="btn ghost" v-if="canWriteEggs" @click="loadSamples">填入示例数据看看效果</button>
       </div>
     </div>
     <div class="empty" v-else-if="!filteredActivities.length">
@@ -307,7 +307,7 @@
         <p class="empty-title">{{ state.expenseCategory ? '这个类别下没有记录' : '这个期间没有记录' }}</p>
         <p class="empty-sub">{{ state.expenseCategory
           ? '点统计卡上的「正在看 … ✕」回到套餐 / API 总览'
-          : '换个月份 / 年份，或点右上角「＋ 记一笔」' }}</p>
+          : (canWriteExpenses ? '换个月份 / 年份，或点右上角「＋ 记一笔」' : '换个月份 / 年份；手机端仅浏览') }}</p>
       </div>
 
       <!-- 花销卡片列表 -->
@@ -329,7 +329,7 @@
         <p class="empty-title">还没有可凝练的体感</p>
         <p class="empty-sub">先在「明细」里记几笔带备注的花销，这里就会按厂商 / 模型把体感拢起来</p>
         <div class="empty-actions">
-          <button class="btn primary" @click="setExpenseView('list')">📋 去记一笔</button>
+          <button class="btn primary" v-if="canWriteExpenses" @click="setExpenseView('list')">📋 去记一笔</button>
         </div>
       </div>
       <template v-else>

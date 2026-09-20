@@ -53,14 +53,19 @@ const PaperCard = {
     <p class="paper-notes" v-if="paper.notes" :title="paper.notes">📝 {{ paper.notes }}</p>
 
     <!-- 阅读记录：读完才有，卡片上只露最新一条的摘要 -->
-    <div class="paper-log" v-if="isRead && logCount" @click.stop="emitLog" title="点开看全部阅读记录">
+    <div class="paper-log" v-if="writable && isRead && logCount" @click.stop="emitLog" title="点开看全部阅读记录">
       <span class="rel-badge" :class="'rel-' + latestLog.rel" v-if="relMeta">{{ relMeta.emoji }} {{ relMeta.label }}</span>
       <span class="paper-log-line" v-if="logSummary">{{ logSummary }}</span>
       <span class="paper-log-line muted" v-else>（最新一条还没写内容）</span>
       <span class="log-count" v-if="logCount > 1">共 {{ logCount }} 条</span>
     </div>
-    <div class="paper-log log-hint" v-else-if="isRead" @click.stop="emitLog" title="点这里补一条阅读记录">
+    <div class="paper-log log-hint" v-else-if="writable && isRead" @click.stop="emitLog" title="点这里补一条阅读记录">
       📝 还没记阅读记录，点这里补一条
+    </div>
+    <div class="paper-log" v-else-if="isRead && logCount">
+      <span class="rel-badge" :class="'rel-' + latestLog.rel" v-if="relMeta">{{ relMeta.emoji }} {{ relMeta.label }}</span>
+      <span class="paper-log-line" v-if="logSummary">{{ logSummary }}</span>
+      <span class="log-count" v-if="logCount > 1">共 {{ logCount }} 条</span>
     </div>
 
     <div class="card-actions" @click.stop v-if="writable || showDesktopActions">

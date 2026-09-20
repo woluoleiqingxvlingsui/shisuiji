@@ -305,6 +305,7 @@ function notifyClosed(activity) {
   n.onclick = () => { window.focus(); jumpTo(activity.id); n.close(); };
 }
 async function loadSamples() {
+  if (state.role !== 'desktop') return toast('手机端不能写入示例数据', 'warn');
   const now = Date.now();
   const iso = (ms) => {
     const d = new Date(ms);
@@ -337,11 +338,12 @@ async function loadSamples() {
     },
   ];
   for (const s of samples) {
-    await api('/api/activities', {
+    const res = await api('/api/activities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(s),
     });
+    if (!res.ok) return toast('示例数据写入失败：' + res.status, 'warn');
   }
   await load();
   toast('已填入 4 条示例数据，可随意编辑或删除 🧪');

@@ -1576,14 +1576,12 @@ function tokenOk(req) {
   return safeEqual(req.headers['x-danji-token'] || '', APP_CONFIG.token);
 }
 
-// 手机端写白名单：能读全部板块、能写自己记的想法、能处理消息已读，其余一律挡住。
+// 手机端写白名单：能读全部板块、只能写自己记的想法；消息也不开放（只读浏览）。
 // 这是「防误操作 + 防同网段邻居」级别，不是防攻击。
 function mobileMayWrite(method, pathname) {
   if (method === 'GET' || method === 'HEAD') return true;
   if (method === 'POST' && (pathname === '/api/ideas' || pathname === '/api/sync/push')) return true;
   if ((method === 'PUT' || method === 'DELETE') && /^\/api\/ideas\/[^/]+$/.test(pathname)) return true;
-  if (method === 'PUT' && /^\/api\/messages\/[^/]+$/.test(pathname)) return true;
-  if (method === 'POST' && (pathname === '/api/messages/read-all' || pathname === '/api/messages/clear-read')) return true;
   return false;
 }
 
@@ -1626,7 +1624,7 @@ async function handleRequest(req, res) {
     }
     const role = clientRole(req);
     if (role === 'mobile' && !mobileMayWrite(req.method, pathname)) {
-      sendJson(res, 403, { error: '手机端只能浏览和新增想法', code: 'forbidden' });
+      sendJson(res, 403, { error: '手机端只能浏览，并可记想法', code: 'forbidden' });
       return;
     }
     for (const r of routes) {

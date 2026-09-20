@@ -281,22 +281,35 @@ const app = createApp({
       observeTopbar();
       syncTopbarHeight();
 
-      // P6：先探测角色。手机端启用同步层（镜像∪outbox），电脑端完全不走这层
+      // P6/P9：先探测角色。手机端启用同步层；离线时跳过 REST，避免一串失败提示
       await installSync();
+      const offlineBoot = !!(state.sync && state.sync.offline);
 
-      await load();
-      try {
-        await loadMessages(); // 必须先加载完消息，再扫过期，否则新消息会被加载结果覆盖
-      } catch (e) {
-        // 服务不可用时不中断初始化：否则重试成功后提醒定时器也不会跑
+      if (offlineBoot) {
+        // 离线冷启动：默认落到想法（本地镜像∪队列），其它板块标记已加载空态
+        if (state.board !== 'ideas') switchBoard('ideas');
+        state.loaded = true;
+        state.papersLoaded = true;
+        state.sitesLoaded = true;
+        state.expensesLoaded = true;
+        state.insightsLoaded = true;
+        state.messagesLoaded = true;
+        loadIdeas();
+      } else {
+        await load();
+        try {
+          await loadMessages();
+        } catch (e) {
+          // 服务不可用时不中断初始化
+        }
+        settleOverdue();
+        loadPapers();
+        loadSites();
+        loadExpenses();
+        loadInsights();
+        loadIdeas();
       }
-      settleOverdue();
-      loadPapers();
-      loadSites();
-      loadExpenses();
-      loadInsights();
-      loadIdeas();
-      tickTimer = setInterval(() => { state.now = Date.now(); settleOverdue(); }, 30 * 1000);
+      tickTimer = setInterval(() => { state.now = Date.now(); if (!offlineBoot) settleOverdue(); }, 30 * 1000);
       remindTimer = setInterval(checkReminders, CONFIG.remind.checkIntervalSec * 1000);
       document.addEventListener('visibilitychange', onVisibility);
     });

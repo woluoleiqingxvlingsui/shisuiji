@@ -3,6 +3,8 @@
 // 手机记的能改，电脑记的在手机上只能看。
 import { computed } from '../vue-globals.js';
 
+import { state } from '../state.js';
+import { canWrite } from '../perm.js';
 import { formatDate } from '../util/date.js';
 
 const IdeaCard = {
@@ -11,8 +13,14 @@ const IdeaCard = {
   emits: ['edit', 'remove'],
   setup(props, { emit }) {
     const timeText = computed(() => formatDate(props.idea.updated_at || props.idea.created_at));
+    // 手机可写想法，但电脑端 origin 的条目服务端会拒写，UI 也不给编辑/删除
+    const writable = computed(() => {
+      if (!canWrite('ideas')) return false;
+      if (state.role === 'desktop') return true;
+      return props.idea.origin !== 'desktop';
+    });
     return {
-      timeText,
+      timeText, writable,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
     };
@@ -26,7 +34,7 @@ const IdeaCard = {
     </div>
     <p class="idea-content" v-if="idea.content">{{ idea.content }}</p>
     <p class="idea-content empty-content" v-else>还没写内容</p>
-    <div class="card-actions" @click.stop>
+    <div class="card-actions" @click.stop v-if="writable">
       <span class="spacer"></span>
       <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
       <button class="btn small danger" @click="emitRemove">🗑</button>
