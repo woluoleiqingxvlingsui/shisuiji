@@ -19,7 +19,8 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node tools/check-syntax.mjs"
+    "test": "node --check server.js && node tools/check-syntax.mjs && node tools/test-sync-logic.mjs",
+    "test:render": "node tools/render-boards.mjs"
   },
   "engines": {
     "node": ">=18"
