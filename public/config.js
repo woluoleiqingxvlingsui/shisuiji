@@ -1,7 +1,10 @@
 /* 拾穗集 shisuiji —— 全局配置
  * 想扩展？先看这里：平台列表、优惠类型、状态、提醒规则都在这。
+ *
+ * 原生 ES module：别的模块一律 import { CONFIG } from './config.js'。
+ * 末尾仍挂到 window，方便在浏览器控制台里直接看/改。
  */
-window.DANJI_CONFIG = {
+export const CONFIG = {
   // 常用平台建议（表单里可自由输入，不限于这个列表）
   platforms: [
     'Kimi', 'DeepSeek', '豆包', '通义千问', '智谱清言', '文心一言',
@@ -169,3 +172,6 @@ window.DANJI_CONFIG = {
   // 手机同步：只影响手机端（本机回环访问算电脑端，不走同步）
   sync: { pullIntervalSec: 60 },
 };
+
+// 保留原来的全局写法，控制台里敲 DANJI_CONFIG 照样能看
+window.DANJI_CONFIG = CONFIG;

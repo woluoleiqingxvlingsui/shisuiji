@@ -2,495 +2,84 @@
    板块：🥚 赛博鸡蛋（原蛋记） / 📄 文献（论文待读已读管理） */
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick, provide } = Vue;
 
-const CONFIG = window.DANJI_CONFIG;
-const HOUR = 3600 * 1000;
-const FLASH_MS = 2600; // 定位高亮的持续时长，与 style.css 的 .card.flash 动画（1.3s × 2）对齐
+import { CONFIG } from '../config.js';
+import { HOUR, FLASH_MS } from './util/const.js';
+import { platformHue, platformStyle, normalizeUrl } from './util/text.js';
+import { pad2, parseStoredDate, formatDate, parseFlexibleDate, formatRemaining, computeUrgency, todayStr } from './util/date.js';
+import { statusMeta, typeMeta } from './util/meta.js';
+import { NOTE_TEXT_FIELDS, noteRelMeta, notePartLabel, notePartsText, blankPaperLog, noteIsEmpty, noteSummary, NOTE_BASIC_FIELDS, NOTE_FIELD_LABEL, noteBasicMissing } from './util/paper-note.js';
+import { readSortTime, readSortKey } from './util/sort.js';
+import { kindMeta, usageMeta, siteNoteKeys, siteNoteFields, siteNoteFieldLabel, blankSiteNote, siteNoteIsEmpty, siteNoteMissing, siteNoteSummary, siteNoteRows } from './util/site-note.js';
+import { LOG_DRAFT_PREFIX, SITE_DRAFT_PREFIX, readDraft, writeDraft, clearDraft } from './util/draft.js';
+import { parseAmountInput, formatMoney, monthOf, periodLabel, defaultExpenseDate } from './util/money.js';
+import { guessExpenseCategory, expenseCategoryMeta, buildCategorySlices, groupExpenseByTitle, buildPieSlices, expenseHitsSubject, matchSubjects, splitSentences, quoteTagOf, pickQuotes, buildSubjectInsight, buildVerdictDraft } from './util/expense.js';
 
-/* ---------------- 工具函数 ---------------- */
+
 
 // 平台名 → 稳定色相，同平台永远同色
-function platformHue(name) {
-  let h = 0;
-  for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) % 360;
-  return h;
-}
 
 // 平台/类别胶囊：只把色相写进 CSS 变量 --h，浅色与深色各自取明度（见 style.css），
 // 这样切主题时不用重新渲染列表
-function platformStyle(name) {
-  return { '--h': String(platformHue(name || '其他')) };
-}
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
 
 // 存储日期 → Date。纯日期（YYYY-MM-DD）按本地时间当天 23:59 解析（截止日当天全天有效），
 // 避免 new Date('2026-09-06') 按 UTC 零点解析带来的时区偏差
-function parseStoredDate(str) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return new Date(`${str}T23:59:59`);
-  return new Date(str);
-}
 
 // 展示用日期：同年省略年份，带时间则显示到分钟
-function formatDate(str) {
-  if (!str) return '';
-  const d = parseStoredDate(str);
-  if (isNaN(d)) return str;
-  const now = new Date();
-  const date = `${d.getFullYear() === now.getFullYear() ? '' : d.getFullYear() + '-'}${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  return String(str).length > 10 ? `${date} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : date;
-}
 
 // 自由文本 → 截止时间。支持：9-8、9/8、9.8、9月8日、2026-9-8，
 // 可选时间 18:00 / 18点 / 18点半 / 晚上8点，支持 今天/明天/后天。
 // 不写年份默认今年（月日已过则顺延一年）；只写时间默认今天。
 // 返回 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm，识别不了返回 null。
-function parseFlexibleDate(raw) {
-  let s = String(raw || '').trim();
-  if (!s) return null;
-  // 「时间不明」标记：待定/未知等作为一种合法状态，存为哨兵值「待定」
-  if (/^(待定|暂定|未知|不清楚|不知道|tbd|\?|？)$/i.test(s)) return '待定';
-  const now = new Date();
-  let y = now.getFullYear();
-  let month = null, day = null, hasYear = false;
 
-  const kw = s.match(/^(今天|今日|明天|明日|后天)/);
-  if (kw) {
-    const base = new Date(now);
-    base.setDate(base.getDate() + { '今天': 0, '今日': 0, '明天': 1, '明日': 1, '后天': 2 }[kw[1]]);
-    y = base.getFullYear();
-    month = base.getMonth() + 1;
-    day = base.getDate();
-    s = s.slice(kw[1].length);
-  } else {
-    const m = s.match(/^(?:(\d{4})[-./年])?(\d{1,2})[-./月](\d{1,2})[日号]?/);
-    if (m) {
-      if (m[1]) { y = parseInt(m[1], 10); hasYear = true; }
-      month = parseInt(m[2], 10);
-      day = parseInt(m[3], 10);
-      s = s.slice(m[0].length);
-    }
-  }
-
-  let hour = null, minute = 0;
-  // 组1: 上午/晚上等前缀，组2: 时，组3: 半或"数字分"整体，组4: 分钟数字
-  const t = s.match(/(上午|早上|凌晨|中午|下午|傍晚|晚上)?\s*(\d{1,2})[点:：时]\s*(半|(\d{1,2})\s*分?)?/);
-  if (t) {
-    hour = parseInt(t[2], 10);
-    minute = t[3] === '半' ? 30 : t[4] ? parseInt(t[4], 10) : 0;
-    if (['下午', '傍晚', '晚上'].includes(t[1]) && hour < 12) hour += 12;
-  }
-
-  if (month === null && hour === null) return null;
-  if (month !== null && (month < 1 || month > 12)) return null;
-  if (hour !== null && (hour > 23 || minute > 59)) return null;
-  // 没写年份：月日早于今天则视为明年（截止时间一般朝前看）
-  if (!kw && !hasYear && month !== null &&
-      (month < now.getMonth() + 1 || (month === now.getMonth() + 1 && day < now.getDate()))) {
-    y += 1;
-  }
-  if (month !== null) {
-    const probe = new Date(y, month - 1, day);
-    if (probe.getMonth() !== month - 1 || probe.getDate() !== day) return null; // 如 2月30日
-  } else {
-    month = now.getMonth() + 1; // 只写时间 = 今天
-    day = now.getDate();
-  }
-  const dateStr = `${y}-${pad2(month)}-${pad2(day)}`;
-  return hour === null ? dateStr : `${dateStr}T${pad2(hour)}:${pad2(minute)}`;
-}
-
-function formatRemaining(ms) {
-  const abs = Math.abs(ms);
-  const minutes = Math.floor(abs / 60000);
-  const hours = Math.floor(abs / HOUR);
-  const days = Math.floor(abs / (24 * HOUR));
-  let text;
-  if (days >= 2) text = `${days} 天 ${hours % 24} 小时`;
-  else if (hours >= 1) text = `${hours} 小时 ${minutes % 60} 分`;
-  else if (minutes >= 1) text = `${minutes} 分钟`;
-  else text = '不到 1 分钟';
-  return ms >= 0 ? `剩 ${text}` : `已过 ${text}`;
-}
 
 // 链接 → 可安全跳转的 URL。只放行 http(s)：没写协议的裸域名补 https://，
 // 其它协议（javascript:、weixin:// 等）一律判空，不渲染成可点链接
-function normalizeUrl(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return '';
-  if (/^https?:\/\//i.test(s)) return s;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return '';
-  return 'https://' + s.replace(/^\/+/, '');
-}
 
 // 紧急度核心逻辑：待领取看「领取截止」，已领取看「使用截止」
 // level: over 已超时 / red / orange / yellow / unknown 截止待确认 / null 无
 // tier 排序：紧急的(0-3) ≈ 已领取截止待确认(3) > 待领取截止待确认(4) > 无截止(pending 5 / claimed 9)
 // 已领取的「待定」没有倒计时可看，只能人工核验，所以和黄档同级靠前
-function computeUrgency(item, now) {
-  let deadlineStr = null;
-  let label = '';
-  if (item.status === 'pending' && item.claim_deadline) {
-    deadlineStr = item.claim_deadline;
-    label = '领取截止';
-  } else if (item.status === 'claimed' && item.valid_until) {
-    deadlineStr = item.valid_until;
-    label = '使用截止';
-  }
-  if (!deadlineStr) {
-    return { tier: item.status === 'pending' ? 5 : 9, level: null, label: '', deadline: null, remainingMs: null };
-  }
-  const deadline = parseStoredDate(deadlineStr);
-  // 「待定」等无法解析的截止时间：不算倒计时，只标记待确认（deadline 置 null，
-  // 让排序、桌面通知等依赖 deadline 的逻辑天然跳过）
-  if (isNaN(deadline.getTime())) {
-    // 已领取且使用截止待定：不知道何时过期，需频繁人工核验，排序与黄档(≤7天)同级
-    const unknownTier = item.status === 'claimed' ? 3 : 4;
-    return { tier: unknownTier, level: 'unknown', label, deadline: null, remainingMs: null };
-  }
-  const remainingMs = deadline - now;
-  let tier, level;
-  if (remainingMs < 0) { tier = 0; level = 'over'; }
-  else if (remainingMs <= CONFIG.urgent.red * HOUR) { tier = 1; level = 'red'; }
-  else if (remainingMs <= CONFIG.urgent.orange * HOUR) { tier = 2; level = 'orange'; }
-  else if (remainingMs <= CONFIG.urgent.yellow * HOUR) { tier = 3; level = 'yellow'; }
-  else { tier = item.status === 'pending' ? 5 : 9; level = null; }
-  return { tier, level, label, deadline, remainingMs };
-}
 
-function statusMeta(id) {
-  return CONFIG.statuses.find((s) => s.id === id) || CONFIG.statuses[0];
-}
-function typeMeta(id) {
-  return CONFIG.types.find((t) => t.id === id) || CONFIG.types[CONFIG.types.length - 1];
-}
 
-/* ---- 文献阅读记录：词表查询与摘要 ---- */
-const NOTE_TEXT_FIELDS = [
-  'problem', 'method', 'finding', 'usable', 'quotable', 'next', 'limits', 'impression', 'excerpt',
-];
-function noteRelMeta(id) {
-  return CONFIG.paperNote.relevance.find((r) => r.id === id) || null;
-}
-function notePartLabel(id) {
-  const p = CONFIG.paperNote.parts.find((x) => x.id === id);
-  return p ? p.label : '';
-}
-function notePartsText(log) {
-  return (log.parts || []).map(notePartLabel).filter(Boolean);
-}
-function blankPaperLog() {
-  const log = { id: '', read_at: todayStr(), rel: '', parts: [] };
-  for (const f of NOTE_TEXT_FIELDS) log[f] = '';
-  return log;
-}
-function noteIsEmpty(log) {
-  return !NOTE_TEXT_FIELDS.some((f) => String(log[f] || '').trim()) && !(log.parts || []).length;
-}
 // 卡片上显示的一行摘要：核心发现 → 一句话感受 → 我能借鉴 → 核心做法 → 核心问题
-function noteSummary(log) {
-  if (!log) return '';
-  for (const f of ['finding', 'impression', 'usable', 'method', 'problem']) {
-    const v = String(log[f] || '').trim();
-    if (v) return v;
-  }
-  return '';
-}
 
-/* ---- 列表排序：按「最近阅读时间」刷新，没读过就按添加时间（文献与网页共用） ---- */
 // 最近一次阅读时间（毫秒）= 点「📖 阅读 / 🌐 打开」记下的 last_read_at 与笔记里手填的「读完日期」取较大者；
 // 从没读过返回 0。日期串解析不了就忽略那一条，不参与比较。
-function readSortTime(item) {
-  let best = 0;
-  const clicked = Date.parse(item.last_read_at || '');
-  if (!isNaN(clicked)) best = clicked;
-  for (const log of item.logs || []) {
-    if (!log || !log.read_at) continue;
-    const t = parseStoredDate(log.read_at).getTime(); // 纯日期按当天 23:59
-    if (!isNaN(t) && t > best) best = t;
-  }
-  return best;
-}
 // 列表排序键：阅读时间优先（点过阅读的立刻置顶），没读过的回落到「添加时间」
-function readSortKey(item) {
-  return Math.max(Date.parse(item.created_at || '') || 0, readSortTime(item));
-}
 
-/* ---- 网页笔记：词表查询、摘要、归档门槛 ---- */
-function kindMeta(id) {
-  return CONFIG.siteNote.kinds.find((k) => k.id === id) || CONFIG.siteNote.kinds[0];
-}
-function usageMeta(id) {
-  return CONFIG.siteNote.usage.find((u) => u.id === id) || null;
-}
 // 所有网页笔记字段（两套类型合起来，用于生成空表单和搜索）
-function siteNoteKeys() {
-  return Object.values(CONFIG.siteNote.fields).flat().map((f) => f.key);
-}
 // 表单要渲染的字段 = 共用 + 当前所选类型专属
-function siteNoteFields(kind) {
-  const f = CONFIG.siteNote.fields;
-  return [...f.common, ...(f[kind] || f.tech)];
-}
-function siteNoteFieldLabel(key) {
-  const hit = Object.values(CONFIG.siteNote.fields).flat().find((f) => f.key === key);
-  if (!hit) return key;
-  return hit.label.replace(/^\S+\s*/, ''); // 去掉开头的 emoji，用于提示文案
-}
-function blankSiteNote(kind) {
-  const log = { id: '', read_at: todayStr(), kind: kind || 'tech', usage: '' };
-  for (const key of siteNoteKeys()) log[key] = '';
-  return log;
-}
-function siteNoteIsEmpty(log) {
-  return !String(log.usage || '').trim() && !siteNoteKeys().some((k) => String(log[k] || '').trim());
-}
 // 归档门槛：技术严（一句话 + 关键做法 + 结论）、杂项松（一句话）
-function siteNoteMissing(log) {
-  const gate = CONFIG.siteNote.gate[log.kind] || CONFIG.siteNote.gate.tech;
-  return gate.filter((k) => !String(log[k] || '').trim());
-}
 // 卡片上露的一行摘要：一句话 → 关键事实 → 结论 → 做法 → 摘抄
-function siteNoteSummary(log) {
-  if (!log) return '';
-  for (const k of ['gist', 'facts', 'finding', 'method', 'excerpt', 'credibility']) {
-    const v = String(log[k] || '').trim();
-    if (v) return v;
-  }
-  return '';
-}
 // 笔记里真正填了内容的字段（按 schema 顺序），列表模式逐行展示
-function siteNoteRows(log) {
-  return siteNoteFields(log.kind).filter((f) => String(log[f.key] || '').trim());
-}
 
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
 
-/* ---- 读完的门槛与草稿 ---- */
 // 「读完」的判定：三行速记都写了才算完成基本记录
-const NOTE_BASIC_FIELDS = ['problem', 'method', 'finding'];
-const NOTE_FIELD_LABEL = { problem: '核心问题', method: '核心做法', finding: '核心发现' };
-function noteBasicMissing(log) {
-  return NOTE_BASIC_FIELDS.filter((f) => !String(log[f] || '').trim());
-}
 
 // 没写完的笔记存本地草稿（按记录 id + 命名空间），下次打开自动带回；不产生正式记录
-const LOG_DRAFT_PREFIX = 'danji.logDraft.';       // 文献笔记（键名保持不变，老草稿还在）
-const SITE_DRAFT_PREFIX = 'danji.siteNoteDraft.'; // 网页笔记
-function readDraft(prefix, id) {
-  try {
-    const raw = localStorage.getItem(prefix + id);
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) { return null; }
-}
-function writeDraft(prefix, id, form, isEmpty) {
-  try {
-    if (!id || !form) return;
-    if (isEmpty(form)) localStorage.removeItem(prefix + id); // 全空就别留空壳
-    else localStorage.setItem(prefix + id, JSON.stringify({
-      ...form, parts: [...(form.parts || [])], saved_at: new Date().toISOString(),
-    }));
-  } catch (e) {}
-}
-function clearDraft(prefix, id) {
-  try { localStorage.removeItem(prefix + id); } catch (e) {}
-}
 
-/* ---- 花销：金额、期间与饼图 ---- */
 // 金额输入容错：¥ / ￥ / 千分位 / 空格都能吃；负数与非法值返回 null
-function parseAmountInput(raw) {
-  const cleaned = String(raw == null ? '' : raw).replace(/[¥￥,，\s]/g, '');
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100) / 100;
-}
 // 金额显示：¥1,280 / ¥1,280.50（整数不留小数）
-function formatMoney(n) {
-  const v = Number(n);
-  const abs = Number.isFinite(v) ? Math.abs(Math.round(v * 100) / 100) : 0;
-  const text = abs.toLocaleString('zh-CN', {
-    minimumFractionDigits: Number.isInteger(abs) ? 0 : 2,
-    maximumFractionDigits: 2,
-  });
-  return `${v < 0 ? '-' : ''}${CONFIG.expenses.currency}${text}`;
-}
 // 记录日期 → 'YYYY-MM'（期间分组用）
-function monthOf(dateStr) {
-  const s = String(dateStr || '');
-  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : '';
-}
-function periodLabel(period) {
-  return period.mode === 'year' ? `${period.year} 年` : `${period.year} 年 ${period.month} 月`;
-}
 // 新记一笔时的默认日期：当前所选期间就是本月（今年）→ 今天；否则给该期间的第一天。
 // 补记过去的账多半记不清具体哪天，先落在当月/当年，改日子比翻月份快。
-function defaultExpenseDate(period, today) {
-  const t = today || todayStr();
-  if (!period) return t;
-  const ty = Number(t.slice(0, 4));
-  const tm = Number(t.slice(5, 7));
-  if (period.mode === 'year') {
-    return period.year === ty ? t : `${period.year}-01-01`;
-  }
-  if (period.year === ty && period.month === tm) return t;
-  return `${period.year}-${pad2(period.month)}-01`;
-}
 // 按标题猜类别（规则与 server.js 的 guessExpenseCategory 一致）：按 categories 顺序匹配关键词，都没命中兜底第一个类别
-function guessExpenseCategory(title) {
-  const s = String(title || '').toLowerCase();
-  const cats = CONFIG.expenses.categories;
-  for (const c of cats) {
-    if ((c.keywords || []).some((k) => s.includes(k))) return c.id;
-  }
-  return cats[0].id;
-}
-function expenseCategoryMeta(id) {
-  return CONFIG.expenses.categories.find((c) => c.id === id) || CONFIG.expenses.categories[0];
-}
 // 年视图的类别层：先把期间内记录按类别汇总，再走同一套饼图逻辑（占比 / 补满 / 排序 / 零值过滤都复用）
-function buildCategorySlices(items) {
-  const rows = CONFIG.expenses.categories.map((c) => ({
-    id: c.id,
-    title: `${c.emoji} ${c.label}`,
-    hue: c.hue,
-    amount: (items || []).filter((e) => e.category === c.id).reduce((sum, e) => sum + (Number(e.amount) || 0), 0),
-  }));
-  return buildPieSlices(rows, rows.length);
-}
 // 年视图逐笔层：同名记录合并成一笔（按年看的是「这一年在这个名目上花了多少」，
 // 同一个名字多次充值不用分开）；颜色按名字稳定生成，同名每次刷新同色
-function groupExpenseByTitle(items) {
-  const groups = new Map();
-  for (const e of items || []) {
-    const title = String(e.title || '').trim().replace(/\s+/g, ' ') || '未命名';
-    const key = title.toLowerCase();
-    let g = groups.get(key);
-    if (!g) {
-      g = { id: `title:${key}`, title, hue: platformHue(`title:${key}`), amount: 0, count: 0 };
-      groups.set(key, g);
-    }
-    g.amount += Number(e.amount) || 0;
-    g.count += 1;
-  }
-  return [...groups.values()];
-}
 // 饼图数据：每笔记录一个扇区（按金额倒序）；超过 maxSlices 时把最小的若干笔合并成「其余 N 笔」
-function buildPieSlices(items, maxSlices) {
-  const limit = Math.max(2, Number(maxSlices) || 24);
-  const rows = (items || [])
-    // count 是年视图同名合并后的笔数（逐笔记录没有），一并带下去给图例显示 ×N
-    .map((e) => ({ id: e.id, title: String(e.title || '未命名'), amount: Number(e.amount) || 0, hue: e.hue, count: e.count }))
-    .filter((r) => r.amount > 0)
-    .sort((a, b) => b.amount - a.amount || String(a.title).localeCompare(String(b.title), 'zh'));
-  const total = rows.reduce((sum, r) => sum + r.amount, 0);
-  if (!total) return { slices: [], total: 0, merged: 0 };
-  let kept = rows;
-  let merged = 0;
-  if (rows.length > limit) {
-    kept = rows.slice(0, limit - 1);
-    const rest = rows.slice(limit - 1);
-    merged = rest.length;
-    kept = [...kept, {
-      id: '__rest__',
-      title: `其余 ${merged} 笔`,
-      merged: true,
-      amount: rest.reduce((sum, r) => sum + r.amount, 0),
-    }];
-  }
-  let acc = 0;
-  const slices = kept.map((r, i) => {
-    const pct = (r.amount / total) * 100;
-    const from = acc;
-    acc += pct;
-    const to = i === kept.length - 1 ? 100 : acc; // 最后一个补到 100%，避免累积误差留下缝隙
-    // 行数据自带色相就用它（类别层固定颜色），否则按 id 稳定取色（逐笔层）
-    return { ...r, pct, from, to, hue: r.hue !== undefined ? r.hue : platformHue(r.id) };
-  });
-  return { slices, total, merged };
-}
 
-/* ---- 花销：体感评价（主体识别与摘录凝练全在前端算，server 只存用户敲定的结论） ---- */
 // 一笔花销是否认领到某个主体：标题或备注（小写化）包含任一关键词即命中
-function expenseHitsSubject(expense, subject) {
-  const text = `${expense.title || ''}\n${expense.notes || ''}`.toLowerCase();
-  return (subject.keywords || []).some((k) => text.includes(k.toLowerCase()));
-}
 // 一笔花销命中了 config 里的哪些主体（一笔可以同时喂多家，备注里点名谁就算谁的）
-function matchSubjects(expense) {
-  return CONFIG.expenses.subjects.filter((s) => expenseHitsSubject(expense, s));
-}
 // 把备注切成句子：按中英文句读和换行切开，太短的碎片丢掉（不然「嗯」「好」也占一行）
-function splitSentences(text) {
-  return String(text || '')
-    .split(/[。！？!?；;\n\r]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 4);
-}
 // 摘录打标：按 config 的顺序先中先用（价格 → 决策），都没命中归「体验」；
 // 目的是把「token 价格 / 划不划算」这类句子一眼扫出来
-function quoteTagOf(sentence) {
-  const s = String(sentence).toLowerCase();
-  for (const t of CONFIG.expenses.insightTags) {
-    if ((t.keywords || []).some((k) => s.includes(k))) return t;
-  }
-  return CONFIG.expenses.insightDefaultTag;
-}
 // 从一笔花销里挑出与主体相关的句子：
 //   句子本身提到主体关键词 → 必收（哪怕标题不是它，备注里点名了也算数）；
 //   标题命中主体时 → 提到价格 / 决策词的句子也收；实在没有就收首句兜底，保证有话可看
-function pickQuotes(expense, subject) {
-  const sentences = splitSentences(expense.notes);
-  if (!sentences.length) return [];
-  const titleHit = (subject.keywords || []).some((k) => String(expense.title || '').toLowerCase().includes(k.toLowerCase()));
-  const picked = sentences.filter((s) => {
-    const low = s.toLowerCase();
-    if ((subject.keywords || []).some((k) => low.includes(k.toLowerCase()))) return true;
-    if (!titleHit) return false;
-    return CONFIG.expenses.insightTags.some((t) => (t.keywords || []).some((k) => low.includes(k)));
-  });
-  if (!picked.length && titleHit) picked.push(sentences[0]);
-  return picked.map((s) => ({ sentence: s, tag: quoteTagOf(s).id }));
-}
 // 汇总一个主体的全部素材：累计花费、笔数、类别拆分、最近一笔、原话摘录（新 → 旧，封顶 6 条）
-function buildSubjectInsight(subject, expenses) {
-  const matched = (expenses || []).filter((e) => expenseHitsSubject(e, subject));
-  const byCategory = new Map();
-  let total = 0;
-  let last = null;
-  const quotes = [];
-  for (const e of matched) {
-    const amount = Number(e.amount) || 0;
-    total += amount;
-    byCategory.set(e.category, (byCategory.get(e.category) || 0) + amount);
-    if (!last || String(e.date).localeCompare(String(last.date)) > 0) last = e;
-    for (const q of pickQuotes(e, subject)) {
-      quotes.push({ ...q, date: e.date, amount, title: e.title });
-    }
-  }
-  quotes.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  return {
-    subject,
-    total,
-    count: matched.length,
-    categorySplit: [...byCategory].map(([id, amount]) => ({ id, amount })),
-    lastDate: last ? last.date : '',
-    quotes: quotes.slice(0, CONFIG.expenses.maxQuotes || 6),
-    quoteTotal: quotes.length,
-  };
-}
 // 由素材拼一段总评草稿：一句合计 + 带日期的要点摘录，填进总评框让用户改成自己的话
-function buildVerdictDraft(insight) {
-  if (!insight.count) return '';
-  const head = `累计 ${formatMoney(insight.total)} / ${insight.count} 笔`
-    + (insight.lastDate ? `，最近 ${formatDate(insight.lastDate)}` : '') + '。';
-  const points = insight.quotes.slice(0, 4).map((q) => `- ${String(q.date).slice(5)}：${q.sentence}`);
-  return [head, ...points].join('\n');
-}
 
 /* ---------------- 组件：蛋卡片 ---------------- */
 const EggCard = {
