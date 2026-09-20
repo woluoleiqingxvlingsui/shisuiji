@@ -12,6 +12,8 @@ import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSit
 import { expensePeriodInit, loadExpenses, openExpenseEditor, saveExpense, removeExpense, setExpenseMode, pickExpenseCategory, clearExpenseCategory, setExpenseYear, setExpenseMonth, stepExpensePeriod, expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories, expensePeriodLabel, expenseYearOptions } from './boards/expenses.js';
 import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, expenseInsights, expenseUnmatchedText } from './boards/insights.js';
 import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea } from './boards/ideas.js';
+import { SyncStatus } from './components/sync-status.js';
+import { installSync, disposeSync } from './sync/engine.js';
 
 import { CONFIG } from '../config.js';
 import { HOUR, FLASH_MS } from './util/const.js';
@@ -278,6 +280,9 @@ const app = createApp({
       observeTopbar();
       syncTopbarHeight();
 
+      // P6：先探测角色。手机端启用同步层（镜像∪outbox），电脑端完全不走这层
+      await installSync();
+
       await load();
       try {
         await loadMessages(); // 必须先加载完消息，再扫过期，否则新消息会被加载结果覆盖
@@ -302,6 +307,7 @@ const app = createApp({
       if (systemDark.removeEventListener) systemDark.removeEventListener('change', onSystemThemeChange);
       else if (systemDark.removeListener) systemDark.removeListener(onSystemThemeChange);
       window.removeEventListener('storage', onStorageTheme);
+      disposeSync();
     });
 
     return {
@@ -353,6 +359,7 @@ app.component('insight-card', InsightCard);
 app.component('message-card', MessageCard);
 app.component('idea-card', IdeaCard);
 app.component('idea-editor', IdeaEditor);
+app.component('sync-status', SyncStatus);
 
 // 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）
 const describeError = (e) => (e instanceof TypeError)

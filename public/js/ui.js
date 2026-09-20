@@ -6,6 +6,20 @@ import { state } from './state.js';
 import { nextTick } from './vue-globals.js';
 import { FLASH_MS } from './util/const.js';
 
+const BOARD_IDS = new Set(['ideas', 'eggs', 'papers', 'sites', 'expenses', 'messages']);
+
+/** 支持 ?board=ideas 等直达，方便无头回归与分享链接 */
+function boardFromQuery() {
+  try {
+    const b = new URLSearchParams(location.search).get('board');
+    return b && BOARD_IDS.has(b) ? b : null;
+  } catch {
+    return null;
+  }
+}
+const queryBoard = boardFromQuery();
+if (queryBoard) state.board = queryBoard;
+
 let topbarObserver = null;
 function syncTopbarHeight() {
   const el = document.querySelector('.topbar');
@@ -15,8 +29,6 @@ function switchBoard(board) {
   state.board = board;
   localStorage.setItem('danji.board', board);
 }
-
-
 
 // 顶栏换行后高度会变，用 ResizeObserver 实时同步 --topbar-h，保证紧急横幅吸顶位置正确
 export function observeTopbar() {

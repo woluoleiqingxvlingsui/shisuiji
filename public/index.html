@@ -31,6 +31,7 @@
       <button :class="{ active: state.board === 'expenses' }" @click="switchBoard('expenses')">💰 花销</button>
     </nav>
     <button class="btn ghost theme-btn" @click="cycleTheme" :title="themeTitle">{{ themeIcon }}</button>
+    <sync-status></sync-status>
     <template v-if="state.board === 'eggs'">
       <input class="search" type="search" v-model.trim="state.search" placeholder="搜索活动 / 平台 / 备注…">
       <button class="btn ghost msg-btn" @click="switchBoard('messages')" title="消息中心：蛋过期的记录都在这里">

@@ -118,6 +118,44 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 10px; line-height: 16px; text-align: center;
 }
 .board-hint { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+/* ---------- 手机端同步状态胶囊 ---------- */
+.sync-pill-btn {
+  margin-left: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  background: var(--card-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.sync-pill-btn.synced { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, var(--border)); }
+.sync-pill-btn.syncing { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, var(--border)); }
+.sync-pill-btn.offline { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 35%, var(--border)); }
+.sync-pill-btn.conflict { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); font-weight: 600; }
+.sync-pill-btn.warn { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 40%, var(--border)); }
+
+.sync-hint { color: var(--muted); margin: 0 0 12px; }
+.conflict-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.conflict-side h3 { margin: 0 0 8px; font-size: 14px; }
+.conflict-text {
+  margin: 0 0 10px;
+  padding: 10px;
+  min-height: 88px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+}
+@media (max-width: 720px) {
+  .conflict-sides { grid-template-columns: 1fr; }
+}
 .msg-summary { color: var(--muted); font-size: 13px; font-weight: 600; padding: 0 4px; }
 .msg-flag {
   margin-left: auto; flex-shrink: 0;

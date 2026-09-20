@@ -65,6 +65,17 @@ const state = reactive({
   ideaSearch: '',
   ideaEditorOpen: false,
   editingIdea: null,
+  // 手机端同步层：电脑端 enabled=false，界面不渲染胶囊
+  sync: {
+    enabled: false,
+    role: 'unknown', // desktop | mobile | unknown
+    needToken: false,
+    status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error
+    pendingCount: 0,
+    conflicts: [], // [{ id, op, entry, server, local }]
+    lastSyncAt: null,
+    lastError: '',
+  },
   now: Date.now(),
   flashId: null,
   toast: { show: false, msg: '', type: 'ok' },
