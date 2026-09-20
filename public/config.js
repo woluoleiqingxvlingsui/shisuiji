@@ -1,7 +1,10 @@
 /* 拾穗集 shisuiji —— 全局配置
  * 想扩展？先看这里：平台列表、优惠类型、状态、提醒规则都在这。
+ *
+ * 原生 ES module：别的模块一律 import { CONFIG } from './config.js'。
+ * 末尾仍挂到 window，方便在浏览器控制台里直接看/改。
  */
-window.DANJI_CONFIG = {
+export const CONFIG = {
   // 常用平台建议（表单里可自由输入，不限于这个列表）
   platforms: [
     'Kimi', 'DeepSeek', '豆包', '通义千问', '智谱清言', '文心一言',
@@ -151,4 +154,24 @@ window.DANJI_CONFIG = {
       { id: 'stop', label: '⛔ 停掉' },
     ],
   },
+
+  // 想法板块：一行点题 + 一段灵感。手机端唯一能写的板块，所以字段越少越好——
+  // 灵感转瞬即逝，别让用户在表单上花时间。
+  ideas: {
+    titleMax: 80,
+    contentRows: 6,
+    titlePlaceholder: '例：给体感评价加个月度对比',
+    contentPlaceholder: '想到什么写什么，不用整理，回头再说……',
+    empty: {
+      icon: '💡',
+      title: '还没有记下任何想法',
+      sub: '科研、办公、开发上的灵感，随手记一句',
+    },
+  },
+
+  // 手机同步：只影响手机端（本机回环访问算电脑端，不走同步）
+  sync: { pullIntervalSec: 60 },
 };
+
+// 保留原来的全局写法，控制台里敲 DANJI_CONFIG 照样能看
+window.DANJI_CONFIG = CONFIG;
