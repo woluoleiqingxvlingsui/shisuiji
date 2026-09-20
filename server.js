@@ -1506,7 +1506,7 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-// sw.js / manifest 必须 no-cache：no-store 会让浏览器拒绝 Service Worker 注册
+// sw.js / manifest 用 no-cache：no-store 容易让 SW 注册/更新出现异常
 const PWA_NO_CACHE = new Set(['/sw.js', '/manifest.webmanifest']);
 
 async function serveStatic(req, res, pathname) {
@@ -1592,7 +1592,11 @@ function mobileMayWrite(method, pathname) {
 function loadTlsOptions() {
   const certPath = String(process.env.DANJI_TLS_CERT || '').trim();
   const keyPath = String(process.env.DANJI_TLS_KEY || '').trim();
-  if (!certPath || !keyPath) return null;
+  if (!certPath && !keyPath) return null;
+  if (!certPath || !keyPath) {
+    console.error('[shisuiji] HTTPS 需要同时设置 DANJI_TLS_CERT 与 DANJI_TLS_KEY，当前只配了一项，回落 HTTP');
+    return null;
+  }
   try {
     return {
       cert: fs.readFileSync(certPath),

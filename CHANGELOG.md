@@ -6,10 +6,18 @@
 
 ### Added
 - **赛博鸡蛋**：已领取的蛋可手动「💤 标为过期」（不限量畅用的蛋永远不会「用完」，收尾只能走已过期）；已过期的蛋可「↩️ 还能用」改回已领取
+- **想法 + 手机同步（P6）**：IndexedDB 镜像 + outbox；显示 = 镜像 ∪ 队列；仅手机端自动同步；顶栏同步状态胶囊；`api.js` 统一带 `X-Danji-Token`
+- **移动端适配（P7）**：`role`（权限）与 `isPhone`（布局）拆分；文献 Windows 操作手机端隐藏；settle/remind 仅 desktop；小屏触控/抽屉/16px 输入框
+- **PWA + 可选 HTTPS（P8）**：`manifest.webmanifest` + `public/sw.js` + 图标；仅 https/localhost 注册 Service Worker；`DANJI_TLS_CERT`/`DANJI_TLS_KEY` 可启 HTTPS
+- **配置**：`config.json` 支持 `papers_dir`（相对路径相对项目根）
 
 ### Changed
 - **赛博鸡蛋**：待领取的蛋过了领取截止，「已错过 😢」更名为「已截止 ⏳」（内部状态 id `missed` → `closed`）；已领取的「已过期」与「💤 标为过期」不变
 - **赛博鸡蛋**：「⏳ 已截止」改为所有待领取的蛋都能用（对齐已领取蛋常驻的「💤 标为过期」），不再只出现在「没填截止 / 已过截止」的蛋上
+
+### Security / PWA 限制
+- Service Worker **仅**在 `https` 或 `localhost` 注册；局域网 `http://IP:端口` 下关掉浏览器后无法离线冷启动，需配置 HTTPS
+- 手机端自动过期扫描关闭，避免用手机时钟误标状态；局域网访问建议配置 `sync.token`
 
 ## [1.0.0] - 2026-09-12
 

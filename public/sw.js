@@ -49,13 +49,15 @@ self.addEventListener('fetch', (event) => {
   // API 一律走网络，绝不进 SW 缓存
   if (url.pathname.startsWith('/api/')) return;
 
-  // 导航：network-first → 回落离线壳
+  // 导航：network-first → 回落离线壳（只缓存成功响应，避免 4xx/5xx 污染离线页）
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
-        const cache = await caches.open(NAV_CACHE);
-        cache.put(OFFLINE_URL, fresh.clone());
+        if (fresh && fresh.ok) {
+          const cache = await caches.open(NAV_CACHE);
+          cache.put(OFFLINE_URL, fresh.clone());
+        }
         return fresh;
       } catch {
         const cache = await caches.open(NAV_CACHE);
