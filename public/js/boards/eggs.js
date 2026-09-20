@@ -213,6 +213,8 @@ async function toggleNotify() {
   }
 }
 function checkReminders() {
+  // 仅电脑端跑到期提醒：手机时钟/权限不同，且会干扰服务端状态机
+  if (state.role !== 'desktop') return;
   if (!state.notifyOn) return; // 用户关掉了提醒开关
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   const now = Date.now();
@@ -232,6 +234,8 @@ function checkReminders() {
 }
 let settleRunning = false;
 async function settleOverdue() {
+  // 仅电脑端自动流转：手机端用本地时钟改 status 会误标过期并打一堆 403
+  if (state.role !== 'desktop') return;
   if (settleRunning) return;
   settleRunning = true;
   try {
