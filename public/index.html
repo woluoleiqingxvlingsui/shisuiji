@@ -24,6 +24,7 @@
   <header class="topbar">
     <span class="logo">🧺 拾穗集</span>
     <nav class="board-tabs">
+      <button :class="{ active: state.board === 'ideas' }" @click="switchBoard('ideas')">💡 想法</button>
       <button :class="{ active: state.board === 'eggs' }" @click="switchBoard('eggs')">🥚 赛博鸡蛋</button>
       <button :class="{ active: state.board === 'papers' }" @click="switchBoard('papers')">📄 文献</button>
       <button :class="{ active: state.board === 'sites' }" @click="switchBoard('sites')">🌐 网页</button>
@@ -53,6 +54,10 @@
       <input class="search" type="search" v-model.trim="state.expenseSearch" placeholder="搜索花销内容 / 备注…">
       <button class="btn primary" @click="openExpenseEditor(null)">＋ 记一笔</button>
     </template>
+    <template v-else-if="state.board === 'ideas'">
+      <input class="search" type="search" v-model.trim="state.ideaSearch" placeholder="搜索想法…">
+      <button class="btn primary" @click="openIdeaEditor(null)">＋ 记想法</button>
+    </template>
     <template v-else>
       <span class="board-hint">蛋过了使用截止，会自动记一条到这里</span>
     </template>
@@ -67,6 +72,32 @@
       <span class="urgent-st">{{ u.statusEmoji }}</span><b>{{ u.platform }}</b> · {{ u.shortTitle }} — {{ u.label }}{{ u.remainingText }}
     </button>
   </div>
+
+  <!-- ===== 想法板块 ===== -->
+  <main class="container" v-if="state.board === 'ideas'">
+    <div class="empty" v-if="!state.ideasLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.ideas.length">
+      <div class="empty-egg">💡</div>
+      <p class="empty-title">还没有记下任何想法</p>
+      <p class="empty-sub">科研、办公、开发上的灵感，随手记一句</p>
+      <div class="empty-actions">
+        <button class="btn primary" @click="openIdeaEditor(null)">＋ 记第一个想法</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredIdeas.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的想法</p>
+      <p class="empty-sub">换个搜索词试试</p>
+    </div>
+
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <idea-card v-for="i in filteredIdeas" :key="i.id" :idea="i"
+                 @edit="openIdeaEditor(i)" @remove="removeIdea(i)">
+      </idea-card>
+    </transition-group>
+  </main>
 
   <!-- ===== 赛博鸡蛋板块 ===== -->
   <main class="container" v-if="state.board === 'eggs'">
@@ -360,6 +391,9 @@
   <expense-editor v-if="state.board === 'expenses' && state.expenseEditorOpen" :initial="state.editingExpense"
                   :default-date="defaultExpenseDate(state.expensePeriod)"
                   @save="saveExpense" @close="state.expenseEditorOpen = false"></expense-editor>
+
+  <idea-editor v-if="state.board === 'ideas' && state.ideaEditorOpen" :initial="state.editingIdea"
+               @save="saveIdea" @close="state.ideaEditorOpen = false"></idea-editor>
 
   <!-- 轻提示 -->
   <transition name="toast">

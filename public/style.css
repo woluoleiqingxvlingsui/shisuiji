@@ -410,6 +410,18 @@ input, select, textarea { font: inherit; color: inherit; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* ---------- 想法 ---------- */
+/* 题目一行点题（超出省略），正文按原样换行显示——灵感要能读完，不能截断 */
+.idea-content {
+  margin: 8px 0 0; font-size: 13.5px; line-height: 1.65; color: var(--muted);
+  white-space: pre-wrap; word-break: break-word;
+}
+.idea-content.empty-content { font-style: italic; opacity: .65; }
+.idea-origin { font-size: 14px; line-height: 1; }
+.idea-time {
+  font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 阅读记录 ---------- */
 .paper-log {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

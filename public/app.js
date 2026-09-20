@@ -2138,6 +2138,112 @@ const MessageCard = {
   `,
 };
 
+/* ---------------- 组件：想法卡片 ---------------- */
+// 想法只有两个字段：一行点题 + 一段灵感。origin 标明这条是从哪儿来的，
+// 手机记的能改，电脑记的在手机上只能看。
+const IdeaCard = {
+  name: 'IdeaCard',
+  props: { idea: { type: Object, required: true } },
+  emits: ['edit', 'remove'],
+  setup(props, { emit }) {
+    const { computed } = Vue;
+    const timeText = computed(() => formatDate(props.idea.updated_at || props.idea.created_at));
+    return {
+      timeText,
+      emitEdit: () => emit('edit'),
+      emitRemove: () => emit('remove'),
+    };
+  },
+  template: `
+  <article class="card idea-card">
+    <div class="card-head">
+      <h3 class="title">{{ idea.title || '（没写题目）' }}</h3>
+      <span class="idea-origin" v-if="idea.origin === 'mobile'" title="这条是在手机上记的">📱</span>
+      <span class="idea-time">{{ timeText }}</span>
+    </div>
+    <p class="idea-content" v-if="idea.content">{{ idea.content }}</p>
+    <p class="idea-content empty-content" v-else>还没写内容</p>
+    <div class="card-actions" @click.stop>
+      <span class="spacer"></span>
+      <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
+      <button class="btn small danger" @click="emitRemove">🗑</button>
+    </div>
+  </article>
+  `,
+};
+
+/* ---------------- 组件：想法新增 / 编辑抽屉 ---------------- */
+const IdeaEditor = {
+  name: 'IdeaEditor',
+  props: { initial: { type: Object, default: null } },
+  emits: ['save', 'close'],
+  setup(props, { emit }) {
+    const { reactive, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
+    const titleInput = ref(null);
+    const form = reactive({
+      title: props.initial?.title || '',
+      content: props.initial?.content || '',
+    });
+    // 题目和内容都不写就没什么可存的——但允许只写其中一个，别拦着灵感
+    const canSave = computed(() => !!(form.title.trim() || form.content.trim()));
+
+    function save() {
+      if (!canSave.value) return alert('至少写一句：这条灵感是关于什么的');
+      emit('save', {
+        title: form.title.trim(),
+        content: form.content.trim(),
+        // 乐观锁：编辑时带上「我改之前看到的时间」，服务端对不上会返回 409
+        base_updated_at: props.initial?.updated_at || '',
+      });
+    }
+
+    const onKey = (e) => { if (e.key === 'Escape') emit('close'); };
+    onMounted(async () => {
+      window.addEventListener('keydown', onKey);
+      await nextTick();
+      titleInput.value && titleInput.value.focus();
+    });
+    onUnmounted(() => window.removeEventListener('keydown', onKey));
+
+    let pressOnOverlay = false;
+    const onOverlayMousedown = (e) => { pressOnOverlay = e.target === e.currentTarget; };
+    const onOverlayMouseup = (e) => {
+      if (pressOnOverlay && e.target === e.currentTarget) emit('close');
+      pressOnOverlay = false;
+    };
+
+    return {
+      form, titleInput, save, canSave, ideas: CONFIG.ideas,
+      close: () => emit('close'),
+      onOverlayMousedown, onOverlayMouseup,
+    };
+  },
+  template: `
+  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+    <aside class="drawer">
+      <header class="drawer-head">
+        <h2>{{ initial ? '✏️ 编辑想法' : '💡 记个想法' }}</h2>
+        <button class="btn ghost small" @click="close">✕</button>
+      </header>
+      <form class="drawer-form" @submit.prevent="save">
+        <label>💡 这条是关于什么的
+          <input ref="titleInput" v-model="form.title" :maxlength="ideas.titleMax"
+                 :placeholder="ideas.titlePlaceholder">
+        </label>
+        <label>📝 灵感
+          <textarea class="tall" v-model="form.content" :rows="ideas.contentRows"
+                    :placeholder="ideas.contentPlaceholder"></textarea>
+        </label>
+        <footer class="drawer-foot">
+          <button type="button" class="btn ghost" @click="close">取消</button>
+          <button type="submit" class="btn primary">💾 保存</button>
+        </footer>
+      </form>
+    </aside>
+  </div>
+  `,
+};
+
 /* ---------------- 根应用 ---------------- */
 // 全局兜底用的 toast 引用：toast 定义在 setup 里，挂载后由 setup 回填
 let toastBridge = null;
@@ -2200,6 +2306,11 @@ const app = createApp({
       },
       messages: [],
       messagesLoaded: false,
+      ideas: [],
+      ideasLoaded: false,
+      ideaSearch: '',
+      ideaEditorOpen: false,
+      editingIdea: null,
       now: Date.now(),
       flashId: null,
       toast: { show: false, msg: '', type: 'ok' },
@@ -2965,6 +3076,66 @@ const app = createApp({
       toast('已清除 🧹');
     }
 
+    /* ---- 想法板块：一行点题 + 一段灵感。目前桌面直连 REST，P6 起手机端改走同步队列 ---- */
+    async function loadIdeas() {
+      try {
+        state.ideas = await fetch('/api/ideas').then((r) => r.json());
+      } catch {
+        toast('想法加载失败', 'warn');
+      }
+      state.ideasLoaded = true;
+    }
+
+    // 列表已按 updated_at 倒序从服务端返回，这里只做搜索过滤（题目 + 正文都搜）
+    const filteredIdeas = computed(() => {
+      const kw = state.ideaSearch.trim().toLowerCase();
+      if (!kw) return state.ideas;
+      return state.ideas.filter((i) =>
+        String(i.title || '').toLowerCase().includes(kw)
+        || String(i.content || '').toLowerCase().includes(kw));
+    });
+
+    function openIdeaEditor(idea) {
+      state.editingIdea = idea ? { ...idea } : null;
+      state.ideaEditorOpen = true;
+    }
+
+    async function saveIdea(payload) {
+      const isEdit = !!state.editingIdea;
+      const url = isEdit ? `/api/ideas/${state.editingIdea.id}` : '/api/ideas';
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const saved = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        // 乐观锁没过：这条在别处先改了。不静默覆盖，刷新拿最新的让用户自己看
+        state.ideaEditorOpen = false;
+        toast('这条想法在别处改过，已刷新为最新内容', 'warn');
+        loadIdeas();
+        return;
+      }
+      if (!res.ok) return toast('保存失败：' + (saved.error || res.status), 'warn');
+      if (isEdit) {
+        const idx = state.ideas.findIndex((i) => i.id === saved.id);
+        if (idx !== -1) state.ideas.splice(idx, 1, saved);
+      } else {
+        state.ideas.unshift(saved);
+      }
+      state.ideaEditorOpen = false;
+      toast(isEdit ? '已保存 ✅' : '记下了 💡');
+    }
+
+    async function removeIdea(idea) {
+      const name = idea.title || (idea.content || '').slice(0, 20) || '这条想法';
+      if (!confirm(`确定删除「${name}」吗？`)) return;
+      const res = await fetch(`/api/ideas/${idea.id}`, { method: 'DELETE' });
+      if (!res.ok) return toast('删除失败：' + res.status, 'warn');
+      state.ideas = state.ideas.filter((i) => i.id !== idea.id);
+      toast('已删除 🗑');
+    }
+
     function setExpenseMode(mode) {
       state.expensePeriod.mode = mode;
       // 类别下钻只属于「按年」：按月是按条目看的，切过去就把筛选清掉，别把年视图的类别带进月视图
@@ -3459,6 +3630,7 @@ const app = createApp({
       loadSites();
       loadExpenses();
       loadInsights();
+      loadIdeas();
       tickTimer = setInterval(() => { state.now = Date.now(); settleOverdue(); }, 30 * 1000);
       remindTimer = setInterval(checkReminders, CONFIG.remind.checkIntervalSec * 1000);
       document.addEventListener('visibilitychange', onVisibility);
@@ -3492,6 +3664,7 @@ const app = createApp({
       stepExpensePeriod, formatMoney, defaultExpenseDate, pickExpenseCategory, clearExpenseCategory,
       setExpenseView, saveInsightVerdict, clearInsightVerdict,
       unreadCount, gotoActivity, markMessageRead, removeMessage, markAllRead, clearReadMessages,
+      filteredIdeas, openIdeaEditor, saveIdea, removeIdea,
       cycleTheme, themeIcon, themeTitle,
       notifActive: computed(() => state.notifPermission === 'granted' && state.notifyOn),
       notifTitle: computed(() => {
@@ -3519,6 +3692,8 @@ app.component('expense-card', ExpenseCard);
 app.component('expense-editor', ExpenseEditor);
 app.component('insight-card', InsightCard);
 app.component('message-card', MessageCard);
+app.component('idea-card', IdeaCard);
+app.component('idea-editor', IdeaEditor);
 
 // 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）
 const describeError = (e) => (e instanceof TypeError)
