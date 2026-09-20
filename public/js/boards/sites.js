@@ -68,13 +68,15 @@ async function openSite(site) {
   const win = window.open(url, '_blank');
   if (win) {
     try { win.opener = null; } catch (e) {}
-    toast('🌐 已打开，这张卡已置顶');
+    toast('🌐 已打开' + (state.role === 'desktop' ? '，这张卡已置顶' : ''));
   } else {
     try {
       await navigator.clipboard.writeText(url);
       toast('浏览器拦截了弹窗，链接已复制 📋', 'warn');
     } catch { toast('浏览器拦截了弹窗，请手动打开链接', 'warn'); }
   }
+  // 手机端只打开链接，不 POST /open：避免无写权限 403，也不改电脑端的 last_read_at 排序
+  if (state.role !== 'desktop') return;
   const res = await api(`/api/sites/${site.id}/open`, { method: 'POST' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.site) return; // 时间没记上也不打扰你阅读

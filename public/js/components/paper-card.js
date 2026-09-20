@@ -1,6 +1,7 @@
 /* ---------------- 组件：论文卡片 ---------------- */
 import { computed } from '../vue-globals.js';
 
+import { state } from '../state.js';
 import { formatDate } from '../util/date.js';
 import { noteRelMeta, noteSummary } from '../util/paper-note.js';
 import { platformStyle } from '../util/text.js';
@@ -11,6 +12,8 @@ const PaperCard = {
   emits: ['open', 'reveal', 'status', 'edit', 'remove', 'log', 'read'],
   setup(props, { emit }) {
     const isRead = computed(() => props.paper.status === 'read');
+    // Windows 本机能力：手机上点了只会作用在跑服务的电脑上，因此按 role 隐藏
+    const showDesktopActions = computed(() => state.role === 'desktop');
     const catStyle = computed(() => platformStyle(props.paper.category || '未分类'));
     const fileMissing = computed(() => !!props.paper.file_name && props.paper.file_exists === false);
     // 最近一次点「📖 阅读」的时间（列表就是按它排的，写在卡片上让人看得懂顺序）
@@ -25,7 +28,7 @@ const PaperCard = {
     const relMeta = computed(() => (latestLog.value ? noteRelMeta(latestLog.value.rel) : null));
 
     return {
-      isRead, catStyle, fileMissing, lastReadText, logs, logCount, latestLog, logSummary, relMeta,
+      isRead, showDesktopActions, catStyle, fileMissing, lastReadText, logs, logCount, latestLog, logSummary, relMeta,
       emitOpen: () => emit('open'),
       emitReveal: () => emit('reveal'),
       emitStatus: (s) => emit('status', s),
@@ -61,14 +64,14 @@ const PaperCard = {
     </div>
 
     <div class="card-actions" @click.stop>
-      <button class="btn small primary" v-if="paper.file_name && !fileMissing" @click="emitOpen">📖 阅读</button>
-      <button class="btn small ghost" v-if="paper.file_name && !fileMissing" @click="emitReveal">📁 所在位置</button>
+      <button class="btn small primary" v-if="showDesktopActions && paper.file_name && !fileMissing" @click="emitOpen">📖 阅读</button>
+      <button class="btn small ghost" v-if="showDesktopActions && paper.file_name && !fileMissing" @click="emitReveal">📁 所在位置</button>
       <button class="btn small ghost" v-if="!isRead" @click="emitRead">✅ 读完了</button>
       <button class="btn small ghost" v-else @click="emitStatus('to_read')">↩️ 移回待读</button>
       <button class="btn small ghost" v-if="isRead" @click="emitLog">{{ logCount ? '📝 记录 ' + logCount : '📝 记一条' }}</button>
-      <span class="spacer"></span>
-      <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small danger" @click="emitRemove">🗑</button>
+      <span class="spacer" v-if="showDesktopActions"></span>
+      <button class="btn small ghost" v-if="showDesktopActions" @click="emitEdit">✏️ 编辑</button>
+      <button class="btn small danger" v-if="showDesktopActions" @click="emitRemove">🗑</button>
     </div>
   </article>
   `,

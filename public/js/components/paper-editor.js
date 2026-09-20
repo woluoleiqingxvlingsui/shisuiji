@@ -1,5 +1,6 @@
 /* ---------------- 组件：论文新增 / 编辑抽屉 ---------------- */
 import { reactive, ref, computed, onMounted, onUnmounted, nextTick, watch } from '../vue-globals.js';
+import { state } from '../state.js';
 import { api } from '../api.js';
 
 const PaperEditor = {
@@ -43,15 +44,20 @@ const PaperEditor = {
     });
 
     async function loadMeta() {
+      // 手机端不扫注册表、不匹配磁盘文件：这两项只在跑服务的电脑上有意义
+      const isDesktop = state.role === 'desktop';
       try {
-        const [inb, cats, rs] = await Promise.all([
+        const tasks = [
           api('/api/papers/inbox').then((r) => r.json()),
           api('/api/papers/categories').then((r) => r.json()),
-          api('/api/papers/readers').then((r) => r.json()).catch(() => ({ readers: [] })),
-        ]);
+        ];
+        if (isDesktop) {
+          tasks.push(api('/api/papers/readers').then((r) => r.json()).catch(() => ({ readers: [] })));
+        }
+        const [inb, cats, rs] = await Promise.all(tasks);
         inbox.value = inb;
         categories.value = cats;
-        readers.value = rs.readers || [];
+        readers.value = isDesktop && rs ? (rs.readers || []) : [];
       } catch { /* 拉不到就先空着，保存时服务端还会兜底 */ }
       readersLoading.value = false;
     }
@@ -61,6 +67,7 @@ const PaperEditor = {
     watch(() => form.title, (val) => {
       clearTimeout(matchTimer);
       if (!val.trim()) { matches.value = null; return; }
+      if (state.role !== 'desktop') return; // 手机端不请求 /api/papers/match
       matchTimer = setTimeout(async () => {
         try {
           matches.value = await api('/api/papers/match?name=' + encodeURIComponent(val.trim())).then((r) => r.json());
