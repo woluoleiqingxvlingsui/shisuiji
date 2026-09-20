@@ -1496,13 +1496,18 @@ function readBody(req) {
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
 };
+
+// sw.js / manifest 必须 no-cache：no-store 会让浏览器拒绝 Service Worker 注册
+const PWA_NO_CACHE = new Set(['/sw.js', '/manifest.webmanifest']);
 
 async function serveStatic(req, res, pathname) {
   // 解析到 public/ 内，拒绝越权路径
@@ -1521,11 +1526,13 @@ async function serveStatic(req, res, pathname) {
     return;
   }
   const ext = path.extname(filePath).toLowerCase();
+  const reqPath = '/' + path.relative(PUBLIC_DIR, filePath).split(path.sep).join('/');
+  const cacheControl = PWA_NO_CACHE.has(reqPath) ? 'no-cache' : 'no-store';
   res.writeHead(200, {
     'Content-Type': MIME[ext] || 'application/octet-stream',
-    // 本地自用的小工具：前端文件一律不缓存，改完刷新就能看到效果。
-    // （原来的 max-age=300 会让浏览器 5 分钟内不回服务器，很容易误以为改动没生效）
-    'Cache-Control': 'no-store',
+    // 本地自用的小工具：前端文件默认不缓存，改完刷新就能看到效果。
+    // sw.js / manifest 用 no-cache，否则 Service Worker 注册会被拒
+    'Cache-Control': cacheControl,
   });
   res.end(data);
 }
@@ -1580,7 +1587,24 @@ function mobileMayWrite(method, pathname) {
   return false;
 }
 
-const server = http.createServer(async (req, res) => {
+// 可选 HTTPS：同时设置 DANJI_TLS_CERT 与 DANJI_TLS_KEY（PEM 路径）时启用；
+// 缺任一或读失败则回落 HTTP。自签证书可用 Git 自带的 openssl 生成。
+function loadTlsOptions() {
+  const certPath = String(process.env.DANJI_TLS_CERT || '').trim();
+  const keyPath = String(process.env.DANJI_TLS_KEY || '').trim();
+  if (!certPath || !keyPath) return null;
+  try {
+    return {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+  } catch (err) {
+    console.error(`[shisuiji] TLS 证书读取失败（${err.message}），回落 HTTP`);
+    return null;
+  }
+}
+
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
 
@@ -1629,7 +1653,11 @@ const server = http.createServer(async (req, res) => {
     console.error('[shisuiji] 静态服务错误:', err.message);
     res.writeHead(500); res.end('Internal Error');
   }
-});
+}
+
+const TLS_OPTIONS = loadTlsOptions();
+const USING_TLS = !!TLS_OPTIONS;
+const server = USING_TLS ? https.createServer(TLS_OPTIONS, handleRequest) : http.createServer(handleRequest);
 
 if (!fs.existsSync(PUBLIC_DIR)) {
     console.error('[shisuiji] 缺少 public 目录，请确认程序完整性');
@@ -1638,7 +1666,7 @@ if (!fs.existsSync(PUBLIC_DIR)) {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[shisuiji] 端口 ${PORT} 被占用，拾穗集可能已经在运行了，直接访问 http://localhost:${PORT}`);
+    console.error(`[shisuiji] 端口 ${PORT} 被占用，拾穗集可能已经在运行了，直接访问 ${USING_TLS ? 'https' : 'http'}://localhost:${PORT}`);
     process.exit(1);
   }
   throw err;
@@ -1648,9 +1676,15 @@ Promise.all([
   loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(),
 ]).then(() => {
   server.listen(PORT, HOST, () => {
-    console.log(`\n  🧺 拾穗集 已启动（监听 ${HOST}:${PORT}）`);
-    console.log(`  ➜  本机访问:  http://localhost:${PORT}`);
+    const scheme = USING_TLS ? 'https' : 'http';
+    console.log(`\n  🧺 拾穗集 已启动（${USING_TLS ? 'HTTPS' : 'HTTP'} 监听 ${HOST}:${PORT}）`);
+    console.log(`  ➜  本机访问:  ${scheme}://localhost:${PORT}`);
     console.log(`  ➜  手机同步:  ${APP_CONFIG.token ? '已开启口令校验' : '未设口令（局域网内可直接读写）'}${HOST === '0.0.0.0' ? ' · 已监听局域网' : ''}`);
+    if (USING_TLS) {
+      console.log('  ➜  PWA:       HTTPS 已启用，Service Worker 可注册');
+    } else {
+      console.log('  ➜  PWA:       仅 localhost/https 会注册 SW；局域网 http 关浏览器后无法离线冷启动');
+    }
     console.log(`  ➜  鸡蛋数据:  ${DATA_FILE}`);
     console.log(`  ➜  文献数据:  ${PAPERS_FILE}`);
     console.log(`  ➜  网页数据:  ${SITES_FILE}`);
