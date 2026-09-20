@@ -710,6 +710,15 @@ input, select, textarea { font: inherit; color: inherit; }
 .toast-enter-active, .toast-leave-active { transition: all .2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 
+.mobile-hint {
+  position: sticky; bottom: 0; z-index: 25;
+  margin: 0; padding: 8px 14px;
+  text-align: center; font-size: 12px; color: var(--muted);
+  background: color-mix(in srgb, var(--card-2) 92%, transparent);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+
 /* ---------- 小屏 / 触控适配 ---------- */
 /* iOS：input/select/textarea 必须 ≥16px，否则聚焦会整页放大 */
 input, select, textarea { font-size: 16px; }
@@ -772,10 +781,18 @@ input, select, textarea { font-size: 16px; }
   .drawer-form .row { flex-direction: column; gap: 0; }
   .drawer-form textarea.tall { min-height: 40vh; }
 
-  /* 花销饼图改竖排，图例宽度放开 */
+  /* 花销饼图改竖排，图例宽度放开；手机只读时隐藏写操作后仍保持可读 */
   .stat-body { flex-direction: column; align-items: stretch; gap: 12px; }
-  .pie { align-self: center; }
-  .pie-legend { min-width: 0; max-width: none; width: 100%; max-height: 220px; }
+  .pie { align-self: center; width: 140px; height: 140px; }
+  .pie-legend { min-width: 0; max-width: none; width: 100%; max-height: 200px; }
+  .stat-head { gap: 8px; }
+  .stat-picker .platform-select { max-width: 7.5em; }
+
+  /* 卡片：手机上元数据与标题更紧凑 */
+  .card { padding: 12px; }
+  .card-head { flex-wrap: wrap; row-gap: 4px; }
+  .card-actions { margin-top: 8px; }
+  .expense-card .card-head .title { flex-basis: 100%; order: 3; }
 
   .conflict-sides { grid-template-columns: 1fr; }
 }
