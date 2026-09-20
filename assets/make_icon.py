@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """生成「拾穗集」的可爱图标：编织小篮 + 金色麦穗 + 笑脸小蛋 + 一页小纸。
 运行: python make_icon.py
-输出: icon.ico (多尺寸 16-256)、icon-256.png、icon-512.png
+输出:
+  assets/  — icon.ico / icon-256.png / icon-512.png（桌面快捷方式）
+  public/icons/ — icon-192.png / icon-512.png / icon-maskable-512.png（PWA）
+maskable 版本：图形缩进 15% 安全边距，底色铺满整图。
 """
 import math
 import os
@@ -247,4 +250,21 @@ master.save(
     format="ICO",
     sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
 )
+
+# ---- PWA 图标：public/icons/ ----
+PUBLIC_ICONS = os.path.join(HERE, "..", "public", "icons")
+os.makedirs(PUBLIC_ICONS, exist_ok=True)
+master.resize((192, 192), Image.LANCZOS).save(os.path.join(PUBLIC_ICONS, "icon-192.png"))
+master.save(os.path.join(PUBLIC_ICONS, "icon-512.png"))
+
+# maskable：系统会在圆形/圆角蒙版下裁切，内容必须落在中心安全区（约 80% 直径）
+# 这里把主图缩到 70%（四边各留约 15%），底色铺满 512 画布
+SAFE = 0.70
+maskable = Image.new("RGBA", (FINAL, FINAL), BG)
+inner = master.resize((int(FINAL * SAFE), int(FINAL * SAFE)), Image.LANCZOS)
+off = (FINAL - inner.size[0]) // 2
+maskable.paste(inner, (off, off), inner)
+maskable.save(os.path.join(PUBLIC_ICONS, "icon-maskable-512.png"))
+
 print("saved icon.ico / icon-256.png / icon-512.png in", HERE)
+print("saved PWA icons in", os.path.normpath(PUBLIC_ICONS))

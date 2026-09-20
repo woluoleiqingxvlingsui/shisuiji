@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🧺 拾穗集 · 赛博鸡蛋与文献</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧺</text></svg>">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="拾穗集">
   <script>
     // 首屏渲染前定好明暗，避免闪白/闪黑：auto 时看系统偏好，其余用上次的选择
     // ?theme=light|dark 可临时强制某个明暗（只为调试/截图方便，不写入偏好）
@@ -15,7 +21,8 @@
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/js/pwa.js"></script>
 </head>
 <body>
 <div id="app" v-cloak>
@@ -402,9 +409,9 @@
   </transition>
 </div>
 
-<script src="vendor/vue.global.prod.js"></script>
+<script src="/vendor/vue.global.prod.js"></script>
 <!-- 原生 ES module：不用打包也不用装依赖。上面的经典脚本一定先执行完，
      所以这里 import 时能拿到已经挂在全局的 Vue -->
-<script type="module" src="js/app.js"></script>
+<script type="module" src="/js/app.js"></script>
 </body>
 </html>
