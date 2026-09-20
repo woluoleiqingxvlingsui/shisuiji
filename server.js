@@ -36,7 +36,7 @@ function loadAppConfig() {
       // 手机端访问口令。不配 = 不校验（和以前一样，只靠监听地址保护）；
       // 配了之后局域网设备每次请求要带 X-Danji-Token，本机回环永远免口令
       token: readToken(sync) || readToken(process.env),
-      // 论文库根目录（可选）。不配则回落到项目目录 papers\
+      // 论文库根目录（可选）。相对路径相对项目根目录；不配则回落到项目目录 papers\
       papersDir: String(parsed.papers_dir || '').trim(),
     };
   } catch {
@@ -47,6 +47,14 @@ function loadAppConfig() {
 function readToken(source) {
   return String((source && (source.token || source.DANJI_TOKEN)) || '').trim();
 }
+
+/** 把 papers_dir 解析成绝对路径：相对路径相对项目根，避免把本机绝对路径写进仓库 */
+function resolvePapersDir(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return path.join(ROOT, 'papers');
+  return path.isAbsolute(s) ? s : path.resolve(ROOT, s);
+}
+
 const APP_CONFIG = loadAppConfig();
 const PORT = validPort(Number(process.env.PORT)) || APP_CONFIG.port;
 // 只监听本机回环：局域网/外网不可达（API 无鉴权，不能暴露给同网段）。
@@ -62,9 +70,8 @@ const MAX_BODY = 2 * 1024 * 1024; // 请求体上限 2MB，防止误传大文件
 
 // 论文库根目录：下载的论文直接丢进来
 // 优先级：环境变量 DANJI_PAPERS_DIR > config.json 的 papers_dir > 项目目录 papers\
-const PAPERS_DIR = process.env.DANJI_PAPERS_DIR
-  || APP_CONFIG.papersDir
-  || path.join(ROOT, 'papers');
+// config 里的相对路径相对项目根解析；本机若要用项目外的目录，用环境变量覆盖，别写进仓库
+const PAPERS_DIR = resolvePapersDir(process.env.DANJI_PAPERS_DIR || APP_CONFIG.papersDir);
 
 const SCHEMA_VERSION = 1;
 const STATUSES = ['pending', 'claimed', 'used', 'expired', 'closed'];

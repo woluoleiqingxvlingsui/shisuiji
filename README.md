@@ -66,7 +66,7 @@ node server.js
 
 ## 📄 文献板块
 
-论文库根目录写在根目录 `config.json` 的 `papers_dir` 字段（也可用环境变量 `DANJI_PAPERS_DIR` 覆盖；两者都没配则默认项目目录下的 `papers\`）。改完重启服务生效。首次使用自动创建：
+论文库根目录写在根目录 `config.json` 的 `papers_dir` 字段（**相对路径相对项目根目录**，默认 `papers`；也可用环境变量 `DANJI_PAPERS_DIR` 覆盖，本机若要把论文库放在项目外用这个，不必改仓库里的 config）。改完重启服务生效。首次使用自动创建：
 
 ```
 papers\
