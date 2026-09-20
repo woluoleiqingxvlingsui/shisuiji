@@ -1,6 +1,7 @@
 /* ---------------- 组件：花销卡片 ---------------- */
 import { computed } from '../vue-globals.js';
 
+import { canWrite } from '../perm.js';
 import { formatDate } from '../util/date.js';
 import { expenseCategoryMeta } from '../util/expense.js';
 import { formatMoney } from '../util/money.js';
@@ -12,8 +13,9 @@ const ExpenseCard = {
   setup(props, { emit }) {
     const amountText = computed(() => formatMoney(props.expense.amount));
     const category = computed(() => expenseCategoryMeta(props.expense.category));
+    const writable = computed(() => canWrite('expenses'));
     return {
-      amountText, category, formatDate,
+      amountText, category, writable, formatDate,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
     };
@@ -27,7 +29,7 @@ const ExpenseCard = {
       <span class="expense-amount">{{ amountText }}</span>
     </div>
     <p class="expense-notes" v-if="expense.notes">{{ expense.notes }}</p>
-    <div class="card-actions" @click.stop>
+    <div class="card-actions" @click.stop v-if="writable">
       <span class="spacer"></span>
       <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
       <button class="btn small danger" @click="emitRemove">🗑</button>

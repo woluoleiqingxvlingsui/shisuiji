@@ -1,6 +1,8 @@
 /* ---------------- 组件：蛋卡片 ---------------- */
 import { computed, ref } from '../vue-globals.js';
 
+import { state } from '../state.js';
+import { canWrite } from '../perm.js';
 import { computeUrgency, formatDate, formatRemaining } from '../util/date.js';
 import { statusMeta, typeMeta } from '../util/meta.js';
 import { normalizeUrl, platformStyle } from '../util/text.js';
@@ -11,6 +13,7 @@ const EggCard = {
   emits: ['edit', 'remove', 'status'],
   setup(props, { emit }) {
     const expanded = ref(false);
+    const writable = computed(() => canWrite('eggs'));
 
     const urgency = computed(() => computeUrgency(props.activity, props.now));
     const status = computed(() => statusMeta(props.activity.status));
@@ -33,18 +36,22 @@ const EggCard = {
     });
 
     // 有链接就有直达按钮：待领取去领，已领取去查用量，其余状态只是打开链接
+    // 手机只读：仍可打开外链，但不出现会改库的状态按钮
     const linkUrl = computed(() => normalizeUrl(props.activity.link));
-    const linkLabel = computed(() => ({
-      pending: '🚀 去领取',
-      claimed: '🔍 查用量',
-    }[props.activity.status] || '↗ 打开链接'));
+    const linkLabel = computed(() => {
+      if (!writable.value) return '↗ 打开活动页';
+      return ({
+        pending: '🚀 去领取',
+        claimed: '🔍 查用量',
+      }[props.activity.status] || '↗ 打开链接');
+    });
 
     function openLink() {
       if (linkUrl.value) window.open(linkUrl.value, '_blank', 'noopener');
     }
 
     return {
-      expanded, urgency, status, type, isOverdue, deadlineText, validText,
+      expanded, urgency, status, type, isOverdue, deadlineText, validText, writable,
       linkUrl, linkLabel, openLink, platformStyle, formatDate,
       emitEdit: () => emit('edit'), emitRemove: () => emit('remove'),
       emitStatus: (s) => emit('status', s),
@@ -82,29 +89,26 @@ const EggCard = {
 
     <div class="card-actions" @click.stop>
       <button class="btn small primary" v-if="activity.link" @click="openLink">{{ linkLabel }}</button>
-      <template v-if="isOverdue">
+      <template v-if="writable && isOverdue">
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
         <button class="btn small ghost" @click="emitStatus('closed')">⏳ 已截止</button>
       </template>
-      <template v-else-if="activity.status === 'closed'">
-        <!-- 自动移入「已截止」可能误判（其实领到了只是没记），留个一键改回的口子 -->
+      <template v-else-if="writable && activity.status === 'closed'">
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
       </template>
-      <template v-else-if="activity.status === 'expired'">
-        <!-- 同理：自动或手动移入「已过期」也可能不准（日期记错 / 其实还能用），留个改回的口子 -->
+      <template v-else-if="writable && activity.status === 'expired'">
         <button class="btn small ghost" @click="emitStatus('claimed')">↩️ 还能用</button>
       </template>
-      <template v-else>
+      <template v-else-if="writable">
         <button class="btn small" :class="activity.link ? 'ghost' : 'primary'"
                 v-if="activity.status === 'pending'" @click="emitStatus('claimed')">🧺 已领取</button>
         <button class="btn small ghost" v-if="activity.status === 'pending'" @click="emitStatus('closed')">⏳ 已截止</button>
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('used')">🏁 用完了</button>
-        <!-- 不限量畅用的蛋永远不会「用完」，收尾只能走「已过期」，所以这个出口常驻 -->
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('expired')">💤 标为过期</button>
       </template>
-      <span class="spacer"></span>
-      <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small danger" @click="emitRemove">🗑</button>
+      <span class="spacer" v-if="writable"></span>
+      <button class="btn small ghost" v-if="writable" @click="emitEdit">✏️ 编辑</button>
+      <button class="btn small danger" v-if="writable" @click="emitRemove">🗑</button>
     </div>
   </article>
   `,

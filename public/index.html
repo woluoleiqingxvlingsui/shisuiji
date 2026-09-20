@@ -44,23 +44,23 @@
       <button class="btn ghost msg-btn" @click="switchBoard('messages')" title="消息中心：蛋过期的记录都在这里">
         💬 消息<span class="badge" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
       </button>
-      <button class="btn ghost notif" :class="{ off: !notifActive }" @click="toggleNotify" :title="notifTitle">
+      <button class="btn ghost notif" v-if="canWriteEggs" :class="{ off: !notifActive }" @click="toggleNotify" :title="notifTitle">
         {{ notifActive ? '🔔' : '🔕' }}
         <span v-if="state.notifPermission === 'default'" class="dot"></span>
       </button>
-      <button class="btn primary" @click="openEditor(null)">＋ 记蛋</button>
+      <button class="btn primary" v-if="canWriteEggs" @click="openEditor(null)">＋ 记蛋</button>
     </template>
     <template v-else-if="state.board === 'papers'">
       <input class="search" type="search" v-model.trim="state.paperSearch" placeholder="搜索论文 / 类别 / 备注…">
-      <button class="btn primary" v-if="state.role === 'desktop'" @click="openPaperEditor(null)">＋ 记论文</button>
+      <button class="btn primary" v-if="canWritePapers" @click="openPaperEditor(null)">＋ 记论文</button>
     </template>
     <template v-else-if="state.board === 'sites'">
       <input class="search" type="search" v-model.trim="state.siteSearch" placeholder="搜索网页 / 域名 / 笔记…">
-      <button class="btn primary" @click="openSiteEditor(null)">＋ 记网页</button>
+      <button class="btn primary" v-if="canWriteSites" @click="openSiteEditor(null)">＋ 记网页</button>
     </template>
     <template v-else-if="state.board === 'expenses'">
       <input class="search" type="search" v-model.trim="state.expenseSearch" placeholder="搜索花销内容 / 备注…">
-      <button class="btn primary" @click="openExpenseEditor(null)">＋ 记一笔</button>
+      <button class="btn primary" v-if="canWriteExpenses" @click="openExpenseEditor(null)">＋ 记一笔</button>
     </template>
     <template v-else-if="state.board === 'ideas'">
       <input class="search" type="search" v-model.trim="state.ideaSearch" placeholder="搜索想法…">
@@ -141,7 +141,7 @@
       <p class="empty-title">还没有记录，篮子是空的</p>
       <p class="empty-sub">把看到的优惠活动都记进来，一颗都不漏</p>
       <div class="empty-actions">
-        <button class="btn primary" @click="openEditor(null)">＋ 记第一颗蛋</button>
+        <button class="btn primary" v-if="canWriteEggs" @click="openEditor(null)">＋ 记第一颗蛋</button>
         <button class="btn ghost" @click="loadSamples">填入示例数据看看效果</button>
       </div>
     </div>
@@ -197,7 +197,7 @@
       <p class="empty-title">书架还是空的</p>
       <p class="empty-sub">下载好的论文丢进「论文」文件夹，再来这里记一笔，自动归档分类</p>
       <div class="empty-actions">
-        <button class="btn primary" v-if="state.role === 'desktop'" @click="openPaperEditor(null)">＋ 记第一篇论文</button>
+        <button class="btn primary" v-if="canWritePapers" @click="openPaperEditor(null)">＋ 记第一篇论文</button>
       </div>
     </div>
     <div class="empty" v-else-if="!filteredPapers.length">
@@ -253,7 +253,7 @@
       <p class="empty-title">还没有待读的网页</p>
       <p class="empty-sub">看到值得读的链接就记进来，读完写一条笔记，以后能搜回来复用</p>
       <div class="empty-actions">
-        <button class="btn primary" @click="openSiteEditor(null)">＋ 记第一个网页</button>
+        <button class="btn primary" v-if="canWriteSites" @click="openSiteEditor(null)">＋ 记第一个网页</button>
       </div>
     </div>
     <div class="empty" v-else-if="!filteredSites.length">
@@ -299,7 +299,7 @@
         <p class="empty-title">还没有记过花销</p>
         <p class="empty-sub">学习、办公相关的开销都记进来，月底一眼看清花在哪</p>
         <div class="empty-actions">
-          <button class="btn primary" @click="openExpenseEditor(null)">＋ 记第一笔</button>
+          <button class="btn primary" v-if="canWriteExpenses" @click="openExpenseEditor(null)">＋ 记第一笔</button>
         </div>
       </div>
       <div class="empty" v-else-if="!expenseVisibleItems.length">
@@ -356,8 +356,8 @@
         </span>
       </div>
       <div class="filter-right">
-        <button class="btn ghost small" v-if="unreadCount" @click="markAllRead">全部已读</button>
-        <button class="btn ghost small" v-if="state.messages.length > unreadCount" @click="clearReadMessages">清空已读</button>
+        <button class="btn ghost small" v-if="canMarkMessages && unreadCount" @click="markAllRead">全部已读</button>
+        <button class="btn ghost small" v-if="canMarkMessages && state.messages.length > unreadCount" @click="clearReadMessages">清空已读</button>
       </div>
     </div>
 
@@ -402,6 +402,8 @@
 
   <idea-editor v-if="state.board === 'ideas' && state.ideaEditorOpen" :initial="state.editingIdea"
                @save="saveIdea" @close="state.ideaEditorOpen = false"></idea-editor>
+
+  <div class="mobile-hint" v-if="mobileHint">{{ mobileHint }}</div>
 
   <!-- 轻提示 -->
   <transition name="toast">

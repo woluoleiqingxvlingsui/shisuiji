@@ -1,6 +1,7 @@
 /* ---------------- 组件：体感评价卡（主体素材 + 我的评价） ---------------- */
 import { reactive, computed, watch } from '../vue-globals.js';
 
+import { canWrite } from '../perm.js';
 import { CONFIG } from '../../config.js';
 import { formatDate } from '../util/date.js';
 import { buildVerdictDraft, expenseCategoryMeta } from '../util/expense.js';
@@ -27,6 +28,7 @@ const InsightCard = {
     watch(() => props.verdict, syncFromVerdict);
 
     const hasSaved = computed(() => !!props.verdict);
+    const writable = computed(() => canWrite('insights'));
     const catSplits = computed(() => props.insight.categorySplit
       .map((c) => ({ ...c, meta: expenseCategoryMeta(c.id) })));
 
@@ -50,7 +52,7 @@ const InsightCard = {
     }
 
     return {
-      form, hasSaved, catSplits, pickStar, pickDecision, fillDraft, save,
+      form, hasSaved, writable, catSplits, pickStar, pickDecision, fillDraft, save,
       decisions: CONFIG.expenses.decisions,
       defaultTag: CONFIG.expenses.insightDefaultTag,
       tagLabel(id) {
@@ -86,7 +88,7 @@ const InsightCard = {
       </div>
     </div>
 
-    <div class="insight-mine">
+    <div class="insight-mine" v-if="writable">
       <p class="insight-label">🧠 我的评价</p>
       <div class="insight-controls">
         <div class="star-row" title="体感评分：点星打分，再点同一颗取消">
@@ -107,6 +109,14 @@ const InsightCard = {
         <span class="spacer"></span>
         <button class="btn small primary" @click="save">💾 保存</button>
       </div>
+    </div>
+    <div class="insight-mine" v-else-if="hasSaved">
+      <p class="insight-label">🧠 我的评价</p>
+      <div class="insight-controls">
+        <span v-if="form.rating" class="star-num">{{ form.rating }} / 5</span>
+        <span v-if="form.decision" class="chip">{{ form.decision }}</span>
+      </div>
+      <p class="paper-notes" v-if="form.verdict">{{ form.verdict }}</p>
     </div>
   </article>
   `,
