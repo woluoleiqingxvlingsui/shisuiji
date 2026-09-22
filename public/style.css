@@ -720,8 +720,10 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 
 /* ---------- 小屏 / 触控适配 ---------- */
-/* iOS：input/select/textarea 必须 ≥16px，否则聚焦会整页放大 */
-input, select, textarea { font-size: 16px; }
+/* iOS 聚焦放大只在手机视口规避；桌面保持 body 14px，抽屉字号与改前一致 */
+@media (max-width: 640px) {
+  input, select, textarea, .search { font-size: 16px; }
+}
 
 @media (hover: none) {
   .card:hover { transform: none; box-shadow: none; }
