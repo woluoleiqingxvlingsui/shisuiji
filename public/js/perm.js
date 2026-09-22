@@ -4,6 +4,7 @@
  */
 
 import { state } from './state.js';
+import { isSecurePwaContext, isPwaShellActive } from './pwa.js';
 
 function isDesktop() {
   if (state.role === 'desktop') return true;
@@ -26,7 +27,15 @@ function canMarkMessages() {
 
 /** 展示用说明条 */
 function mobileReadOnlyHint() {
-  return isDesktop() ? '' : '手机端可浏览 · 想法可离线记';
+  if (isDesktop()) return '';
+  const base = '手机端可浏览 · 想法可离线记';
+  if (!isSecurePwaContext()) {
+    return base + ' · 未配 HTTPS：关掉浏览器后不能冷启动';
+  }
+  if (!isPwaShellActive()) {
+    return base + ' · 离线壳未生效：请刷新一次再「添加到主屏幕」';
+  }
+  return base + ' · 离线壳已就绪';
 }
 
 export { isDesktop, canWrite, canMarkMessages, mobileReadOnlyHint };
