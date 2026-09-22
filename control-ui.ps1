@@ -128,6 +128,11 @@ try {
 function Start-ServerFire {
   $script:EnvInfo = Import-LocalEnv
   Refresh-AddressLabels
+  # 带 local.env / TLS 环境启动；端口有残留但探活失败时先停再起（HTTP→HTTPS）
+  if (-not (Test-Up) -and (Get-ServerPid)) {
+    Stop-Server | Out-Null
+    Start-Sleep -Milliseconds 400
+  }
   Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $Base -WindowStyle Hidden
   $script:LaunchPending = $true
   $script:StartTicks = 0
@@ -159,7 +164,7 @@ function Update-Status {
       $script:LaunchPending = $false
       $dot.Fill          = ColorBrush '#FF5C5C'
       $statusText.Text   = "启动失败"
-      $statusDetail.Text = "请在项目文件夹运行 node server.js 查看具体报错"
+      $statusDetail.Text = "端口 $($Port) 可能被占用，或 node 报错。可在项目目录运行 node server.js 看日志"
       $btnOpen.IsEnabled  = $true
       $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
       $btnStart.IsEnabled = $true

@@ -1,10 +1,19 @@
-# 拾穗集 公共函数库 —— control.ps1（命令行）与 control-ui.ps1（图形窗口）共用
+﻿# 拾穗集 公共函数库 —— control.ps1（命令行）与 control-ui.ps1（图形窗口）共用
 # 服务在本目录以隐藏窗口方式独立运行：关掉控制台/图形窗口都不会停服务。
 # 启动时自动加载 local.env.ps1（口令等）以及目录下若存在的 HTTPS 证书。
 
-$Base   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Base = $null
+if ($PSScriptRoot) { $Base = $PSScriptRoot }
+elseif ($MyInvocation.MyCommand.Path) { $Base = Split-Path -Parent $MyInvocation.MyCommand.Path }
+else { $Base = (Get-Location).Path }
 
-# 与 server.js 共用根目录 config.json；优先级：环境变量 > config.json > 内置默认 8642
+$AppCfg = $null
+$Port = 8642
+$Scheme = 'http'
+$Url = "http://localhost:8642"
+$PhoneUrl = $null
+$Health = "http://127.0.0.1:8642/api/health"
+
 function Get-AppConfig {
   $cfg = @{ port = 8642; host = '127.0.0.1' }
   $cfgPath = Join-Path $Base 'config.json'
@@ -26,11 +35,10 @@ function Get-AppConfig {
   return $cfg
 }
 
-# 加载本地私密配置（gitignore）：DANJI_TOKEN / DANJI_HOST / TLS 证书路径
 function Import-LocalEnv {
   $envFile = Join-Path $Base 'local.env.ps1'
   if (Test-Path $envFile) {
-    try { . $envFile } catch { Write-Host "local.env.ps1 加载失败: $($_.Exception.Message)" }
+    try { . $envFile } catch { Write-Host ("local.env.ps1 加载失败: " + $_.Exception.Message) }
   }
   $cert = Join-Path $Base 'danji-cert.pem'
   $key  = Join-Path $Base 'danji-key.pem'
@@ -70,43 +78,51 @@ function Get-LanIPv4 {
   return $null
 }
 
-$AppCfg = Get-AppConfig
-$Port   = $AppCfg.port
-$Scheme = 'http'
-$Url    = "http://localhost:$Port"
-
 function Update-UrlFromEnv {
-  if (Get-UseTls) { $script:Scheme = 'https' } else { $script:Scheme = 'http' }
-  $script:Url = "{0}://localhost:{1}" -f $script:Scheme, $Port
+  if (Get-UseTls) { $Scheme = 'https' } else { $Scheme = 'http' }
+  $Url = ("{0}://localhost:{1}" -f $Scheme, $Port)
   $lip = Get-LanIPv4
-  if ($lip) {
-    $script:PhoneUrl = "{0}://{1}:{2}" -f $script:Scheme, $lip, $Port
-  } else {
-    $script:PhoneUrl = $null
-  }
-  $script:Health = "{0}://127.0.0.1:{1}/api/health" -f $script:Scheme, $Port
+  if ($lip) { $PhoneUrl = ("{0}://{1}:{2}" -f $Scheme, $lip, $Port) }
+  else { $PhoneUrl = $null }
+  $Health = ("{0}://127.0.0.1:{1}/api/health" -f $Scheme, $Port)
+  # 同步到脚本作用域，避免 UI 读到旧的 $Url
+  $script:Scheme = $Scheme
+  $script:Url = $Url
+  $script:PhoneUrl = $PhoneUrl
+  $script:Health = $Health
+  $script:Port = $Port
 }
 
-# 启动前先读一遍 env，便于控制台立刻显示地址
-$null = Import-LocalEnv
-Update-UrlFromEnv
-$Health = $script:Health
-$PhoneUrl = $script:PhoneUrl
+# 探测 URI 是否 200。自签证书用 curl -k，避免 PowerShell 对 HTTPS 误判「服务未启动」
+function Test-UriOk([string]$uri) {
+  $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+  if (Test-Path $curl) {
+    & $curl -sk -m 2 -f -o NUL $uri 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+  }
+  try {
+    $req = [System.Net.HttpWebRequest]::Create($uri)
+    $req.Timeout = 1500
+    $req.Method = 'GET'
+    if ($uri.StartsWith('https')) {
+      $req.ServerCertificateValidationCallback = { $true }
+    }
+    $resp = $req.GetResponse()
+    $code = [int]$resp.StatusCode
+    $resp.Close()
+    return ($code -eq 200)
+  } catch { return $false }
+}
 
 function Test-Up {
-  try {
-    $uri = "{0}://127.0.0.1:{1}/api/health" -f $script:Scheme, $Port
-    if ($script:Scheme -eq 'https') {
-      # 自签证书：仅本机健康检查时跳过校验
-      [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-      try {
-        return ((Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 1).StatusCode -eq 200)
-      } finally {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $null
-      }
-    }
-    return ((Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 1).StatusCode -eq 200)
-  } catch { return $false }
+  Update-UrlFromEnv
+  # HTTP / HTTPS 都探：只要有一个在服就算在跑
+  $a = Test-UriOk ("http://127.0.0.1:{0}/api/health" -f $Port)
+  if ($a) { $script:LiveScheme = 'http'; return $true }
+  $b = Test-UriOk ("https://127.0.0.1:{0}/api/health" -f $Port)
+  if ($b) { $script:LiveScheme = 'https'; return $true }
+  $script:LiveScheme = $null
+  return $false
 }
 
 function Get-ServerPid {
@@ -116,11 +132,19 @@ function Get-ServerPid {
 }
 
 function Start-Server {
-  if (Test-Up) { return $true }
+  if (Test-Up) {
+    # 协议不对（有证书却在跑 HTTP）时提示由 UI 处理；这里只判断「在不在」
+    return $true
+  }
   $null = Import-LocalEnv
   Update-UrlFromEnv
+  # 端口被占但健康检查不过：先停掉残留进程，再启动（常见于 HTTP→HTTPS 切换）
+  if (Get-ServerPid) {
+    Stop-Server | Out-Null
+    Start-Sleep -Milliseconds 400
+  }
   Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $Base -WindowStyle Hidden
-  for ($i = 0; $i -lt 20; $i++) {
+  for ($i = 0; $i -lt 24; $i++) {
     Start-Sleep -Milliseconds 500
     if (Test-Up) { return $true }
   }
@@ -133,3 +157,9 @@ function Stop-Server {
   try { Stop-Process -Id $srvPid -Force -ErrorAction Stop } catch { }
   return $true
 }
+
+# 初始化配置与地址
+$AppCfg = Get-AppConfig
+$Port   = $AppCfg.port
+$null = Import-LocalEnv
+Update-UrlFromEnv
