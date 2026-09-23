@@ -7,6 +7,7 @@
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { apiJson, getToken, setToken } from '../api.js';
+import { isNativePlatform } from '../pwa.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -117,17 +118,21 @@ function rememberRole(role) {
  * - health 成功：按 role 决定是否启用同步层
  * - health 失败：若上次是 mobile / 强制 mobile / 视口像手机 → 进入离线 mobile，
  *   IndexedDB 镜像∪队列仍可记想法；服务恢复后自动同步
+ * - Capacitor 原生壳：强制 mobile，health 只作可达 / 口令探测
  */
 async function initSync() {
   const force = forceMobileFromQuery();
+  const native = isNativePlatform();
   const { role, needToken, reachable } = await detectRole();
   bindIsPhoneMq();
   syncIsPhone();
 
   let effectiveRole;
   let offline = false;
-  if (force) {
+  if (force || native) {
+    // 原生壳始终是手机同步端，不看 health.role / lastRole
     effectiveRole = 'mobile';
+    offline = !reachable;
   } else if (reachable && (role === 'desktop' || role === 'mobile')) {
     effectiveRole = role;
     rememberRole(role);
@@ -142,7 +147,7 @@ async function initSync() {
   state.sync.role = effectiveRole;
   state.sync.offline = offline;
   state.sync.needToken = reachable && needToken && !getToken();
-  state.sync.enabled = force || effectiveRole === 'mobile';
+  state.sync.enabled = force || native || effectiveRole === 'mobile';
 
   if (!state.sync.enabled) {
     setStatus('idle');

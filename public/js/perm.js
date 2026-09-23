@@ -4,7 +4,7 @@
  */
 
 import { state } from './state.js';
-import { isSecurePwaContext, isPwaShellActive } from './pwa.js';
+import { isSecurePwaContext, isPwaShellActive, isNativePlatform } from './pwa.js';
 
 function isDesktop() {
   if (state.role === 'desktop') return true;
@@ -28,6 +28,10 @@ function canMarkMessages() {
 /** 展示用说明条 */
 function mobileReadOnlyHint() {
   if (isDesktop()) return '';
+  // 原生壳：本地已内置应用，不谈 HTTPS / PWA 离线壳
+  if (isNativePlatform()) {
+    return 'App 模式：断网可记想法';
+  }
   const base = '手机端可浏览 · 想法可离线记';
   if (!isSecurePwaContext()) {
     return base + ' · 未配 HTTPS：关掉浏览器后不能冷启动';
