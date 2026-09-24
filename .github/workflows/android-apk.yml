@@ -1,0 +1,58 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master, 'feat/**']
+    paths:
+      - 'public/**'
+      - 'app/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'public/**'
+      - 'app/**'
+      - 'package.json'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Capacitor deps
+        working-directory: app
+        run: npm ci || npm install
+
+      - name: Sync web assets
+        working-directory: app
+        run: npx cap sync android
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > app/android/local.properties
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      - name: Build debug APK
+        working-directory: app/android
+        run: gradle assembleDebug --no-daemon
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: shisuiji-app-debug
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

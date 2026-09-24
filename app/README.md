@@ -2,6 +2,19 @@
 
 把仓库根目录的 `public/` 前端打进 APK。`webDir` 指向 `../public`，**无前端打包步骤**。
 
+## 一键打包（推荐）
+
+```powershell
+# 在仓库根目录
+powershell -ExecutionPolicy Bypass -File app\build-apk.ps1
+```
+
+脚本会：缺 JDK21 / Android SDK / Gradle 时自动下载到 `%USERPROFILE%\tools`（Gradle 走国内镜像）→ `cap sync` → `assembleDebug`，并打印 APK 路径。已装环境会复用，可重复执行。
+
+也可在 GitHub 仓库 **Actions → Android APK** 下载 CI 打好的 `shisuiji-app-debug`。
+
+进阶手动步骤见下。
+
 > Cap 7 Android 模板按 **Java 21** 编译（见 `android/app/capacitor.build.gradle`）。  
 > 下列「需 Android 工具链」的步骤要在装了 JDK/SDK 的机器上跑；开发机没有工具链时，以 `npx cap sync` 成功 + 根仓库 `npm test` 作为骨架验收。
 
