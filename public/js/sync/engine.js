@@ -6,8 +6,9 @@
 
 import { state } from '../state.js';
 import { toast } from '../toast.js';
-import { apiJson, getToken, setToken } from '../api.js';
+import { apiJson, getToken, setToken, getServerBase } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
+import { isPaired } from '../pair.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -123,6 +124,7 @@ function rememberRole(role) {
 async function initSync() {
   const force = forceMobileFromQuery();
   const native = isNativePlatform();
+  const needPair = native && !isPaired();
   const { role, needToken, reachable } = await detectRole();
   bindIsPhoneMq();
   syncIsPhone();
@@ -132,7 +134,7 @@ async function initSync() {
   if (force || native) {
     // 原生壳始终是手机同步端，不看 health.role / lastRole
     effectiveRole = 'mobile';
-    offline = !reachable;
+    offline = !reachable || needPair;
   } else if (reachable && (role === 'desktop' || role === 'mobile')) {
     effectiveRole = role;
     rememberRole(role);
@@ -146,7 +148,10 @@ async function initSync() {
   state.role = effectiveRole;
   state.sync.role = effectiveRole;
   state.sync.offline = offline;
-  state.sync.needToken = reachable && needToken && !getToken();
+  state.sync.needPair = needPair;
+  state.sync.pairOpen = needPair;
+  // 未配对时用配对表单收口令，不走旧的 need_token 弹层
+  state.sync.needToken = !needPair && reachable && needToken && !getToken();
   state.sync.enabled = force || native || effectiveRole === 'mobile';
 
   if (!state.sync.enabled) {
@@ -494,6 +499,26 @@ function submitToken(token) {
   return t;
 }
 
+/** 配对成功后收尾：关表单、恢复可达状态并立刻同步 */
+function notifyPaired() {
+  state.sync.needPair = false;
+  state.sync.pairOpen = false;
+  state.sync.offline = false;
+  state.sync.needToken = false;
+  if (state.sync.pendingCount > 0) setStatus('offline');
+  else setStatus('idle');
+  syncNow({ reason: 'pair' });
+}
+
+function openPair() {
+  state.sync.pairOpen = true;
+}
+
+function closePair() {
+  // 未配对时允许关闭（离线记想法），但仍标 needPair
+  state.sync.pairOpen = false;
+}
+
 function installSync() {
   if (started) return Promise.resolve(state.sync.enabled);
   started = true;
@@ -508,6 +533,9 @@ export {
   resolveConflict,
   enqueueIdeaLocal,
   submitToken,
+  notifyPaired,
+  openPair,
+  closePair,
   reloadIdeasDisplay,
   disposeSync,
   refreshPendingCount,

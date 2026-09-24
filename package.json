@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node tools/check-syntax.mjs && node tools/test-sync-logic.mjs && node tools/test-api-base.mjs",
+    "test": "node --check server.js && node tools/check-syntax.mjs && node tools/test-sync-logic.mjs && node tools/test-api-base.mjs && node tools/test-pair.mjs",
     "test:render": "node tools/render-boards.mjs"
   },
   "engines": {

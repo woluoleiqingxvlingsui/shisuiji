@@ -403,6 +403,8 @@
   <idea-editor v-if="state.board === 'ideas' && state.ideaEditorOpen" :initial="state.editingIdea"
                @save="saveIdea" @close="state.ideaEditorOpen = false"></idea-editor>
 
+  <pair-drawer></pair-drawer>
+
   <div class="mobile-hint" v-if="mobileHint">{{ mobileHint }}</div>
 
   <!-- 轻提示 -->

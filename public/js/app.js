@@ -125,6 +125,7 @@ import { InsightCard } from './components/insight-card.js';
 import { MessageCard } from './components/message-card.js';
 import { IdeaCard } from './components/idea-card.js';
 import { IdeaEditor } from './components/idea-editor.js';
+import { PairDrawer } from './components/pair-drawer.js';
 
 /* ---------------- 根应用 ---------------- */
 // 全局兜底用的 toast 引用：toast 定义在 setup 里，挂载后由 setup 回填
@@ -273,6 +274,19 @@ const app = createApp({
       // 浏览器会把后台标签页的定时器拖慢到几分钟一次，切回来的瞬间立刻补查一次
       if (document.visibilityState === 'visible') checkReminders();
     }
+    // M2：原生配对成功后补拉各板块（需在 setup 作用域，onUnmounted 才能解绑）
+    function onPaired() {
+      state.sync.offline = false;
+      load();
+      loadMessages().catch(() => {});
+      settleOverdue();
+      loadPapers();
+      loadSites();
+      loadExpenses();
+      loadInsights();
+      loadIdeas();
+    }
+
     onMounted(async () => {
       applyTheme(); // 内联脚本已经设过，这里兜一次（也覆盖脚本被禁用的情况）
       if (systemDark.addEventListener) systemDark.addEventListener('change', onSystemThemeChange);
@@ -284,6 +298,8 @@ const app = createApp({
       // P6/P9：先探测角色。手机端启用同步层；离线时跳过 REST，避免一串失败提示
       await installSync();
       const offlineBoot = !!(state.sync && state.sync.offline);
+
+      window.addEventListener('danji:paired', onPaired);
 
       if (offlineBoot) {
         // 离线冷启动：默认落到想法（本地镜像∪队列），其它板块标记已加载空态
@@ -317,6 +333,7 @@ const app = createApp({
       clearInterval(tickTimer);
       clearInterval(remindTimer);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('danji:paired', onPaired);
       stopObserveTopbar();
       if (systemDark.removeEventListener) systemDark.removeEventListener('change', onSystemThemeChange);
       else if (systemDark.removeListener) systemDark.removeListener(onSystemThemeChange);
@@ -379,6 +396,7 @@ app.component('insight-card', InsightCard);
 app.component('message-card', MessageCard);
 app.component('idea-card', IdeaCard);
 app.component('idea-editor', IdeaEditor);
+app.component('pair-drawer', PairDrawer);
 app.component('sync-status', SyncStatus);
 
 // 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）

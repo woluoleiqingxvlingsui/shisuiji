@@ -2,7 +2,8 @@
 
 import { computed, ref, watch } from '../vue-globals.js';
 import { state } from '../state.js';
-import { syncNow, resolveConflict, submitToken } from '../sync/engine.js';
+import { syncNow, resolveConflict, submitToken, openPair } from '../sync/engine.js';
+import { isNativePlatform } from '../pwa.js';
 
 const SyncStatus = {
   name: 'SyncStatus',
@@ -25,6 +26,7 @@ const SyncStatus = {
     const label = computed(() => {
       const s = state.sync;
       if (!s.enabled) return '';
+      if (s.needPair) return '未配对';
       if (s.status === 'need_token') return '待填口令';
       if (conflictCount.value > 0) return `${conflictCount.value} 条冲突`;
       if (s.status === 'syncing') return '同步中';
@@ -49,6 +51,7 @@ const SyncStatus = {
 
     const pillClass = computed(() => {
       const s = state.sync;
+      if (s.needPair) return 'sync-pill warn';
       if (s.status === 'need_token') return 'sync-pill warn';
       if (conflictCount.value) return 'sync-pill conflict';
       if (s.status === 'syncing') return 'sync-pill syncing';
@@ -59,6 +62,11 @@ const SyncStatus = {
     });
 
     async function onPillClick() {
+      // 原生壳：点胶囊进配对表单（未配对引导连接 / 已配对可重配、清配对、立即同步）
+      if (state.sync.needPair || isNativePlatform()) {
+        openPair();
+        return;
+      }
       if (state.sync.status === 'need_token') return;
       if (conflictCount.value) {
         resolving.value = state.sync.conflicts[0].id;

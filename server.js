@@ -1458,12 +1458,40 @@ function applyIdeaOp(op, role) {
 }
 
 // ---------- HTTP 基础设施 ----------
+// Capacitor WebView 预检/跨源保险：原生 CapacitorHttp 通常不走 CORS，
+// 但 WebView fetch 退回时需要。只回显白名单 Origin，不用 *。
+const CORS_ALLOW_ORIGIN_RE = /^(https?|capacitor|ionic):\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
+function corsAllowOrigin(origin, reqHost) {
+  if (!origin) return '';
+  if (CORS_ALLOW_ORIGIN_RE.test(origin)) return origin;
+  // 同源局域网（Origin host === Host，且 Host 是 IP/localhost）
+  if (originAllowed(origin, reqHost)) {
+    try {
+      return new URL(origin).origin;
+    } catch { /* fallthrough */ }
+  }
+  return '';
+}
+
+function applyCorsHeaders(req, res) {
+  const allow = corsAllowOrigin(req.headers.origin, req.headers.host);
+  if (!allow) return;
+  res.setHeader('Access-Control-Allow-Origin', allow);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'x-danji-token, content-type');
+  res.setHeader('Access-Control-Max-Age', '600');
+}
+
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
-  res.writeHead(statusCode, {
+  const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-  });
+  };
+  // 已通过 applyCorsHeaders 写入的头会保留（writeHead 合并 setHeader）
+  res.writeHead(statusCode, headers);
   res.end(body);
 }
 
@@ -1609,6 +1637,15 @@ function loadTlsOptions() {
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
+
+  if (pathname.startsWith('/api/')) {
+    applyCorsHeaders(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  }
 
   if (pathname.startsWith('/api/') && !originAllowed(req.headers.origin, req.headers.host)) {
     console.error(`[shisuiji] 已拒绝非本机来源的 API 请求: Origin=${req.headers.origin || '(无)'} Host=${req.headers.host || '(无)'}`);
