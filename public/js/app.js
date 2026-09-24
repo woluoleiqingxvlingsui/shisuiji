@@ -15,6 +15,7 @@ import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea } from '
 import { SyncStatus } from './components/sync-status.js';
 import { installSync, disposeSync } from './sync/engine.js';
 import { canWrite, canMarkMessages, mobileReadOnlyHint } from './perm.js';
+import { isNativePlatform } from './pwa.js';
 
 import { CONFIG } from '../config.js';
 import { HOUR, FLASH_MS } from './util/const.js';
@@ -296,10 +297,15 @@ const app = createApp({
       syncTopbarHeight();
 
       // P6/P9：先探测角色。手机端启用同步层；离线时跳过 REST，避免一串失败提示
+      // M3.1：原生先落在「想法」，避免默认「蛋」板块空转
+      if (isNativePlatform() || new URLSearchParams(location.search).get('danji-mobile') === '1') {
+        if (state.board !== 'ideas') switchBoard('ideas');
+      }
       await installSync();
       const offlineBoot = !!(state.sync && state.sync.offline);
 
       window.addEventListener('danji:paired', onPaired);
+      window.addEventListener('danji:online', onPaired);
 
       if (offlineBoot) {
         // 离线冷启动：默认落到想法（本地镜像∪队列），其它板块标记已加载空态
@@ -325,7 +331,10 @@ const app = createApp({
         loadInsights();
         loadIdeas();
       }
-      tickTimer = setInterval(() => { state.now = Date.now(); if (!offlineBoot) settleOverdue(); }, 30 * 1000);
+      tickTimer = setInterval(() => {
+        state.now = Date.now();
+        if (!(state.sync && state.sync.offline)) settleOverdue();
+      }, 30 * 1000);
       remindTimer = setInterval(checkReminders, CONFIG.remind.checkIntervalSec * 1000);
       document.addEventListener('visibilitychange', onVisibility);
     });
@@ -334,6 +343,7 @@ const app = createApp({
       clearInterval(remindTimer);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('danji:paired', onPaired);
+      window.removeEventListener('danji:online', onPaired);
       stopObserveTopbar();
       if (systemDark.removeEventListener) systemDark.removeEventListener('change', onSystemThemeChange);
       else if (systemDark.removeListener) systemDark.removeListener(onSystemThemeChange);

@@ -50,17 +50,37 @@ function resolveApiUrl(path) {
   return joinApiUrl(path, getServerBase());
 }
 
-/** 带可选口令头的 fetch 封装 */
+const DEFAULT_TIMEOUT_MS = 12000;
+const HEALTH_TIMEOUT_MS = 4000;
+
+/** 超时控制：Promise.race + 定时器；超时抛 TimeoutError（不中断底层 fetch） */
+function withTimeout(promise, timeoutMs) {
+  const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`timeout after ${ms}ms`);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/** 带可选口令头的 fetch 封装（默认 12s 超时） */
 async function api(path, init = {}) {
-  const headers = { ...(init.headers || {}) };
+  const { timeoutMs, ...rest } = init;
+  const headers = { ...(rest.headers || {}) };
   const token = getToken();
   if (token && !headers['X-Danji-Token'] && !headers['x-danji-token']) {
     headers['X-Danji-Token'] = token;
   }
-  if (init.body != null && typeof init.body === 'string' && !headers['Content-Type']) {
+  if (rest.body != null && typeof rest.body === 'string' && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  return fetch(resolveApiUrl(path), { ...init, headers });
+  return withTimeout(fetch(resolveApiUrl(path), { ...rest, headers }), timeoutMs);
 }
 
 /** 读 JSON：统一返回 { ok, status, data, res }，网络层异常会 throw */
@@ -73,6 +93,8 @@ async function apiJson(path, init = {}) {
 export {
   TOKEN_KEY,
   SERVER_BASE_KEY,
+  DEFAULT_TIMEOUT_MS,
+  HEALTH_TIMEOUT_MS,
   getToken,
   setToken,
   normalizeServerBase,
@@ -80,6 +102,7 @@ export {
   setServerBase,
   joinApiUrl,
   resolveApiUrl,
+  withTimeout,
   api,
   apiJson,
 };

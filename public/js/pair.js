@@ -3,7 +3,7 @@
  * 校验失败只报错，绝不半写配置。
  */
 
-import { setServerBase, setToken, getServerBase, getToken, joinApiUrl } from './api.js';
+import { setServerBase, setToken, getServerBase, getToken, joinApiUrl, withTimeout, HEALTH_TIMEOUT_MS } from './api.js';
 
 /** host:port（可含主机名 / IPv6）——注意不能把 localhost:8642 当成自定义 scheme */
 const HOST_PORT_RE = /^(?:localhost|\[[0-9a-fA-F:]+\]|(?:\d{1,3}\.){3}\d{1,3}|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*):\d{1,5}$/i;
@@ -62,7 +62,7 @@ async function testPair(base, token) {
   const t = String(token || '').trim();
   if (t) headers['X-Danji-Token'] = t;
   try {
-    const res = await fetch(joinApiUrl('/api/health', b), { headers });
+    const res = await withTimeout(fetch(joinApiUrl('/api/health', b), { headers }), HEALTH_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
   } catch (err) {

@@ -6,10 +6,10 @@
 
 import { state } from '../state.js';
 import { toast } from '../toast.js';
-import { apiJson, getToken, setToken } from '../api.js';
+import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
-import { shouldAttemptSync } from './net.js';
+import { shouldAttemptSync, pickIntervalMs } from './net.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -26,12 +26,12 @@ import {
   toPushPayload,
 } from './outbox.js';
 
-const SYNC_INTERVAL_MS = 60 * 1000;
 const MOBILE_FORCE_KEY = 'danji-mobile';
 
 let syncing = false;
 let started = false;
 let intervalTimer = null;
+let intervalMs = 0;
 let listenersBound = false;
 
 function uuid() {
@@ -69,6 +69,7 @@ function syncIsPhone() {
 function refreshPendingCount() {
   return listOutbox().then((ops) => {
     state.sync.pendingCount = ops.length;
+    try { rearmInterval(); } catch { /* 尚未启动 interval 时忽略 */ }
     return ops.length;
   }).catch(() => 0);
 }
@@ -93,7 +94,7 @@ function setStatus(status, extra = {}) {
 
 async function detectRole() {
   try {
-    const { ok, data } = await apiJson('/api/health');
+    const { ok, data } = await apiJson('/api/health', { timeoutMs: HEALTH_TIMEOUT_MS });
     if (!ok || !data) return { role: 'unknown', needToken: false, reachable: false };
     return { role: data.role || 'unknown', needToken: !!data.needToken, reachable: true };
   } catch {
@@ -126,6 +127,48 @@ async function initSync() {
   const force = forceMobileFromQuery();
   const native = isNativePlatform();
   const needPair = native && !isPaired();
+  const pairedNative = (native || force) && !needPair;
+
+  // 原生已配对：先开本地同步层（IDB 立刻可读可写），health 后台探
+  if (pairedNative) {
+    bindIsPhoneMq();
+    syncIsPhone();
+    state.role = 'mobile';
+    state.sync.role = 'mobile';
+    state.sync.offline = true;
+    state.sync.needPair = false;
+    state.sync.pairOpen = false;
+    state.sync.needToken = false;
+    state.sync.enabled = true;
+    if (!idbAvailable()) {
+      setStatus('error', { lastError: '当前环境不支持 IndexedDB，无法离线同步' });
+      return false;
+    }
+    setStatus('offline');
+    bindListeners();
+    startInterval();
+    tryPersistStorage();
+    await refreshPendingCount();
+    await reloadIdeasDisplay();
+    // 后台探测可达性，成功则立刻同步并通知根应用补拉板块
+    detectRole().then(async ({ needToken, reachable }) => {
+      state.sync.needToken = reachable && needToken && !getToken();
+      state.sync.offline = !reachable;
+      if (!reachable) {
+        setStatus('offline');
+        return;
+      }
+      const result = await syncNow({ reason: 'init' });
+      // 仅同步真正成功后再通知补拉，避免失败时误标在线
+      if (result && result.ok) {
+        try {
+          window.dispatchEvent(new CustomEvent('danji:online'));
+        } catch { /* ignore */ }
+      }
+    }).catch(() => { /* 已在 offline */ });
+    return true;
+  }
+
   const { role, needToken, reachable } = await detectRole();
   bindIsPhoneMq();
   syncIsPhone();
@@ -231,18 +274,28 @@ function onOnline() {
   syncNow({ reason: 'online' });
 }
 
-function startInterval() {
-  stopInterval();
-  intervalTimer = setInterval(() => {
-    if (syncEnabled()) syncNow({ reason: 'interval' });
-  }, SYNC_INTERVAL_MS);
-}
-
 function stopInterval() {
   if (intervalTimer) {
     clearInterval(intervalTimer);
     intervalTimer = null;
   }
+  intervalMs = 0;
+}
+
+function startInterval() {
+  const want = pickIntervalMs(state.sync.pendingCount || 0);
+  if (intervalTimer && intervalMs === want) return;
+  stopInterval();
+  intervalMs = want;
+  intervalTimer = setInterval(() => {
+    if (syncEnabled()) syncNow({ reason: 'interval' });
+  }, want);
+}
+
+/** pending 变化后切换 60s / 8s */
+function rearmInterval() {
+  if (!intervalTimer && intervalMs === 0 && !started) return;
+  startInterval();
 }
 
 function disposeSync() {
