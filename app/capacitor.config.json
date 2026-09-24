@@ -1,0 +1,8 @@
+{
+  "appId": "app.shisuiji.danji",
+  "appName": "拾穗集",
+  "webDir": "../public",
+  "android": {
+    "allowMixedContent": false
+  }
+}
