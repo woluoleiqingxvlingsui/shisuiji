@@ -6,9 +6,10 @@
 
 import { state } from '../state.js';
 import { toast } from '../toast.js';
-import { apiJson, getToken, setToken, getServerBase } from '../api.js';
+import { apiJson, getToken, setToken } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
+import { shouldAttemptSync } from './net.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -169,6 +170,7 @@ async function initSync() {
   }
   bindListeners();
   startInterval();
+  tryPersistStorage();
   await refreshPendingCount();
   await reloadIdeasDisplay();
   if (offline) {
@@ -187,6 +189,15 @@ function bindIsPhoneMq() {
     if (mq.addEventListener) mq.addEventListener('change', syncIsPhone);
     else if (mq.addListener) mq.addListener(syncIsPhone);
   } catch { /* 老环境忽略 */ }
+}
+
+/** 尽力申请持久化存储，降低系统回收导致未同步 outbox 丢失的概率 */
+function tryPersistStorage() {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function') {
+      Promise.resolve(navigator.storage.persist()).catch(() => { /* 拒绝也不阻断 */ });
+    }
+  } catch { /* 无 storage API 时忽略 */ }
 }
 
 function bindListeners() {
@@ -345,15 +356,17 @@ async function pullOnce() {
 async function syncNow(opts = {}) {
   if (!syncEnabled()) return { skipped: true, reason: 'disabled' };
   if (syncing) return { skipped: true, reason: 'running' };
+  // 先过同步门闩，避免「syncing → offline」空闪
+  const online = typeof navigator === 'undefined' ? undefined : navigator.onLine;
+  if (!shouldAttemptSync({ native: isNativePlatform(), paired: isPaired(), online })) {
+    await refreshPendingCount();
+    setStatus('offline', { lastError: '' });
+    await reloadIdeasDisplay();
+    return { skipped: true, reason: 'offline' };
+  }
   syncing = true;
   setStatus('syncing');
   try {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      await refreshPendingCount();
-      setStatus('offline', { lastError: '' });
-      await reloadIdeasDisplay();
-      return { skipped: true, reason: 'offline' };
-    }
     if (!getToken() && state.sync.needToken) {
       setStatus('need_token');
       return { skipped: true, reason: 'need_token' };
@@ -476,13 +489,15 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
   await enqueueOutbox(merged);
   await refreshPendingCount();
   await reloadIdeasDisplay();
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+  const online = typeof navigator === 'undefined' ? undefined : navigator.onLine;
+  const attempt = shouldAttemptSync({ native: isNativePlatform(), paired: isPaired(), online });
+  if (!attempt) {
     setStatus('offline');
   } else if (state.sync.status !== 'syncing') {
     setStatus(state.sync.conflicts.length ? 'conflicts' : (state.sync.pendingCount ? 'offline' : 'synced'));
   }
-  // 在线时顺手推一把
-  if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+  // 能发请求就顺手推一把（原生已配对忽略 onLine）
+  if (attempt) {
     syncNow({ reason: 'local-write' });
   }
   return entryId;
@@ -540,4 +555,5 @@ export {
   disposeSync,
   refreshPendingCount,
   syncIsPhone,
+  shouldAttemptSync,
 };
