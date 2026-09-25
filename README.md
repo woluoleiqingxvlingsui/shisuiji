@@ -106,6 +106,30 @@ powershell -File start-with-env.ps1
 
 **验证方法：** 断网或关电脑 → 从主屏图标打开 → 应能进「想法」并新增 → 再连上电脑同一 Wi-Fi → 顶栏自动变「已同步 / N 条待同步」。
 
+### 原生 App（Android APK，推荐替代 PWA）
+
+浏览器 PWA 有硬伤：清浏览器数据就丢离线壳和未同步记录。原生 App（Capacitor 壳）没有这个问题：
+
+| 场景 | PWA（浏览器） | 原生 App |
+|------|--------------|----------|
+| 清除**手机浏览器**数据 | ❌ 离线壳 + 未同步想法全丢 | ✅ 不受影响 |
+| 不与电脑同 Wi-Fi 时冷启动 | ❌ 打不开（除非已装离线壳且不清数据） | ✅ 能进、能记想法 |
+| 局域网 HTTP 直接可用 | ❌ SW 不注册，需自签 HTTPS | ✅ HTTP + 私网门禁 |
+
+**安装与配对（只做一次）：**
+
+1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或从 GitHub Actions 下载 APK
+2. APK 发到手机安装（允许未知来源）
+3. 电脑控制台点 **🔗 配对码** → 手机 App 里「连接」→ 扫码 / 粘贴 JSON / 手输地址+口令，三选一
+4. 配对成功后即可离线使用；回到同一 Wi-Fi 自动同步
+
+**边界：**
+
+- HTTP 明文只允许连**局域网私网地址**（192.168.x.x / 10.x.x.x / 172.16-31.x 等）；公网地址必须 https
+- 电脑若开了自签 HTTPS，App 连不上（不做证书放行）——配对时请改用 HTTP 模式出码
+- 卸载 App / 清 App 数据仍会丢未同步记录，可用配对抽屉里的「导出未同步」兜底
+- 服务端升级 API 后，旧 APK 顶栏会提示「App 需升级」，重打安装新 APK 即可（数据保留）
+
 ### 配置与隐私
 
 - 公开仓库只保留 `config.example.json`；本机 `config.json`、`local.env.ps1`、`*.pem` 均在 `.gitignore`

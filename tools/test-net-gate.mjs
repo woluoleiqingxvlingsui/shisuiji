@@ -3,7 +3,7 @@
  * 用法：node tools/test-net-gate.mjs
  */
 import assert from 'node:assert/strict';
-import { shouldAttemptSync } from '../public/js/sync/net.js';
+import { shouldAttemptSync, isClientOutdated, CLIENT_VERSION } from '../public/js/sync/net.js';
 
 let passed = 0;
 function ok(name, fn) {
@@ -39,6 +39,19 @@ ok('网页：尊重 online（false 不请求）', () => {
   assert.equal(shouldAttemptSync({ online: false }), false);
   assert.equal(shouldAttemptSync({ online: true }), true);
   assert.equal(shouldAttemptSync({}), true);
+});
+
+ok('isClientOutdated：minClient 大于内置版本才过旧', () => {
+  assert.equal(isClientOutdated(CLIENT_VERSION), false);
+  assert.equal(isClientOutdated(CLIENT_VERSION + 1), true);
+  assert.equal(isClientOutdated(CLIENT_VERSION - 1), false);
+});
+
+ok('isClientOutdated：老服务缺字段 / 非法值不误报', () => {
+  assert.equal(isClientOutdated(undefined), false);
+  assert.equal(isClientOutdated(null), false);
+  assert.equal(isClientOutdated('abc'), false);
+  assert.equal(isClientOutdated(String(CLIENT_VERSION + 1)), true);
 });
 
 if (process.exitCode) {

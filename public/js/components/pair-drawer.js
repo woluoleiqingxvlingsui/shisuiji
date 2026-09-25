@@ -234,7 +234,7 @@ const PairDrawer = {
         <h2>🔗 连接电脑上的拾穗集</h2>
       </header>
       <div class="drawer-form">
-        <p class="sync-hint">同一 Wi-Fi：扫控制台「配对码」，或粘贴配对 JSON / 手填地址。跳过也可离线记想法。</p>
+        <p class="sync-hint">同一 Wi-Fi：扫控制台「配对码」，或粘贴配对 JSON / 手填地址。跳过也可离线记想法。<br>出于安全，HTTP 明文只接受局域网私网地址；电脑若开了自签 HTTPS，请改用 HTTP 模式出码配对。</p>
         <div class="tabs" style="margin-bottom:10px">
           <button type="button" class="tab" :class="{ active: mode === 'manual' }" @click="mode = 'manual'">手输</button>
           <button type="button" class="tab" :class="{ active: mode === 'paste' }" @click="mode = 'paste'">粘贴码</button>

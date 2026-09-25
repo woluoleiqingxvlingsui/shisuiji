@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import {
   normalizePairBase,
+  isPrivateHost,
+  isAllowedPairBase,
   applyPair,
   clearPair,
   isPaired,
@@ -107,6 +109,46 @@ ok('parsePairPayload：非法输入不写配置', () => {
   assert.equal(missingBase.ok, false);
   assert.equal(getServerBase(), 'http://10.0.0.8:8642');
   assert.equal(getToken(), 'keep');
+});
+
+ok('isPrivateHost：私网 / 回环 / 局域网主机名', () => {
+  assert.equal(isPrivateHost('192.168.1.5'), true);
+  assert.equal(isPrivateHost('10.0.0.2'), true);
+  assert.equal(isPrivateHost('172.16.0.1'), true);
+  assert.equal(isPrivateHost('172.31.255.254'), true);
+  assert.equal(isPrivateHost('127.0.0.1'), true);
+  assert.equal(isPrivateHost('localhost'), true);
+  assert.equal(isPrivateHost('::1'), true);
+  assert.equal(isPrivateHost('myhost'), true);
+  assert.equal(isPrivateHost('danji.local'), true);
+});
+
+ok('isPrivateHost：公网地址', () => {
+  assert.equal(isPrivateHost('8.8.8.8'), false);
+  assert.equal(isPrivateHost('172.32.0.1'), false);
+  assert.equal(isPrivateHost('172.15.0.1'), false);
+  assert.equal(isPrivateHost('example.com'), false);
+});
+
+ok('isAllowedPairBase：http 只放行私网，https 不限', () => {
+  assert.equal(isAllowedPairBase('http://192.168.1.5:8642'), true);
+  assert.equal(isAllowedPairBase('http://8.8.8.8:8642'), false);
+  assert.equal(isAllowedPairBase('https://example.com'), true);
+});
+
+ok('applyPair：公网 http 不写配置', () => {
+  store.clear();
+  applyPair({ base: 'http://10.0.0.8:8642', token: 'keep' });
+  const r = applyPair({ base: 'http://8.8.8.8:8642', token: 'new' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /私网/);
+  assert.equal(getServerBase(), 'http://10.0.0.8:8642');
+  assert.equal(getToken(), 'keep');
+});
+
+ok('parsePairPayload：公网 http 配对码拒绝', () => {
+  const r = parsePairPayload('{"v":1,"base":"http://8.8.8.8:8642","token":"x"}');
+  assert.equal(r.ok, false);
 });
 
 if (process.exitCode) {

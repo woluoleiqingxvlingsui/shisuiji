@@ -33,10 +33,47 @@ function normalizePairBase(input) {
   return u.origin;
 }
 
-/** 写入配对；base 非法时不写任何东西 */
+/**
+ * 明文收紧（M5）：http 明文只允许连私网 / 回环 / 单标签与 .local 等局域网主机名；
+ * 公网地址必须走 https。https 一律放行（自签证书连不上会由 testPair 报错）。
+ */
+function isPrivateHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1') return true;
+  if (/^127\./.test(h)) return true;                       // 回环
+  if (/^10\./.test(h)) return true;                         // 10/8
+  if (/^192\.168\./.test(h)) return true;                   // 192.168/16
+  if (/^169\.254\./.test(h)) return true;                   // link-local
+  const m = h.match(/^172\.(\d{1,3})\./);                   // 172.16/12
+  if (m) {
+    const o = Number(m[1]);
+    if (o >= 16 && o <= 31) return true;
+  }
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(h)) return true;          // IPv6 ULA
+  if (/^fe80:/.test(h)) return true;                        // IPv6 link-local
+  if (!h.includes('.')) return true;                        // 单标签主机名（局域网 NetBIOS 等）
+  return /\.(local|lan|internal|home|fritz\.box)$/i.test(h); // 常见局域网域名后缀
+}
+
+/** http 明文基址是否指向私网；https 恒真 */
+function isAllowedPairBase(base) {
+  let u;
+  try {
+    u = new URL(base);
+  } catch {
+    return false;
+  }
+  if (u.protocol === 'https:') return true;
+  return isPrivateHost(u.hostname);
+}
+
+/** 写入配对；base 非法或 http 指向公网时不写任何东西 */
 function applyPair({ base, token } = {}) {
   const b = normalizePairBase(base);
   if (!b) return { ok: false, error: '电脑地址不合法，应如 http://192.168.1.5:8642' };
+  if (!isAllowedPairBase(b)) {
+    return { ok: false, error: 'HTTP 明文只允许连局域网私网地址（如 192.168.x.x / 10.x.x.x）；公网请使用 https://' };
+  }
   setServerBase(b);
   setToken(token);
   return { ok: true, base: b };
@@ -94,8 +131,11 @@ function parsePairPayload(text) {
   if (!base) {
     return { ok: false, error: '配对码里的电脑地址不合法' };
   }
+  if (!isAllowedPairBase(base)) {
+    return { ok: false, error: '配对码是公网 HTTP 地址，出于安全不接受；请在同一局域网用 http://192.168.x.x 出码' };
+  }
   const token = String(obj.token == null ? '' : obj.token).trim();
   return { ok: true, base, token, payload: { v: 1, base, token } };
 }
 
-export { normalizePairBase, applyPair, clearPair, isPaired, testPair, parsePairPayload };
+export { normalizePairBase, isPrivateHost, isAllowedPairBase, applyPair, clearPair, isPaired, testPair, parsePairPayload };

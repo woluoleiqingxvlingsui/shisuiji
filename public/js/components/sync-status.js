@@ -27,6 +27,7 @@ const SyncStatus = {
       const s = state.sync;
       if (!s.enabled) return '';
       if (s.needPair) return '未配对';
+      if (s.needUpgrade) return 'App 需升级';
       if (s.status === 'need_token') return '待填口令';
       if (conflictCount.value > 0) return `${conflictCount.value} 条冲突`;
       if (s.status === 'syncing') return '同步中';
@@ -43,6 +44,7 @@ const SyncStatus = {
     const title = computed(() => {
       const s = state.sync;
       const parts = [];
+      if (s.needUpgrade) parts.push('App 版本过旧，请在电脑上重装最新 APK');
       if (s.lastSyncAt) parts.push('上次同步 ' + new Date(s.lastSyncAt).toLocaleTimeString());
       if (s.lastError) parts.push(s.lastError);
       if (conflictCount.value) parts.push('有待处理冲突');
@@ -52,6 +54,7 @@ const SyncStatus = {
     const pillClass = computed(() => {
       const s = state.sync;
       if (s.needPair) return 'sync-pill warn';
+      if (s.needUpgrade) return 'sync-pill warn';
       if (s.status === 'need_token') return 'sync-pill warn';
       if (conflictCount.value) return 'sync-pill conflict';
       if (s.status === 'syncing') return 'sync-pill syncing';

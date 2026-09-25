@@ -4,5 +4,9 @@ android/build/
 android/app/build/
 android/local.properties
 android/.idea/
+# Release 签名材料：只留在本机，绝不入库
+android/keystore.properties
+*.keystore
+*.jks
 *.apk
 *.aab

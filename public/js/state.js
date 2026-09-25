@@ -76,6 +76,7 @@ const state = reactive({
     role: 'unknown', // desktop | mobile | unknown（与 state.role 保持一致）
     needToken: false,
     needPair: false, // 原生壳未配置 serverBase
+    needUpgrade: false, // 原生壳版本低于 health.minClient：提示重装最新 APK
     pairOpen: false, // 配对表单是否打开（未配对默认开）
     offline: false, // health 不可达时的离线优先模式
     status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error

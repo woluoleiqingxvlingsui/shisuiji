@@ -1,8 +1,13 @@
-﻿# 拾穗集 —— Windows 一键装工具并打 Android debug 包
+﻿# 拾穗集 —— Windows 一键装工具并打 Android 包（默认 debug）
 # 用法（仓库根目录或 app/ 下）：
-#   powershell -ExecutionPolicy Bypass -File app\build-apk.ps1
-# 幂等：已有 JDK/SDK 会复用；缺什么补什么。产物：app\android\app\build\outputs\apk\debug\app-debug.apk
+#   powershell -ExecutionPolicy Bypass -File app\build-apk.ps1            # debug 包
+#   powershell -ExecutionPolicy Bypass -File app\build-apk.ps1 -Release   # release 包（首次自动生成签名）
+# 幂等：已有 JDK/SDK 会复用；缺什么补什么。
+# 产物：app\android\app\build\outputs\apk\debug\app-debug.apk
+#   或：app\android\app\build\outputs\apk\release\app-release.apk
 # 国内网络默认走镜像（Gradle 腾讯 / Maven 阿里）。
+
+param([switch]$Release)
 
 $ErrorActionPreference = 'Stop'
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -102,7 +107,34 @@ allprojects {
 $sdkProp = $SdkDir.Replace('\', '\\')
 [IO.File]::WriteAllText((Join-Path $AndroidDir 'local.properties'), "sdk.dir=$sdkProp`n", [Text.UTF8Encoding]::new($false))
 
-Write-Step 'Capacitor sync + assembleDebug'
+if ($Release) {
+  Write-Step 'Prepare release keystore'
+  $ksFile = Join-Path $AndroidDir 'danji-release.keystore'
+  $ksProps = Join-Path $AndroidDir 'keystore.properties'
+  if (-not (Test-Path $ksFile)) {
+    # 首次：随机口令生成签名密钥；只留本机（已 gitignore），丢了就无法覆盖安装升级
+    $keytool = Join-Path $JdkDir 'bin\keytool.exe'
+    $ksPwd = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+    & $keytool -genkeypair -v -keystore $ksFile -alias danji -keyalg RSA -keysize 2048 -validity 10950 `
+      -storepass $ksPwd -keypass $ksPwd -dname 'CN=Danji, OU=Home, O=Danji, L=Local, C=CN'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ksFile)) { throw 'keytool genkeypair failed' }
+    $props = @(
+      'storeFile=danji-release.keystore',
+      "storePassword=$ksPwd",
+      'keyAlias=danji',
+      "keyPassword=$ksPwd"
+    ) -join "`n"
+    [IO.File]::WriteAllText($ksProps, "$props`n", [Text.UTF8Encoding]::new($false))
+    Write-Host '  keystore 已生成；口令在 app\android\keystore.properties（不入库，请自行备份）'
+  } elseif (-not (Test-Path $ksProps)) {
+    throw "找到 $ksFile 但缺 keystore.properties（含口令），无法签名；请恢复该文件"
+  } else {
+    Write-Host "  reuse $ksFile"
+  }
+}
+
+$gradleTask = if ($Release) { 'assembleRelease' } else { 'assembleDebug' }
+Write-Step "Capacitor sync + $gradleTask"
 Push-Location $AppRoot
 try {
   npx cap sync android
@@ -111,11 +143,15 @@ try {
 
 Push-Location $AndroidDir
 try {
-  & $gradleBin assembleDebug --no-daemon
-  if ($LASTEXITCODE -ne 0) { throw "assembleDebug failed ($LASTEXITCODE)" }
+  & $gradleBin $gradleTask --no-daemon
+  if ($LASTEXITCODE -ne 0) { throw "$gradleTask failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 
-$apk = Join-Path $AndroidDir 'app\build\outputs\apk\debug\app-debug.apk'
+$apk = if ($Release) {
+  Join-Path $AndroidDir 'app\build\outputs\apk\release\app-release.apk'
+} else {
+  Join-Path $AndroidDir 'app\build\outputs\apk\debug\app-debug.apk'
+}
 if (-not (Test-Path $apk)) { throw "APK not found: $apk" }
 Write-Step 'Done'
 Write-Host "APK: $apk" -ForegroundColor Green

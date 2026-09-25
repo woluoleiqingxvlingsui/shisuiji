@@ -9,6 +9,9 @@
 - **想法 + 手机同步（P6）**：IndexedDB 镜像 + outbox；显示 = 镜像 ∪ 队列；仅手机端自动同步；顶栏同步状态胶囊；`api.js` 统一带 `X-Danji-Token`
 - **移动端适配（P7）**：`role`（权限）与 `isPhone`（布局）拆分；文献 Windows 操作手机端隐藏；settle/remind 仅 desktop；小屏触控/抽屉/16px 输入框
 - **PWA + 可选 HTTPS（P8）**：`manifest.webmanifest` + `public/sw.js` + 图标；仅 https/localhost 注册 Service Worker；`DANJI_TLS_CERT`/`DANJI_TLS_KEY` 可启 HTTPS
+- **手机离线优先（P9）**：health 不可达时手机仍可进「想法」离线记录（镜像∪outbox），服务恢复自动同步；底部提示显示离线壳状态
+- **Android App（P10 / M0–M5）**：Capacitor 混合壳（`app/`，webDir 直连 `public/`）；CapacitorHttp + HTTP 明文；配对三通道（扫码 html5-qrcode / 粘贴 JSON / 手输）+ 控制台图形窗口二维码；原生强制 `role=mobile`、跳过 SW；未同步 outbox 可导出 JSON；一键打包 `app\build-apk.ps1`（含 `-Release` 自动签名）+ GitHub Actions 出 debug 包
+- **版本门禁（P10 / M5）**：`/api/health` 增加 `apiVersion` / `minClient`；壳内置 `CLIENT_VERSION`，过旧顶栏提示「App 需升级」
 - **配置**：`config.json` 支持 `papers_dir`（相对路径相对项目根）
 
 ### Changed
@@ -18,6 +21,8 @@
 ### Security / PWA 限制
 - Service Worker **仅**在 `https` 或 `localhost` 注册；局域网 `http://IP:端口` 下关掉浏览器后无法离线冷启动，需配置 HTTPS
 - 手机端自动过期扫描关闭，避免用手机时钟误标状态；局域网访问建议配置 `sync.token`
+- **App 明文收紧（P10 / M5）**：Android NSC 无法按 IP 段放行，`usesCleartextTraffic` 保留；改在应用层门禁——HTTP 明文配对只接受私网/回环/局域网主机名（`pair.js` 的 `isAllowedPairBase`），公网必须 https；无任何 SSL 错误放行
+- App 不支持电脑端自签 HTTPS（不做证书放行）；配对请用 HTTP 模式出码
 
 ## [1.0.0] - 2026-09-12
 

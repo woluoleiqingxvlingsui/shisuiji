@@ -9,7 +9,7 @@ import { toast } from '../toast.js';
 import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
-import { shouldAttemptSync, pickIntervalMs } from './net.js';
+import { shouldAttemptSync, pickIntervalMs, isClientOutdated } from './net.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -95,11 +95,26 @@ function setStatus(status, extra = {}) {
 async function detectRole() {
   try {
     const { ok, data } = await apiJson('/api/health', { timeoutMs: HEALTH_TIMEOUT_MS });
-    if (!ok || !data) return { role: 'unknown', needToken: false, reachable: false };
-    return { role: data.role || 'unknown', needToken: !!data.needToken, reachable: true };
+    if (!ok || !data) return { role: 'unknown', needToken: false, reachable: false, minClient: null };
+    return {
+      role: data.role || 'unknown',
+      needToken: !!data.needToken,
+      reachable: true,
+      minClient: data.minClient,
+    };
   } catch {
-    return { role: 'unknown', needToken: false, reachable: false };
+    return { role: 'unknown', needToken: false, reachable: false, minClient: null };
   }
+}
+
+/** 版本门禁（M5）：原生壳低于 minClient 时标记 needUpgrade；提示只弹一次，不阻断同步 */
+function applyVersionGate(minClient, native) {
+  if (!native) return;
+  const outdated = isClientOutdated(minClient);
+  if (outdated && !state.sync.needUpgrade) {
+    toast('App 版本过旧，请在电脑上重装最新 APK（期间仍可正常同步）', 'warn');
+  }
+  state.sync.needUpgrade = outdated;
 }
 
 function lastKnownRole() {
@@ -151,9 +166,10 @@ async function initSync() {
     await refreshPendingCount();
     await reloadIdeasDisplay();
     // 后台探测可达性，成功则立刻同步并通知根应用补拉板块
-    detectRole().then(async ({ needToken, reachable }) => {
+    detectRole().then(async ({ needToken, reachable, minClient }) => {
       state.sync.needToken = reachable && needToken && !getToken();
       state.sync.offline = !reachable;
+      applyVersionGate(minClient, native);
       if (!reachable) {
         setStatus('offline');
         return;
@@ -169,7 +185,7 @@ async function initSync() {
     return true;
   }
 
-  const { role, needToken, reachable } = await detectRole();
+  const { role, needToken, reachable, minClient } = await detectRole();
   bindIsPhoneMq();
   syncIsPhone();
 
@@ -197,6 +213,7 @@ async function initSync() {
   // 未配对时用配对表单收口令，不走旧的 need_token 弹层
   state.sync.needToken = !needPair && reachable && needToken && !getToken();
   state.sync.enabled = force || native || effectiveRole === 'mobile';
+  applyVersionGate(minClient, native);
 
   if (!state.sync.enabled) {
     setStatus('idle');

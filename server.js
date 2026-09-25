@@ -74,6 +74,10 @@ const MAX_BODY = 2 * 1024 * 1024; // 请求体上限 2MB，防止误传大文件
 const PAPERS_DIR = resolvePapersDir(process.env.DANJI_PAPERS_DIR || APP_CONFIG.papersDir);
 
 const SCHEMA_VERSION = 1;
+// 版本门禁（P10 / M5）：apiVersion=当前 REST 协议版本；minClient=App 壳最低可接受版本。
+// 改 /api 行为时递增 apiVersion；旧 App 会静默出错时才递增 minClient。
+const API_VERSION = 1;
+const MIN_CLIENT = 1;
 const STATUSES = ['pending', 'claimed', 'used', 'expired', 'closed'];
 // 老数据里的状态名 → 现在的名字，遇到就顺手升级，别把它当非法值打回 pending
 const LEGACY_STATUS = { missed: 'closed' };
@@ -214,6 +218,8 @@ route('GET', '/api/health', async (ctx) => ctx.json({
   schema_version: SCHEMA_VERSION,
   role: ctx.role,
   needToken: !!APP_CONFIG.token && ctx.role !== 'desktop',
+  apiVersion: API_VERSION,
+  minClient: MIN_CLIENT,
   server_time: new Date().toISOString(),
 }));
 
