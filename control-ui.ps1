@@ -73,6 +73,7 @@ $xaml = @'
 
     <Button x:Name="BtnOpen" Content="🚀 打开网页（电脑）" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
     <Button x:Name="BtnCopyPhone" Content="📋 复制手机访问地址" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+    <Button x:Name="BtnPairQr" Content="🔗 配对码（扫码 / 粘贴）" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
@@ -102,6 +103,7 @@ $phoneText    = $win.FindName('PhoneText')
 $envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
 $btnCopyPhone = $win.FindName('BtnCopyPhone')
+$btnPairQr    = $win.FindName('BtnPairQr')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
 
@@ -208,6 +210,78 @@ $btnCopyPhone.Add_Click({
   } catch {
     $statusDetail.Text = "复制失败，请手动选中：$($script:PhoneUrl)"
   }
+})
+
+$btnPairQr.Add_Click({
+  Import-LocalEnv | Out-Null
+  Refresh-AddressLabels
+  $json = Get-PairPayload
+  try { Set-Clipboard -Value $json } catch { }
+
+  $png = New-PairQrPng
+  if (-not $png) {
+    $statusDetail.Text = "二维码生成失败（请确认已 npm install）；配对 JSON 已复制，可粘贴。"
+    [System.Windows.MessageBox]::Show(
+      "未能生成二维码图片。`n`n配对 JSON 已复制到剪贴板（含口令，请勿外传）：`n`n$json`n`nApp → 连接 → 粘贴码。",
+      "拾穗集 配对码",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Warning
+    ) | Out-Null
+    return
+  }
+
+  $statusDetail.Text = "配对二维码已显示；配对 JSON 已复制。App 扫码或粘贴。"
+
+  $qrXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="拾穗集 配对码" Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#17191F" FontFamily="Microsoft YaHei UI">
+  <StackPanel Margin="24,20,24,22" HorizontalAlignment="Center">
+    <TextBlock Text="🔗 扫码配对" FontSize="18" FontWeight="Bold" Foreground="#F2F4F8" HorizontalAlignment="Center"/>
+    <TextBlock Text="手机 App → 连接 → 扫码，对准下方二维码" FontSize="12" Foreground="#8B93A5"
+               Margin="0,5,0,14" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+    <Border Background="White" CornerRadius="12" Padding="14" HorizontalAlignment="Center">
+      <Image x:Name="QrImage" Width="300" Height="300" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+    </Border>
+    <TextBlock x:Name="QrBase" Text="" FontSize="12.5" Foreground="#6EA8FF" Margin="0,14,0,0"
+               HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+    <TextBlock Text="配对 JSON 已复制到剪贴板（含口令，请勿外传）。扫不出可手动粘贴。"
+               FontSize="11" Foreground="#667084" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+    <Button x:Name="QrClose" Content="关闭" FontSize="14" FontWeight="SemiBold" Foreground="White"
+            Background="#2C303B" BorderThickness="0" Cursor="Hand" Margin="0,16,0,0" Padding="0,10" Width="160"
+            HorizontalAlignment="Center">
+      <Button.Template>
+        <ControlTemplate TargetType="Button">
+          <Border Background="{TemplateBinding Background}" CornerRadius="10" Padding="0,10">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+        </ControlTemplate>
+      </Button.Template>
+    </Button>
+  </StackPanel>
+</Window>
+'@
+  $qrWin = [Windows.Markup.XamlReader]::Parse($qrXaml)
+  $qrWin.Owner = $win
+  $img = $qrWin.FindName('QrImage')
+  $bmp = New-Object Windows.Media.Imaging.BitmapImage
+  $bmp.BeginInit()
+  $bmp.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+  $bmp.UriSource = [Uri]$png
+  $bmp.EndInit()
+  $bmp.Freeze()
+  $img.Source = $bmp
+  try {
+    $parsed = $json | ConvertFrom-Json
+    $qrWin.FindName('QrBase').Text = [string]$parsed.base
+  } catch { }
+  $qrWin.FindName('QrClose').Add_Click({ $qrWin.Close() })
+  $qrWin.Add_Closed({
+    try { if (Test-Path $png) { Remove-Item $png -Force -ErrorAction SilentlyContinue } } catch { }
+  })
+  $qrWin.ShowDialog() | Out-Null
 })
 
 $btnStart.Add_Click({
