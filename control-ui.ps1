@@ -73,6 +73,7 @@ $xaml = @'
 
     <Button x:Name="BtnOpen" Content="🚀 打开网页（电脑）" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
     <Button x:Name="BtnCopyPhone" Content="📋 复制手机访问地址" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+    <Button x:Name="BtnPairQr" Content="🔗 配对码（扫码 / 粘贴）" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
@@ -102,6 +103,7 @@ $phoneText    = $win.FindName('PhoneText')
 $envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
 $btnCopyPhone = $win.FindName('BtnCopyPhone')
+$btnPairQr    = $win.FindName('BtnPairQr')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
 
@@ -208,6 +210,27 @@ $btnCopyPhone.Add_Click({
   } catch {
     $statusDetail.Text = "复制失败，请手动选中：$($script:PhoneUrl)"
   }
+})
+
+$btnPairQr.Add_Click({
+  Import-LocalEnv | Out-Null
+  Refresh-AddressLabels
+  $json = Get-PairPayload
+  # 终端出码 + 纯文本；图形窗口里再给一份可复制 JSON（含口令，慎分享）
+  try {
+    Show-PairQr | Out-Null
+  } catch {
+    Write-Host "生成二维码失败: $($_.Exception.Message)"
+    Write-Host $json
+  }
+  try { Set-Clipboard -Value $json } catch { }
+  $statusDetail.Text = "配对 JSON 已复制；终端已打印二维码。App 扫码或粘贴。"
+  [System.Windows.MessageBox]::Show(
+    "配对 JSON 已复制到剪贴板（含口令，请勿外传）。`n`n$json`n`n终端窗口里有可扫二维码。`nApp → 连接 → 扫码 / 粘贴码。",
+    "拾穗集 配对码",
+    [System.Windows.MessageBoxButton]::OK,
+    [System.Windows.MessageBoxImage]::Information
+  ) | Out-Null
 })
 
 $btnStart.Add_Click({

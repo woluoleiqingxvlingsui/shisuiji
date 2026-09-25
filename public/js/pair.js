@@ -70,4 +70,32 @@ async function testPair(base, token) {
   }
 }
 
-export { normalizePairBase, applyPair, clearPair, isPaired, testPair };
+/**
+ * 解析配对载荷（扫码 / 粘贴同一入口）。
+ * 形如 {"v":1,"base":"http://192.168.1.5:8642","token":"..."}
+ * 失败只报错，不写配置。
+ */
+function parsePairPayload(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return { ok: false, error: '内容为空' };
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: '不是合法 JSON 配对码' };
+  }
+  if (!obj || typeof obj !== 'object') {
+    return { ok: false, error: '配对码格式不正确' };
+  }
+  if (obj.v !== 1) {
+    return { ok: false, error: '配对码版本不支持（需要 v:1）' };
+  }
+  const base = normalizePairBase(obj.base);
+  if (!base) {
+    return { ok: false, error: '配对码里的电脑地址不合法' };
+  }
+  const token = String(obj.token == null ? '' : obj.token).trim();
+  return { ok: true, base, token, payload: { v: 1, base, token } };
+}
+
+export { normalizePairBase, applyPair, clearPair, isPaired, testPair, parsePairPayload };

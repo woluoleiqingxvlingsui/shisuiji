@@ -8,6 +8,7 @@ import {
   applyPair,
   clearPair,
   isPaired,
+  parsePairPayload,
 } from '../public/js/pair.js';
 import { getServerBase, getToken, SERVER_BASE_KEY, TOKEN_KEY } from '../public/js/api.js';
 
@@ -80,6 +81,32 @@ ok('clearPair：清空配置', () => {
   assert.equal(getServerBase(), '');
   assert.equal(getToken(), '');
   assert.equal(isPaired(), false);
+});
+
+ok('parsePairPayload：合法 JSON', () => {
+  const r = parsePairPayload('{"v":1,"base":"http://192.168.1.5:8642","token":"abc"}');
+  assert.equal(r.ok, true);
+  assert.equal(r.base, 'http://192.168.1.5:8642');
+  assert.equal(r.token, 'abc');
+  const r2 = parsePairPayload(' { "v" : 1 , "base" : "10.0.0.2:8642/" } ');
+  assert.equal(r2.ok, true);
+  assert.equal(r2.base, 'http://10.0.0.2:8642');
+  assert.equal(r2.token, '');
+});
+
+ok('parsePairPayload：非法输入不写配置', () => {
+  store.clear();
+  applyPair({ base: 'http://10.0.0.8:8642', token: 'keep' });
+  const bad = parsePairPayload('not-json');
+  assert.equal(bad.ok, false);
+  const badV = parsePairPayload('{"v":2,"base":"http://10.0.0.8:8642"}');
+  assert.equal(badV.ok, false);
+  const badBase = parsePairPayload('{"v":1,"base":"ftp://x"}');
+  assert.equal(badBase.ok, false);
+  const missingBase = parsePairPayload('{"v":1,"token":"x"}');
+  assert.equal(missingBase.ok, false);
+  assert.equal(getServerBase(), 'http://10.0.0.8:8642');
+  assert.equal(getToken(), 'keep');
 });
 
 if (process.exitCode) {

@@ -78,6 +78,34 @@ function Get-LanIPv4 {
   return $null
 }
 
+# App 配对载荷（P10 / M4）：{"v":1,"base":"http://IP:port","token":"..."}
+function Get-PairPayload {
+  $scheme = if (Get-UseTls) { 'https' } else { 'http' }
+  $ip = Get-LanIPv4
+  if (-not $ip) {
+    $ip = '127.0.0.1'
+  }
+  $cfg = Get-AppConfig
+  $base = "{0}://{1}:{2}" -f $scheme, $ip, $cfg.port
+  $token = if ($env:DANJI_TOKEN) { $env:DANJI_TOKEN } else { '' }
+  $obj = [ordered]@{ v = 1; base = $base; token = $token }
+  return ($obj | ConvertTo-Json -Compress)
+}
+
+function Show-PairQr {
+  $json = Get-PairPayload
+  $qrScript = Join-Path $Base 'tools\print-pair-qr.mjs'
+  if (Test-Path $qrScript) {
+    $parsed = $json | ConvertFrom-Json
+    & node $qrScript --base $parsed.base --token $parsed.token
+  } else {
+    Write-Host '----- 配对 JSON -----'
+    Write-Host $json
+    Write-Host '---------------------'
+  }
+  return $json
+}
+
 function Update-UrlFromEnv {
   if (Get-UseTls) { $Scheme = 'https' } else { $Scheme = 'http' }
   $Url = ("{0}://localhost:{1}" -f $Scheme, $Port)
