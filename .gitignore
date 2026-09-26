@@ -5,6 +5,7 @@ data/
 config.json
 local.env.ps1
 *.pem
+*.pem.bak
 danji-key.pem
 danji-cert.pem
 
