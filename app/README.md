@@ -71,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File app\build-apk.ps1 -Release   # release 
 ## 说明
 
 - 原生探测：`window.Capacitor.isNativePlatform()`；SW 在原生环境会跳过（见 `public/js/pwa.js`）。
-- 配对：扫码 / 粘贴 JSON / 手输三通道，载荷 `{"v":1,"base":"http://IP:port","token":"..."}`（见 `public/js/pair.js`）。
+- 配对：扫码单通道。原生走 `@capacitor-mlkit/barcode-scanning` 的 **startScan 路径**（CameraX 预览画在 WebView 背后 + 内置 ML Kit 解码，**不依赖 Google 服务**；`scan()` 那条 GmsBarcodeScanner 路径在国内无 GMS 机器上会报 module not available，勿用）。扫码期间页面加 `body.danji-scan-active` 透出相机画面（见 `public/style.css`）。浏览器兜底 html5-qrcode 仅调试用。
 - **明文收紧（M5）**：Android NSC 无法按 IP 段放行，故 `usesCleartextTraffic=true` 保留，收紧在应用层——`pair.js` 的 `isAllowedPairBase` 只允许 http 连私网/回环/局域网主机名，公网必须 https；配对写入前强制校验。
 - **版本门禁（M5）**：壳内置 `CLIENT_VERSION`（`public/js/sync/net.js`），health 返回 `minClient`；过旧时顶栏胶囊显示「App 需升级」并弹一次提示，不阻断同步。改到「旧壳会静默出错」的行为时，同时递增 `server.js` 的 `MIN_CLIENT` 和 `net.js` 的 `CLIENT_VERSION`，并重打 APK。
 - 改应用名：改 `capacitor.config.json` 的 `appName`，再 **`npx cap sync android`**（`cap copy` 不会重写 `strings.xml`）。

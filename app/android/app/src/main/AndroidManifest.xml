@@ -39,4 +39,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 扫码配对（html5-qrcode getUserMedia）：声明后 Capacitor 会在首次调用时弹系统授权框 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

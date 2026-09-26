@@ -1,5 +1,5 @@
 /* 拾穗集 —— 手机 App 配对（电脑地址 + 口令）
- * M2 只做手输；配对 JSON / 扫码在 M4 复用 normalizePairBase + applyPair。
+ * 配对入口为扫码单通道；normalizePairBase + applyPair 承担校验与写入。
  * 校验失败只报错，绝不半写配置。
  */
 
@@ -108,7 +108,7 @@ async function testPair(base, token) {
 }
 
 /**
- * 解析配对载荷（扫码 / 粘贴同一入口）。
+ * 解析配对载荷（扫码结果统一入口）。
  * 形如 {"v":1,"base":"http://192.168.1.5:8642","token":"..."}
  * 失败只报错，不写配置。
  */

@@ -18,7 +18,7 @@ $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="拾穗集 控制台" Width="460" SizeToContent="Height"
-        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
         Background="#17191F" FontFamily="Microsoft YaHei UI" FontSize="13">
   <Window.Resources>
     <Style x:Key="Card" TargetType="Border">
@@ -65,15 +65,12 @@ $xaml = @'
                      Foreground="#F2F4F8" VerticalAlignment="Center"/>
         </StackPanel>
         <TextBlock x:Name="StatusDetail" Text="" FontSize="12" Foreground="#8B93A5" Margin="20,7,0,0" TextWrapping="Wrap"/>
-        <TextBlock x:Name="UrlText" Text="" FontSize="13" Foreground="#6EA8FF" Margin="20,3,0,0"/>
-        <TextBlock x:Name="PhoneText" Text="" FontSize="12.5" Foreground="#9B8CFF" Margin="20,3,0,0" TextWrapping="Wrap"/>
         <TextBlock x:Name="EnvText" Text="" FontSize="11.5" Foreground="#667084" Margin="20,6,0,0" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
 
     <Button x:Name="BtnOpen" Content="🚀 打开网页（电脑）" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
-    <Button x:Name="BtnCopyPhone" Content="📋 复制手机访问地址" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
-    <Button x:Name="BtnPairQr" Content="🔗 配对码（扫码 / 粘贴）" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+    <Button x:Name="BtnPairQr" Content="🔗 配对码（App 扫码）" Style="{StaticResource BtnBase}" Margin="0,14,0,0"/>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
@@ -98,23 +95,14 @@ $win          = [Windows.Markup.XamlReader]::Parse($xaml)
 $dot          = $win.FindName('Dot')
 $statusText   = $win.FindName('StatusText')
 $statusDetail = $win.FindName('StatusDetail')
-$urlText      = $win.FindName('UrlText')
-$phoneText    = $win.FindName('PhoneText')
 $envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
-$btnCopyPhone = $win.FindName('BtnCopyPhone')
 $btnPairQr    = $win.FindName('BtnPairQr')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
 
 function Refresh-AddressLabels {
   Update-UrlFromEnv
-  $urlText.Text = $Url
-  if ($script:PhoneUrl) {
-    $phoneText.Text = "手机（同一 Wi-Fi）：$($script:PhoneUrl)"
-  } else {
-    $phoneText.Text = "手机地址：未能识别局域网 IP（ipconfig 查 WLAN IPv4）"
-  }
   $tok = if ($env:DANJI_TOKEN) { "口令已加载（local.env.ps1）" } else { "未配置口令（建议 local.env.ps1 设置 DANJI_TOKEN）" }
   $tls = if (Get-UseTls) { "HTTPS 已启用 · SW 可注册" } else { "HTTP · 局域网下无离线冷启动（见 README）" }
   $envText.Text = "$tok · $tls"
@@ -149,7 +137,6 @@ function Update-Status {
     $statusText.Text = "服务运行中" + $(if ($srvPid) { " · PID $srvPid" } else { '' })
     $statusDetail.Text = "后台独立运行 · 启动时已加载 local.env / TLS（若有）"
     $btnOpen.IsEnabled  = $true
-    $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = $true
     $script:LaunchPending = $false
@@ -168,8 +155,7 @@ function Update-Status {
       $statusText.Text   = "启动失败"
       $statusDetail.Text = "端口 $($Port) 可能被占用，或 node 报错。可在项目目录运行 node server.js 看日志"
       $btnOpen.IsEnabled  = $true
-      $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
-      $btnStart.IsEnabled = $true
+        $btnStart.IsEnabled = $true
       $btnStop.IsEnabled  = $false
       return
     }
@@ -177,7 +163,6 @@ function Update-Status {
     $statusText.Text   = "正在启动服务…"
     $statusDetail.Text = "正在拉起 node server.js（含口令/HTTPS 环境）"
     $btnOpen.IsEnabled  = $true
-    $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = $false
     return
@@ -187,7 +172,6 @@ function Update-Status {
   $statusText.Text   = "服务已停止"
   $statusDetail.Text = "点「启动服务」或「打开网页」都可以把它拉起来（会自动加载口令）"
   $btnOpen.IsEnabled  = $true
-  $btnCopyPhone.IsEnabled = [bool]$script:PhoneUrl
   $btnStart.IsEnabled = $true
   $btnStop.IsEnabled  = $false
 }
@@ -198,17 +182,6 @@ $btnOpen.Add_Click({
   } elseif (-not $script:LaunchPending) {
     Start-ServerFire
     $script:AutoOpenPending = $true
-  }
-})
-
-$btnCopyPhone.Add_Click({
-  Refresh-AddressLabels
-  if (-not $script:PhoneUrl) { return }
-  try {
-    Set-Clipboard -Value $script:PhoneUrl
-    $statusDetail.Text = "已复制：$($script:PhoneUrl)"
-  } catch {
-    $statusDetail.Text = "复制失败，请手动选中：$($script:PhoneUrl)"
   }
 })
 
@@ -224,7 +197,7 @@ $btnPairQr.Add_Click({
     try { Show-PairQr | Out-Null } catch { Write-Host $json }
     $statusDetail.Text = "二维码图片生成失败，已在终端出码；配对 JSON 已复制。"
     [System.Windows.MessageBox]::Show(
-      "未能生成二维码图片；终端窗口已打印 ASCII 二维码。`n`n配对 JSON 已复制到剪贴板（含口令，请勿外传）：`n`n$json`n`nApp → 连接 → 扫码 / 粘贴码。",
+      "未能生成二维码图片；终端窗口已打印 ASCII 二维码。`n`n配对 JSON 已复制到剪贴板（含口令，请勿外传）：`n`n$json`n`nApp → 连接 → 扫码（对准终端里的二维码）。",
       "拾穗集 配对码",
       [System.Windows.MessageBoxButton]::OK,
       [System.Windows.MessageBoxImage]::Warning
@@ -232,7 +205,7 @@ $btnPairQr.Add_Click({
     return
   }
 
-  $statusDetail.Text = "配对二维码已显示；配对 JSON 已复制。App 扫码或粘贴。"
+  $statusDetail.Text = "配对二维码已显示；App 扫码即可。"
 
   $qrXaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -247,9 +220,7 @@ $btnPairQr.Add_Click({
     <Border Background="White" CornerRadius="12" Padding="14" HorizontalAlignment="Center">
       <Image x:Name="QrImage" Width="300" Height="300" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
     </Border>
-    <TextBlock x:Name="QrBase" Text="" FontSize="12.5" Foreground="#6EA8FF" Margin="0,14,0,0"
-               HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
-    <TextBlock Text="配对 JSON 已复制到剪贴板（含口令，请勿外传）。扫不出可手动粘贴。"
+    <TextBlock Text="App → 连接 → 开始扫码，对准此码即可（配对 JSON 已在剪贴板，含口令，请勿外传）。"
                FontSize="11" Foreground="#667084" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
     <Button x:Name="QrClose" Content="关闭" FontSize="14" FontWeight="SemiBold" Foreground="White"
             Background="#2C303B" BorderThickness="0" Cursor="Hand" Margin="0,16,0,0" Padding="0,10" Width="160"
@@ -275,10 +246,6 @@ $btnPairQr.Add_Click({
   $bmp.EndInit()
   $bmp.Freeze()
   $img.Source = $bmp
-  try {
-    $parsed = $json | ConvertFrom-Json
-    $qrWin.FindName('QrBase').Text = [string]$parsed.base
-  } catch { }
   $qrWin.FindName('QrClose').Add_Click({ $qrWin.Close() })
   $qrWin.Add_Closed({
     try { if (Test-Path $png) { Remove-Item $png -Force -ErrorAction SilentlyContinue } } catch { }

@@ -120,14 +120,13 @@ powershell -File start-with-env.ps1
 
 1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或从 GitHub Actions 下载 APK
 2. APK 发到手机安装（允许未知来源）
-3. 电脑控制台点 **🔗 配对码** → 手机 App 里「连接」→ 扫码 / 粘贴 JSON / 手输地址+口令，三选一
-4. 配对成功后即可离线使用；回到同一 Wi-Fi 自动同步
+3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步
 
 **边界：**
 
 - HTTP 明文只允许连**局域网私网地址**（192.168.x.x / 10.x.x.x / 172.16-31.x 等）；公网地址必须 https
 - 电脑若开了自签 HTTPS，App 连不上（不做证书放行）——配对时请改用 HTTP 模式出码
-- 卸载 App / 清 App 数据仍会丢未同步记录，可用配对抽屉里的「导出未同步」兜底
+- 卸载 App / 清 App 数据仍会丢未同步记录——回到同一 Wi-Fi 让顶栏变「已同步」后再卸载，日常保持定期同网即可
 - 服务端升级 API 后，旧 APK 顶栏会提示「App 需升级」，重打安装新 APK 即可（数据保留）
 
 ### 配置与隐私

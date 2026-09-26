@@ -798,3 +798,18 @@ input, select, textarea { font: inherit; color: inherit; }
 
   .conflict-sides { grid-template-columns: 1fr; }
 }
+
+/* 原生扫码（ML Kit startScan）：相机预览画在 WebView 背后，插件会把 WebView 置透明；
+   页面侧隐藏全部内容、只留底部操作条，退出扫码移除 class 即恢复 */
+body.danji-scan-active { background: transparent !important; }
+body.danji-scan-active #app { visibility: hidden; }
+body.danji-scan-active .scan-ui {
+  visibility: visible;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(0, 0, 0, .6), rgba(0, 0, 0, 0));
+}
+body.danji-scan-active .scan-ui .btn { width: min(320px, 92vw); }
+body.danji-scan-active .scan-ui .sync-hint,
+body.danji-scan-active .scan-ui .pair-error { color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
