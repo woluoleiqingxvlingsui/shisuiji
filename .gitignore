@@ -23,6 +23,7 @@ temp/
 # 开发与 AI 助手产物
 .zcode/
 .playwright-cli/
+.worktrees/
 output/
 __pycache__/
 docs/

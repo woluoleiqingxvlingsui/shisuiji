@@ -13,7 +13,7 @@
 
 ## 环境要求
 
-- **Node.js ≥ 18**（只用标准库，无需 npm install）——没有的话去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版即可
+- **Node.js ≥ 18**——没有的话去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版即可。服务端与网页本体只用 Node 标准库，`node server.js` **无需 npm install**；仅「🔗 配对码」二维码出图额外依赖 `qrcode`（见「手动启动」说明）
 - Windows（启动脚本/桌面提醒按 Windows 设计；`node server.js` 本体其他平台也能跑）
 
 ## 快速开始
@@ -32,7 +32,8 @@
 node server.js
 ```
 
-- 零依赖：只用到 Node.js 标准库，**无需 npm install**
+- 服务端零依赖：只用到 Node.js 标准库，`node server.js` **无需 npm install** 即可跑网页本体
+- 仅「🔗 配对码」二维码出图（`tools/pair-qr-png.mjs` / `tools/print-pair-qr.mjs`）依赖 `qrcode`：在仓库根目录执行一次 `npm install` 即可；未安装时图形控制台会回退为把配对 JSON 复制到剪贴板（App 里手动粘贴也能配对）
 - 内存占用约 30MB，可以一直挂着
 - 配置：复制 `config.example.json` 为根目录 `config.json`（**已在 .gitignore，不会进仓库**）改端口/监听/论文库路径
 - **口令与本机私密项用环境变量**，不要写进会提交的文件：
@@ -120,7 +121,7 @@ powershell -File start-with-env.ps1
 
 1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或从 GitHub Actions 下载 APK
 2. APK 发到手机安装（允许未知来源）
-3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步
+3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步。二维码出图需先在仓库根目录 `npm install`（装 `qrcode`）；未装时控制台会把配对 JSON 复制到剪贴板，App 里粘贴亦可配对
 
 **边界：**
 
@@ -256,7 +257,7 @@ papers\
 3. **加接口** → `server.js` 里的 `route()` 表，加一行就是一个新端点
 4. **数据字段变更** → `server.js` 里的 `normalizeActivity()` / `normalizePaper()` / `normalizeSite()` / `normalizeExpense()` 和 `migrate()`（配合 `schema_version` 做平滑迁移）
 
-一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、同局域网手机访问（默认只监听本机 `127.0.0.1`，设环境变量 `DANJI_HOST=0.0.0.0` 后重启即可——注意 API 没有鉴权，仅在可信网络这么做）、接入通知机器人、定时抓取活动页。
+一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、同局域网手机访问（默认只监听本机 `127.0.0.1`，设环境变量 `DANJI_HOST=0.0.0.0` 后重启即可——局域网访问需填口令 `DANJI_TOKEN`（见「配置与隐私」），仍建议仅在可信网络开放）、接入通知机器人、定时抓取活动页。
 
 ## 常见问题
 
