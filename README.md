@@ -1,11 +1,14 @@
 # 🧺 拾穗集 —— 赛博鸡蛋与文献拾穗
 
-捡到什么就记什么。目前有四大板块，以后还能长出新的：
+捡到什么就记什么。目前有这些板块，以后还能长出新的：
 
+- **📝 随记**：碎片想法随手记；手机端离线也能写、联网自动同步；支持 📌 置顶与贴图。
 - **🥚 赛博鸡蛋**：记录各大模型平台的优惠活动（免费额度、代金券、折扣、试用会员……），按截止日期紧急程度排序展示，页面开着就自动提醒，**不漏领一颗赛博鸡蛋**。
 - **📄 文献**：论文待读/已读管理。下载的论文丢进论文文件夹，在这里记一笔就能自动按类别归档，点「📖 阅读」直接用你指定的阅读软件打开，读完自动转入「已读」。
 - **🌐 网页**：待读网页（技术文 / 杂项知识都收）的收藏与笔记。记链接就能存，点「🌐 打开」在浏览器打开并**把卡片顶到最前**，读完按类型引导你记下能复用的要点。
 - **💰 花销**：学习、办公相关的开销记账（内容 + 金额 + 日期 + 备注）。按月看每一笔，按年按「📦 套餐 / 🔌 API」归纳，点类别可下钻看明细，列表跟着所选期间走；「🧭 体感评价」还能把记录里写的体感按厂商 / 模型凝练成评价，方便决定下次还买不买。
+- **🏆 成果**：做完的事记一笔（时间线 + 类别聚合）。
+- **📚 知识库**：从随记 / 文献阅读记录 / 网页笔记三处沉淀知识卡，同名知识可合并。
 
 | 🥚 赛博鸡蛋 | ✍️ 记蛋 | 💰 花销 |
 |---|---|---|
@@ -36,8 +39,8 @@ node server.js
 - 仅「🔗 配对码」二维码出图（`tools/pair-qr-png.mjs` / `tools/print-pair-qr.mjs`）依赖 `qrcode`：在仓库根目录执行一次 `npm install` 即可；未安装时图形控制台会回退为把配对 JSON 复制到剪贴板（App 里手动粘贴也能配对）
 - 内存占用约 30MB，可以一直挂着
 - 配置：复制 `config.example.json` 为根目录 `config.json`（**已在 .gitignore，不会进仓库**）改端口/监听/论文库路径
-- **口令与本机私密项用环境变量**，不要写进会提交的文件：
-  - `DANJI_TOKEN`：局域网访问口令（手机同步）
+- **口令以本机 `config.json` 的 `sync.token` 为准**（该文件不入库）；读取优先级与服务端一致：config 优先、环境变量回落：
+  - `DANJI_TOKEN`：局域网访问口令（config 未设 `sync.token` 时的回落）
   - `DANJI_HOST`：监听地址，局域网用 `0.0.0.0`（默认 `127.0.0.1`）
   - `DANJI_PAPERS_DIR`：论文库绝对路径（覆盖 config）
   - `DANJI_TLS_CERT` / `DANJI_TLS_KEY`：HTTPS 证书路径
@@ -56,7 +59,7 @@ node server.js
 2. 控制台会**自动**加载 `local.env.ps1` 里的口令；若存在 `danji-cert.pem` / `danji-key.pem` 则自动 HTTPS
 3. 点 **🚀 打开网页（电脑）** → `http://localhost:8642`（或 https）
 4. 点 **📋 复制手机访问地址** → 粘贴到手机浏览器（同一 Wi-Fi）
-5. 手机首次访问填口令（`local.env.ps1` 的 `DANJI_TOKEN`）
+5. 手机首次访问填口令（`config.json` 的 `sync.token`）
 
 **方式 B：命令行**
 
@@ -80,7 +83,7 @@ powershell -File start-with-env.ps1
 
 1. 用图形工作台启动服务（见上「方式 A」）
 2. 手机与电脑同一 Wi-Fi，打开控制台显示的「手机访问地址」（或 `http://<电脑IP>:8642`）
-3. 顶栏同步胶囊处填写 `local.env.ps1` 里的 `DANJI_TOKEN`
+3. 顶栏同步胶囊处填写 `config.json` 里的 `sync.token`
 4. 电脑本机请用控制台上的本机地址（`localhost` 免口令、完整功能）
 
 ### 离线冷启动（电脑关机也能进、也能记）
@@ -134,7 +137,7 @@ powershell -File start-with-env.ps1
 ### 配置与隐私
 
 - 公开仓库只保留 `config.example.json`；本机 `config.json`、`local.env.ps1`、`*.pem` 均在 `.gitignore`
-- 口令用环境变量 `DANJI_TOKEN`，不要写进会提交的文件
+- 口令写在本机 `config.json` 的 `sync.token`（已在 .gitignore，不入库）；环境变量 `DANJI_TOKEN` 可作回落，config 优先
 - 校园网若隔离设备，手机可能无法访问电脑 IP；可改用手机热点让电脑连入后再试
 - 原生 App 壳内页面源是 `https://localhost`，`<img>` 直连 `http://局域网IP` 会被 WebView 混合内容策略拦下；因此贴图统一走 `public/js/img-urls.js`：原生壳直连 CapacitorHttp 插件（`responseType:'blob'`，base64 回传解码成 Blob），Web 端走普通 fetch，最后转 objectURL 给 `<img>`——与同步/上传同一条已验证的 HTTP 通道。`app/capacitor.config.json` 的 `android.allowMixedContent` 也开着作保险
 
@@ -258,9 +261,9 @@ papers\
 
 ## 数据与备份
 
-所有数据存在 `data/eggs.json`（赛博鸡蛋）、`data/papers.json`（文献）、`data/sites.json`（网页）、`data/expenses.json`（花销）、`data/insights.json`（体感评价）与 `data/messages.json`（消息中心），纯文本 JSON，可直接查看编辑：
+所有数据存在 `data/` 下的纯文本 JSON，每个板块一个文件：`eggs.json`（赛博鸡蛋）、`papers.json`（文献）、`sites.json`（网页）、`expenses.json`（花销）、`insights.json`（体感评价）、`messages.json`（消息）、`ideas.json`（随记）、`achievements.json`（成果）、`kb.json`（知识库）；随记贴图原图在 `data/images/`。均可直接查看编辑：
 
-- **备份**：把 `data` 文件夹整个复制走就行（里面就五个 JSON 文件）
+- **备份**：把 `data` 文件夹整个复制走就行（各板块 JSON + `images/` 贴图原图）
 - **恢复**：把备份的 JSON 放回 `data/` 对应位置
 - **迁移**：整个项目文件夹拷走就能用，数据跟着文件夹走
 - 列表排序用的 `last_read_at`（论文 = 最近一次点「📖 阅读」、网页 = 最近一次点「🌐 打开」的时间）就存在对应 JSON 里，可手动清空，清空后该条回落到按添加时间排

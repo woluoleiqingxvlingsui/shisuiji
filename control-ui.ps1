@@ -103,7 +103,7 @@ $btnStop      = $win.FindName('BtnStop')
 
 function Refresh-AddressLabels {
   Update-UrlFromEnv
-  $tok = if ($env:DANJI_TOKEN) { "口令已加载（local.env.ps1）" } else { "未配置口令（建议 local.env.ps1 设置 DANJI_TOKEN）" }
+  $tok = if (Get-EffectiveToken) { "口令已配置（config.json 或 local.env.ps1）" } else { "未配置口令（建议 config.json 设置 sync.token）" }
   $tls = if (Get-UseTls) { "HTTPS 已启用 · SW 可注册" } else { "HTTP · 局域网下无离线冷启动（见 README）" }
   $envText.Text = "$tok · $tls"
 }

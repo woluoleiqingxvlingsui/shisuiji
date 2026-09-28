@@ -15,7 +15,7 @@ $PhoneUrl = $null
 $Health = "http://127.0.0.1:8642/api/health"
 
 function Get-AppConfig {
-  $cfg = @{ port = 8642; host = '127.0.0.1' }
+  $cfg = @{ port = 8642; host = '127.0.0.1'; token = '' }
   $cfgPath = Join-Path $Base 'config.json'
   if (Test-Path $cfgPath) {
     try {
@@ -23,6 +23,10 @@ function Get-AppConfig {
       $p = 0
       if ([int]::TryParse([string]$parsed.port, [ref]$p) -and $p -gt 0 -and $p -le 65535) { $cfg.port = $p }
       if ($parsed.host) { $cfg.host = ([string]$parsed.host).Trim() }
+      if ($parsed.sync -and $parsed.sync.token) {
+        $t = ([string]$parsed.sync.token).Trim()
+        if ($t) { $cfg.token = $t }
+      }
     } catch { }
   }
   try {
@@ -47,9 +51,17 @@ function Import-LocalEnv {
     $env:DANJI_TLS_KEY  = $key
   }
   return @{
-    TokenConfigured = -not [string]::IsNullOrWhiteSpace($env:DANJI_TOKEN)
+    TokenConfigured = -not [string]::IsNullOrWhiteSpace((Get-EffectiveToken))
     TlsEnabled      = -not [string]::IsNullOrWhiteSpace($env:DANJI_TLS_CERT) -and (Test-Path $env:DANJI_TLS_CERT)
   }
+}
+
+# 与 server.js 读取优先级一致：config.json 的 sync.token 优先，环境变量 DANJI_TOKEN 回落
+function Get-EffectiveToken {
+  $t = (Get-AppConfig).token
+  if (-not [string]::IsNullOrWhiteSpace($t)) { return $t }
+  if ($env:DANJI_TOKEN) { return $env:DANJI_TOKEN }
+  return ''
 }
 
 function Get-UseTls {
@@ -86,9 +98,10 @@ function Get-PairPayload {
     $ip = '127.0.0.1'
   }
   $cfg = Get-AppConfig
-  $base = "{0}://{1}:{2}" -f $scheme, $ip, $cfg.port
-  $token = if ($env:DANJI_TOKEN) { $env:DANJI_TOKEN } else { '' }
-  $obj = [ordered]@{ v = 1; base = $base; token = $token }
+  $token = Get-EffectiveToken
+  # 局部变量不能叫 $base：PowerShell 变量不分大小写且动态作用域，会遮蔽全局 $Base 目录
+  $pairBase = "{0}://{1}:{2}" -f $scheme, $ip, $cfg.port
+  $obj = [ordered]@{ v = 1; base = $pairBase; token = $token }
   return ($obj | ConvertTo-Json -Compress)
 }
 

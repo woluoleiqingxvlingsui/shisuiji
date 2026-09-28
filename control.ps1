@@ -13,7 +13,7 @@ function Show-Menu {
     Write-Host "  拾穗集 控制台  -  $Url"
     Write-Host "============================================"
     if ($PhoneUrl) { Write-Host "  手机地址：$PhoneUrl" }
-    if ($env:DANJI_TOKEN) { Write-Host "  口令：已从 local.env.ps1 加载" -ForegroundColor DarkGray }
+    if (Get-EffectiveToken) { Write-Host "  口令：已配置（config.json sync.token 或 local.env.ps1）" -ForegroundColor DarkGray }
     $srvPid = Get-ServerPid
     if ($null -eq $srvPid) {
       Write-Host "  服务状态：未运行" -ForegroundColor Yellow
@@ -50,7 +50,7 @@ switch ($Action.ToLower()) {
     if (Start-Server) {
       Write-Host "shisuiji is up at $Url"
       if ($PhoneUrl) { Write-Host "phone: $PhoneUrl" }
-      if ($env:DANJI_TOKEN) { Write-Host "token: loaded from local.env.ps1" }
+      if (Get-EffectiveToken) { Write-Host "token: configured (config.json sync.token or DANJI_TOKEN)" }
       if (Get-UseTls) { Write-Host "tls: https" }
     } else {
       Write-Host "shisuiji failed to start"
