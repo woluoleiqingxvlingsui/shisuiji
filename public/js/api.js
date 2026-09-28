@@ -90,6 +90,18 @@ async function apiJson(path, init = {}) {
   return { ok: res.ok, status: res.status, data, res };
 }
 
+/** 图片上传：原始字节流直传（不压缩、不限单张大小），服务端校验扩展名与魔数 */
+async function uploadImage(file, timeoutMs = 120000) {
+  const res = await api('/api/uploads?name=' + encodeURIComponent(file.name || 'image.png'), {
+    method: 'POST',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    timeoutMs,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
 export {
   TOKEN_KEY,
   SERVER_BASE_KEY,
@@ -105,4 +117,5 @@ export {
   withTimeout,
   api,
   apiJson,
+  uploadImage,
 };

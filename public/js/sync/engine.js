@@ -171,7 +171,10 @@ async function initSync() {
       state.sync.offline = !reachable;
       applyVersionGate(minClient, native);
       if (!reachable) {
-        setStatus('offline');
+        setStatus('offline', {
+          lastError: '连不上电脑端：请确认拾穗集服务已启动、手机与电脑在同一网络；若电脑 IP 变了，需清除配对后重新扫码',
+        });
+        toast('连不上电脑端，已进入离线模式（记的想法会在连通后自动同步）', 'warn');
         return;
       }
       const result = await syncNow({ reason: 'init' });
@@ -400,7 +403,12 @@ async function pushOnce() {
   if (!ok) {
     throw new Error((data && data.error) || `push 失败 HTTP ${status}`);
   }
-  const results = Array.isArray(data.results) ? data.results : [];
+  const results = data && data.results;
+  // 2xx 但 body 不是预期 results（校园网强制门户/代理错误页会返回 200 HTML）：
+  // 此时按 error 出队会把离线随记静默丢光，必须视为失败留队重试
+  if (!Array.isArray(results) || results.length !== ops.length) {
+    throw new Error('同步返回异常（results 缺失或条数不符），待同步队列保留');
+  }
   const byId = new Map(results.map((r) => [r.id, r]));
   for (const entry of ops) {
     const result = byId.get(entry.id) || { id: entry.id, status: 'error', error: '服务端未返回该条结果' };
@@ -486,7 +494,9 @@ async function syncNow(opts = {}) {
 async function resolveConflict(id, choice) {
   const idx = state.sync.conflicts.findIndex((c) => c.id === id);
   if (idx === -1) return false;
-  const conflict = state.sync.conflicts[idx];
+  // state 是 reactive 的，conflict 里嵌套对象是 Proxy；IndexedDB 结构化克隆
+  // 序列化不了 Proxy（DataCloneError），先深拷成纯 JSON 再用
+  const conflict = JSON.parse(JSON.stringify(state.sync.conflicts[idx]));
   state.sync.conflicts.splice(idx, 1);
 
   if (choice === 'mobile') {
@@ -522,6 +532,9 @@ async function resolveConflict(id, choice) {
 async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
   const entryId = id || uuid();
   const now = new Date().toISOString();
+  // IDB 边界统一去 Proxy：调用方常把 Vue reactive 对象直接塞进 payload，
+  // structured clone 遇到 Proxy 会 DataCloneError（已栽过两次），这里一次性洗成普通对象
+  if (payload) payload = JSON.parse(JSON.stringify(payload));
   let confirmed = false;
   try {
     const mirror = await readCollection('ideas');
@@ -549,6 +562,11 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
         origin: 'mobile',
         created_at: payload.created_at || now,
         updated_at: now,
+        // 贴图与置顶必须随队列走，否则 push 时会把服务端已有的值冲掉
+        ...(Array.isArray(payload.images) ? { images: payload.images } : {}),
+        ...(payload.pinned !== undefined
+          ? { pinned: !!payload.pinned, pinned_at: payload.pinned ? (payload.pinned_at || now) : '' }
+          : {}),
       }
       : null,
     base_updated_at: serverBase,

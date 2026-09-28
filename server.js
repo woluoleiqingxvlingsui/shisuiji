@@ -66,11 +66,15 @@ const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const SITES_FILE = path.join(DATA_DIR, 'sites.json');
 const EXPENSES_FILE = path.join(DATA_DIR, 'expenses.json');
 const IDEAS_FILE = path.join(DATA_DIR, 'ideas.json');
+const ACHIEVEMENTS_FILE = path.join(DATA_DIR, 'achievements.json');
+const KB_FILE = path.join(DATA_DIR, 'kb.json');
 const MAX_BODY = 2 * 1024 * 1024; // 请求体上限 2MB，防止误传大文件
 
 // 论文库根目录：下载的论文直接丢进来
 // 优先级：环境变量 DANJI_PAPERS_DIR > config.json 的 papers_dir > 项目目录 papers\
 // config 里的相对路径相对项目根解析；本机若要用项目外的目录，用环境变量覆盖，别写进仓库
+// 红线（见 AGENTS.md）：用户文献库固定为 config.json papers_dir 指向的目录，
+// 禁止改这里的回落逻辑；测试/隔离实例必须用 DANJI_PAPERS_DIR 指到临时目录
 const PAPERS_DIR = resolvePapersDir(process.env.DANJI_PAPERS_DIR || APP_CONFIG.papersDir);
 
 const SCHEMA_VERSION = 1;
@@ -130,6 +134,28 @@ const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until
 const IDEA_FIELDS = ['title', 'content'];
 // origin 记这条是从哪儿来的：手机写的只有手机能改，电脑全能
 const IDEA_ORIGINS = ['desktop', 'mobile'];
+// 随记贴图：原图直传不压缩，存 data/images/（不入库目录）；每条最多 9 张
+const IMAGE_DIR = path.join(DATA_DIR, 'images');
+const IMAGE_TYPES = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+};
+const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
+const IDEA_MAX_IMAGES = 9;
+
+// 成果板块：项目/奖项/论文/证书等成果记录，桌面端管理，手机端在线只读
+// category/status 枚举与 public/config.js 的 achievements 段同步
+const ACHIEVEMENT_CATEGORIES = ['project', 'award', 'paper', 'cert', 'other'];
+const ACHIEVEMENT_STATUSES = ['doing', 'done'];
+const ACHIEVEMENT_FIELDS = ['title', 'content', 'highlight'];
+
+// 知识库：可反复复用的精华沉淀（学术表达/理论分析/方法研究…），桌面端管理，手机端在线只读
+// category 枚举与 public/config.js 的 kb 段同步；source 记这条从哪儿沉淀来的
+const KB_CATEGORIES = ['expression', 'theory', 'method', 'inspiration', 'other'];
+const KB_SOURCES = ['paper', 'site', 'idea', 'manual'];
+const KB_FIELDS = ['title', 'content'];
+// 时间是自由文本（"2026-08 开始，9 月下旬开源"这种也收），date_key 是从中猜出的
+// 排序/分组键：取文里第一个 YYYY / YYYY-MM / YYYY-MM-DD，猜不到就是空串
+const ACHIEVEMENT_DATE_KEY_RE = /(\d{4})(?:[-./年](\d{1,2})(?:[-./月](\d{1,2}))?)?/;
 
 // ---------- 数据层 ----------
 let db = null;
@@ -155,11 +181,14 @@ async function loadData() {
 }
 
 // 原子写入：先写临时文件再改名，避免写一半损坏数据
-async function saveData() {
+async function saveDataNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = DATA_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(db, null, 2), 'utf8');
   await fsp.rename(tmp, DATA_FILE);
+}
+function saveData() {
+  return queueWrite(saveDataNow);
 }
 
 // ---------- 数据校验与清洗 ----------
@@ -267,11 +296,14 @@ async function loadPapers() {
   }
 }
 
-async function savePapers() {
+async function savePapersNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = PAPERS_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(paperDb, null, 2), 'utf8');
   await fsp.rename(tmp, PAPERS_FILE);
+}
+function savePapers() {
+  return queueWrite(savePapersNow);
 }
 
 // 类别清洗：去掉 Windows 非法字符与路径穿越，锁死在论文库内
@@ -354,11 +386,14 @@ async function loadSites() {
   }
 }
 
-async function saveSites() {
+async function saveSitesNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = SITES_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(siteDb, null, 2), 'utf8');
   await fsp.rename(tmp, SITES_FILE);
+}
+function saveSites() {
+  return queueWrite(saveSitesNow);
 }
 
 // 链接规范化：裸域名补 https://；只放行 http/https（javascript:、ftp: 之类一律拒）
@@ -410,6 +445,7 @@ function normalizeSite(input, existing = {}) {
   }
   // last_read_at（最近一次点「🌐 打开」的时间，只用于排序）不进 SITE_FIELDS：
   // 它由 /open 路由独占写入，靠上面的 {...existing} 原样保留，客户端 PUT 覆盖不了
+  // read_progress / progress_at 同理：只由 /progress 路由写，PUT 带不带都不动它
   if ('logs' in input) {
     const prev = new Map((Array.isArray(existing.logs) ? existing.logs : []).map((l) => [l.id, l]));
     const incoming = Array.isArray(input.logs) ? input.logs : [];
@@ -549,11 +585,14 @@ async function loadExpenses() {
   }
 }
 
-async function saveExpenses() {
+async function saveExpensesNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = EXPENSES_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(expenseDb, null, 2), 'utf8');
   await fsp.rename(tmp, EXPENSES_FILE);
+}
+function saveExpenses() {
+  return queueWrite(saveExpensesNow);
 }
 
 // 金额解析：容忍 ¥ / ￥ / 千分位 / 空格；负数与非法值一律返回 null
@@ -1074,6 +1113,34 @@ route('POST', '/api/sites/:id/open', async (ctx) => {
   ctx.json({ ok: true, site });
 });
 
+// 进度锚点：扩展存视口顶部标题/文本片段 + 元素相对视口的偏移。
+// 恢复时按锚点找位置，JS 渲染导致页面高度变化也不漂移；比例只是兜底。
+function sanitizeAnchor(raw) {
+  if (raw === null || raw === undefined) return '';
+  if (typeof raw !== 'object') return '';
+  const h = typeof raw.h === 'string' ? raw.h.trim().slice(0, 160) : '';
+  const t = typeof raw.t === 'string' ? raw.t.trim().slice(0, 160) : '';
+  const dy = Number(raw.dy);
+  if (!h && !t) return '';
+  if (!Number.isFinite(dy)) return '';
+  return { h, t, dy: Math.max(-100000, Math.min(100000, dy)) };
+}
+
+// 阅读进度：浏览器扩展在原页滚动时回写比例（0~1）+ 锚点，卡片显示进度徽章
+route('POST', '/api/sites/:id/progress', async (ctx) => {
+  const site = siteDb.sites.find((s) => s.id === ctx.params.id);
+  if (!site) return ctx.json({ error: '记录不存在' }, 404);
+  const r = Number(ctx.body && ctx.body.ratio);
+  if (!Number.isFinite(r)) return ctx.json({ error: 'ratio 不合法' }, 400);
+  site.read_progress = Math.min(1, Math.max(0, r));
+  // 旧版扩展不带 anchor 字段：保留已有锚点；带了（含 null=没找到锚点）就覆盖
+  if (ctx.body && 'anchor' in ctx.body) site.read_anchor = sanitizeAnchor(ctx.body.anchor);
+  else if (site.read_anchor === undefined) site.read_anchor = '';
+  site.progress_at = new Date().toISOString();
+  await saveSites();
+  ctx.json({ ok: true, site });
+});
+
 // ---------- 花销板块：路由 ----------
 const AMOUNT_ERROR = '金额得是正数（可写 1280、1280.5、¥1,280）';
 
@@ -1131,11 +1198,14 @@ async function loadInsights() {
   }
 }
 
-async function saveInsights() {
+async function saveInsightsNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = INSIGHTS_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(insightDb, null, 2), 'utf8');
   await fsp.rename(tmp, INSIGHTS_FILE);
+}
+function saveInsights() {
+  return queueWrite(saveInsightsNow);
 }
 
 // 评价清洗：verdict 是用户敲定的总评；rating 收敛成 1-5 整数或 null；
@@ -1201,11 +1271,14 @@ async function loadMessages() {
   }
 }
 
-async function saveMessages() {
+async function saveMessagesNow() {
   await fsp.mkdir(DATA_DIR, { recursive: true });
   const tmp = MESSAGES_FILE + '.tmp';
   await fsp.writeFile(tmp, JSON.stringify(messageDb, null, 2), 'utf8');
   await fsp.rename(tmp, MESSAGES_FILE);
+}
+function saveMessages() {
+  return queueWrite(saveMessagesNow);
 }
 
 function normalizeMessage(input, existing = {}) {
@@ -1338,7 +1411,37 @@ function conflicted(prev, body) {
   return String(base) !== String(prev.updated_at);
 }
 
-function normalizeIdea(input, existing = {}) {
+// 贴图归一化：只认 uuid 形态的 id，超量截断，非法项丢弃
+function sanitizeImages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw.slice(0, IDEA_MAX_IMAGES)) {
+    const id = uuidOrNull(item && item.id);
+    if (!id) continue;
+    out.push({ id, name: String((item && item.name) || '').slice(0, 200) });
+  }
+  return out;
+}
+
+// 删掉不再被任何随记引用的图片文件（编辑移除/删除随记时调用），不留孤儿
+async function pruneImageFiles(ids) {
+  if (!ids || !ids.length) return;
+  const used = new Set();
+  for (const i of ideaDb.ideas) for (const im of i.images || []) used.add(im.id);
+  const targets = ids.filter((id) => !used.has(id));
+  if (!targets.length) return;
+  let files = null;
+  try { files = await fsp.readdir(IMAGE_DIR); } catch { return; }
+  for (const id of targets) {
+    for (const f of files) {
+      if (f.startsWith(id + '.') && !f.endsWith('.tmp')) {
+        await fsp.unlink(path.join(IMAGE_DIR, f)).catch(() => {});
+      }
+    }
+  }
+}
+
+function normalizeIdea(input, existing = {}, opts = {}) {
   const idea = { ...existing };
   for (const field of IDEA_FIELDS) {
     if (!(field in input)) continue;
@@ -1350,16 +1453,42 @@ function normalizeIdea(input, existing = {}) {
   if (!idea.id) idea.id = newId();
   if (IDEA_ORIGINS.includes(input.origin)) idea.origin = input.origin;
   if (!IDEA_ORIGINS.includes(idea.origin)) idea.origin = 'desktop';
+  if ('images' in input) idea.images = sanitizeImages(input.images);
+  if (!Array.isArray(idea.images)) idea.images = [];
+  // 置顶：pinned 变化时记 pinned_at（置顶组内按置顶时间倒序）
+  if ('pinned' in input) {
+    const next = !!input.pinned;
+    if (next && !idea.pinned) idea.pinned_at = new Date().toISOString();
+    if (!next) idea.pinned_at = '';
+    idea.pinned = next;
+  }
+  if (idea.pinned === undefined) idea.pinned = false;
   idea.created_at = existing.created_at || isoOrNow(input.created_at);
-  idea.updated_at = new Date().toISOString();
+  // 同步 push 带的是手机端真实编辑时间：保留它，同步只搬运不改写内容时间；
+  // 桌面直连 REST 不带该字段，落服务端当前时间（编辑即发生在此刻）
+  idea.updated_at = opts.keepClientTimes ? isoOrNow(input.updated_at) : new Date().toISOString();
   return idea;
 }
 
 // ---------- 想法板块：路由 ----------
+// 置顶组内的顺序键：置顶时间与编辑时间取较新者——
+// 编辑一条置顶随记 = 刚被想起，应浮到置顶组最前（手机端离线编辑同理）
+function pinSortKey(i) {
+  const p = String(i.pinned_at || '');
+  const u = String(i.updated_at || '');
+  return p > u ? p : u;
+}
+
+// 列表排序：置顶组优先（组内按最近动作倒序），其余按更新时间倒序
+function ideaSortDesc(a, b) {
+  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+    || pinSortKey(b).localeCompare(pinSortKey(a))
+    || String(b.updated_at).localeCompare(String(a.updated_at))
+    || String(b.created_at).localeCompare(String(a.created_at));
+}
+
 route('GET', '/api/ideas', async (ctx) => {
-  ctx.json([...ideaDb.ideas].sort((a, b) =>
-    String(b.updated_at).localeCompare(String(a.updated_at))
-    || String(b.created_at).localeCompare(String(a.created_at))));
+  ctx.json([...ideaDb.ideas].sort(ideaSortDesc));
 });
 
 // 幂等新增：手机离线时自己生成 id，队列重放遇到同一个 id 就直接返回已有记录
@@ -1387,6 +1516,8 @@ route('PUT', '/api/ideas/:id', async (ctx) => {
   const idea = normalizeIdea(ctx.body, prev);
   ideaDb.ideas[idx] = idea;
   await saveIdeas();
+  // 编辑移除的图：不再被任何随记引用就删文件
+  pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
   ctx.json(idea);
 });
 
@@ -1399,7 +1530,332 @@ route('DELETE', '/api/ideas/:id', async (ctx) => {
   }
   const [removed] = ideaDb.ideas.splice(idx, 1);
   await saveIdeas();
+  // 删除带图随记：图片文件一并删掉（仍被其他随记引用的跳过，作误伤保险）
+  pruneImageFiles((removed.images || []).map((im) => im.id)).catch(() => {});
   ctx.json({ ok: true, deleted: removed.id });
+});
+
+// ---------- 成果板块 ----------
+let achievementDb = null;
+
+function defaultAchievementData() {
+  return { schema_version: SCHEMA_VERSION, achievements: [] };
+}
+
+async function loadAchievements() {
+  try {
+    const raw = await fsp.readFile(ACHIEVEMENTS_FILE, 'utf8');
+    achievementDb = JSON.parse(raw);
+    if (!Array.isArray(achievementDb.achievements)) achievementDb.achievements = [];
+    // 旧数据没有 date_key（时间字段改版前是严格格式），读盘时补上
+    for (const item of achievementDb.achievements) {
+      if (!item.date_key) item.date_key = extractDateKey(item.date);
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    achievementDb = defaultAchievementData();
+    await saveAchievementsNow();
+  }
+}
+
+async function saveAchievementsNow() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  const tmp = ACHIEVEMENTS_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(achievementDb, null, 2), 'utf8');
+  await fsp.rename(tmp, ACHIEVEMENTS_FILE);
+}
+
+function saveAchievements() {
+  return queueWrite(saveAchievementsNow);
+}
+
+// 从自由文本里猜排序键：第一个出现的年（可选月/日），月日越界就只取到上一级。
+// 猜不到返回空串——时间线归到「时间不明」，排序落在最后
+function extractDateKey(raw) {
+  const m = ACHIEVEMENT_DATE_KEY_RE.exec(String(raw || ''));
+  if (!m) return '';
+  const year = m[1];
+  const month = m[2] ? Number(m[2]) : 0;
+  const day = m[3] ? Number(m[3]) : 0;
+  if (month < 1 || month > 12) return year;
+  if (m[3] === undefined || day < 1 || day > 31) return `${year}-${String(month).padStart(2, '0')}`;
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const d = new Date(iso + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) return `${year}-${String(month).padStart(2, '0')}`;
+  return iso;
+}
+
+function normalizeAchievement(input, existing = {}) {
+  const a = { ...existing };
+  for (const field of ACHIEVEMENT_FIELDS) {
+    if (!(field in input)) continue;
+    a[field] = input[field] === null || input[field] === undefined ? '' : String(input[field]).trim();
+  }
+  for (const field of ACHIEVEMENT_FIELDS) if (a[field] === undefined) a[field] = '';
+  if ('category' in input && ACHIEVEMENT_CATEGORIES.includes(input.category)) a.category = input.category;
+  if (!ACHIEVEMENT_CATEGORIES.includes(a.category)) a.category = 'project';
+  if ('status' in input && ACHIEVEMENT_STATUSES.includes(input.status)) a.status = input.status;
+  if (!ACHIEVEMENT_STATUSES.includes(a.status)) a.status = 'done';
+  // 时间自由填写：原样存，排序键从文字里猜；没传 date 时沿用已有记录的时间与键
+  if ('date' in input) {
+    a.date = input.date === null || input.date === undefined ? '' : String(input.date).trim();
+    a.date_key = extractDateKey(a.date);
+  }
+  if (typeof a.date !== 'string') a.date = '';
+  if (!a.date_key) a.date_key = extractDateKey(a.date);
+  // links / tags：数组进数组出，逐项去空（参照网页板块 tags 的处理）
+  for (const field of ['links', 'tags']) {
+    if (field in input) {
+      a[field] = Array.isArray(input[field])
+        ? input[field].map((t) => String(t).trim()).filter(Boolean)
+        : [];
+    } else if (!Array.isArray(a[field])) {
+      a[field] = [];
+    }
+  }
+  const incomingId = uuidOrNull(input.id);
+  if (incomingId) a.id = incomingId;
+  if (!a.id) a.id = newId();
+  if (IDEA_ORIGINS.includes(input.origin)) a.origin = input.origin;
+  if (!IDEA_ORIGINS.includes(a.origin)) a.origin = 'desktop';
+  a.created_at = existing.created_at || isoOrNow(input.created_at);
+  a.updated_at = new Date().toISOString();
+  return a;
+}
+
+// 时间线排序：猜出的时间键倒序（猜不到的排最后），再按更新时间倒序
+function achievementSortDesc(a, b) {
+  return String(b.date_key || '').localeCompare(String(a.date_key || ''))
+    || String(b.updated_at).localeCompare(String(a.updated_at));
+}
+
+route('GET', '/api/achievements', async (ctx) => {
+  ctx.json([...achievementDb.achievements].sort(achievementSortDesc));
+});
+
+// 幂等新增：与想法一致，重放同 id 直接返回已有记录
+route('POST', '/api/achievements', async (ctx) => {
+  const id = uuidOrNull(ctx.body.id);
+  const hit = id ? achievementDb.achievements.find((a) => a.id === id) : null;
+  if (hit) return ctx.json(hit, 200);
+  const achievement = normalizeAchievement(ctx.body);
+  if (ctx.role === 'mobile') achievement.origin = 'mobile';
+  achievementDb.achievements.push(achievement);
+  await saveAchievements();
+  ctx.json(achievement, 201);
+});
+
+route('PUT', '/api/achievements/:id', async (ctx) => {
+  const idx = achievementDb.achievements.findIndex((a) => a.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '成果不存在', code: 'missing' }, 404);
+  const prev = achievementDb.achievements[idx];
+  if (conflicted(prev, ctx.body)) {
+    return ctx.json({ error: '这条成果在别处改过', code: 'conflict', server: prev }, 409);
+  }
+  const achievement = normalizeAchievement(ctx.body, prev);
+  achievementDb.achievements[idx] = achievement;
+  await saveAchievements();
+  ctx.json(achievement);
+});
+
+route('DELETE', '/api/achievements/:id', async (ctx) => {
+  const idx = achievementDb.achievements.findIndex((a) => a.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '成果不存在', code: 'missing' }, 404);
+  const [removed] = achievementDb.achievements.splice(idx, 1);
+  await saveAchievements();
+  ctx.json({ ok: true, deleted: removed.id });
+});
+
+// ---------- 知识库板块 ----------
+let kbDb = null;
+
+function defaultKbData() {
+  return { schema_version: SCHEMA_VERSION, kb: [] };
+}
+
+async function loadKb() {
+  try {
+    const raw = await fsp.readFile(KB_FILE, 'utf8');
+    kbDb = JSON.parse(raw);
+    if (!Array.isArray(kbDb.kb)) kbDb.kb = [];
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    kbDb = defaultKbData();
+    await saveKbNow();
+  }
+}
+
+async function saveKbNow() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  const tmp = KB_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(kbDb, null, 2), 'utf8');
+  await fsp.rename(tmp, KB_FILE);
+}
+
+function saveKb() {
+  return queueWrite(saveKbNow);
+}
+
+function normalizeKbSource(input, existing) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = existing && typeof existing === 'object' ? { ...existing } : {};
+  if (KB_SOURCES.includes(src.type)) out.type = src.type;
+  if (!KB_SOURCES.includes(out.type)) out.type = 'manual';
+  if ('ref_id' in src) out.ref_id = String(src.ref_id || '').trim();
+  if ('label' in src) out.label = String(src.label || '').trim().slice(0, 200);
+  return out;
+}
+
+function normalizeKb(input, existing = {}) {
+  const k = { ...existing };
+  for (const field of KB_FIELDS) {
+    if (!(field in input)) continue;
+    k[field] = input[field] === null || input[field] === undefined ? '' : String(input[field]).trim();
+  }
+  for (const field of KB_FIELDS) if (k[field] === undefined) k[field] = '';
+  if ('category' in input && KB_CATEGORIES.includes(input.category)) k.category = input.category;
+  if (!KB_CATEGORIES.includes(k.category)) k.category = 'other';
+  if ('tags' in input) {
+    k.tags = Array.isArray(input.tags)
+      ? input.tags.map((t) => String(t).trim()).filter(Boolean)
+      : [];
+  } else if (!Array.isArray(k.tags)) {
+    k.tags = [];
+  }
+  if ('source' in input) k.source = normalizeKbSource(input.source, k.source);
+  if (!k.source || typeof k.source !== 'object') k.source = { type: 'manual' };
+  // 自动沉淀 vs 手动调整：auto_sync 只更新 auto 标记（不动 manual_at）；
+  // 手动保存（编辑器/合并定稿）记 manual_at。前端据此决定"直接覆盖"还是"弹合并层"
+  if (input.auto_sync === true) {
+    k.auto = {
+      at: new Date().toISOString(),
+      ref_updated_at: String(input.ref_updated_at || '').trim(),
+    };
+  } else {
+    k.manual_at = new Date().toISOString();
+  }
+  const incomingId = uuidOrNull(input.id);
+  if (incomingId) k.id = incomingId;
+  if (!k.id) k.id = newId();
+  if (IDEA_ORIGINS.includes(input.origin)) k.origin = input.origin;
+  if (!IDEA_ORIGINS.includes(k.origin)) k.origin = 'desktop';
+  k.created_at = existing.created_at || isoOrNow(input.created_at);
+  k.updated_at = new Date().toISOString();
+  return k;
+}
+
+route('GET', '/api/kb', async (ctx) => {
+  ctx.json([...kbDb.kb].sort((a, b) =>
+    String(b.updated_at).localeCompare(String(a.updated_at))
+    || String(b.created_at).localeCompare(String(a.created_at))));
+});
+
+route('POST', '/api/kb', async (ctx) => {
+  const id = uuidOrNull(ctx.body.id);
+  const hit = id ? kbDb.kb.find((k) => k.id === id) : null;
+  if (hit) return ctx.json(hit, 200);
+  const entry = normalizeKb(ctx.body);
+  if (ctx.role === 'mobile') entry.origin = 'mobile';
+  kbDb.kb.push(entry);
+  await saveKb();
+  ctx.json(entry, 201);
+});
+
+route('PUT', '/api/kb/:id', async (ctx) => {
+  const idx = kbDb.kb.findIndex((k) => k.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '知识不存在', code: 'missing' }, 404);
+  const prev = kbDb.kb[idx];
+  if (conflicted(prev, ctx.body)) {
+    return ctx.json({ error: '这条知识在别处改过', code: 'conflict', server: prev }, 409);
+  }
+  const entry = normalizeKb(ctx.body, prev);
+  kbDb.kb[idx] = entry;
+  await saveKb();
+  ctx.json(entry);
+});
+
+route('DELETE', '/api/kb/:id', async (ctx) => {
+  const idx = kbDb.kb.findIndex((k) => k.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '知识不存在', code: 'missing' }, 404);
+  const [removed] = kbDb.kb.splice(idx, 1);
+  await saveKb();
+  ctx.json({ ok: true, deleted: removed.id });
+});
+
+// ---------- 随记贴图：上传与回读 ----------
+// 原图直传不压缩：请求体就是文件字节流，不走 readBody/MAX_BODY（那会卡 2MB）
+function imageMagicOk(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+  const head6 = buf.slice(0, 6).toString('latin1');
+  if (head6 === 'GIF87a' || head6 === 'GIF89a') return true;
+  return buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
+}
+
+async function handleUpload(req, res, url) {
+  const name = String(url.searchParams.get('name') || '');
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!IMAGE_TYPES[ext]) {
+    return sendJson(res, 400, { error: '只支持 png/jpg/jpeg/gif/webp 图片' });
+  }
+  const id = newId();
+  await fsp.mkdir(IMAGE_DIR, { recursive: true });
+  const tmp = path.join(IMAGE_DIR, `${id}.${ext}.tmp`);
+  const dest = path.join(IMAGE_DIR, `${id}.${ext}`);
+  try {
+    await new Promise((resolve, reject) => {
+      let size = 0;
+      const ws = fs.createWriteStream(tmp);
+      const tooLarge = Object.assign(new Error('too large'), { code: 'TOO_LARGE' });
+      req.on('data', (c) => {
+        size += c.length;
+        if (size > MAX_UPLOAD_BYTES) {
+          ws.destroy(); req.destroy();
+          reject(tooLarge);
+        }
+      });
+      req.on('error', reject);
+      ws.on('error', reject);
+      ws.on('finish', resolve);
+      req.pipe(ws);
+    });
+    const fh = await fsp.open(tmp, 'r');
+    const head = Buffer.alloc(12);
+    try { await fh.read(head, 0, 12, 0); } finally { await fh.close(); }
+    if (!imageMagicOk(head)) {
+      await fsp.unlink(tmp).catch(() => {});
+      return sendJson(res, 415, { error: '文件内容不是合法图片（按魔数校验）' });
+    }
+    await fsp.rename(tmp, dest);
+    sendJson(res, 201, { id, ext, url: '/api/images/' + id });
+  } catch (e) {
+    await fsp.unlink(tmp).catch(() => {});
+    if (e && e.code === 'TOO_LARGE') return sendJson(res, 413, { error: '图片超过 64MB 上限' });
+    sendJson(res, 500, { error: '上传失败' });
+  }
+}
+
+route('GET', '/api/images/:id', async (ctx) => {
+  const id = uuidOrNull(ctx.params.id);
+  if (!id) return ctx.json({ error: '图片不存在' }, 404);
+  let file = null;
+  try {
+    file = (await fsp.readdir(IMAGE_DIR))
+      .find((f) => f.startsWith(id + '.') && !f.endsWith('.tmp')) || null;
+  } catch { return ctx.json({ error: '图片不存在' }, 404); }
+  if (!file) return ctx.json({ error: '图片不存在' }, 404);
+  const ext = file.slice(id.length + 1);
+  ctx.res.writeHead(200, {
+    'Content-Type': IMAGE_TYPES[ext] || 'application/octet-stream',
+    'Cache-Control': 'private, max-age=86400',
+  });
+  await new Promise((resolve) => {
+    const st = fs.createReadStream(path.join(IMAGE_DIR, file));
+    st.on('error', () => { ctx.res.destroy(); resolve(); });
+    st.on('end', resolve);
+    st.pipe(ctx.res);
+  });
 });
 
 // ---------- 手机同步 ----------
@@ -1414,7 +1870,9 @@ route('GET', '/api/sync/pull', async (ctx) => {
     expenses: expenseDb.expenses,
     insights: insightDb.verdicts,
     messages: [...messageDb.messages].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))),
-    ideas: ideaDb.ideas,
+    ideas: [...ideaDb.ideas].sort(ideaSortDesc),
+    achievements: [...achievementDb.achievements].sort(achievementSortDesc),
+    kb: [...kbDb.kb].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))),
   });
 });
 
@@ -1445,7 +1903,7 @@ function applyIdeaOp(op, role) {
   if (kind === 'create') {
     // 已经有 = 这次是重放，直接把服务端的版本还回去，别写第二条
     if (prev) return { id, status: 'ok', applied: false, idea: prev, already: true };
-    const idea = normalizeIdea(op);
+    const idea = normalizeIdea(op, {}, { keepClientTimes: true });
     idea.id = id;
     if (role === 'mobile') idea.origin = 'mobile';
     ideaDb.ideas.push(idea);
@@ -1456,10 +1914,12 @@ function applyIdeaOp(op, role) {
   if (conflicted(prev, op)) return { id, status: 'conflict', applied: false, server: prev };
   if (kind === 'delete') {
     ideaDb.ideas.splice(idx, 1);
+    pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
     return { id, status: 'ok', applied: true, deleted: true };
   }
-  const idea = normalizeIdea(op, prev);
+  const idea = normalizeIdea(op, prev, { keepClientTimes: true });
   ideaDb.ideas[idx] = idea;
+  pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
   return { id, status: 'ok', applied: true, idea };
 }
 
@@ -1467,9 +1927,13 @@ function applyIdeaOp(op, role) {
 // Capacitor WebView 预检/跨源保险：原生 CapacitorHttp 通常不走 CORS，
 // 但 WebView fetch 退回时需要。只回显白名单 Origin，不用 *。
 const CORS_ALLOW_ORIGIN_RE = /^(https?|capacitor|ionic):\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+// 浏览器扩展（阅读进度回传）：origin 形如 chrome-extension://<id>，固定且本机安装；
+// 放行后仍有口令门禁兜底
+const CORS_ALLOW_EXT_RE = /^(chrome|moz)-extension:\/\/[a-z0-9-]+$/i;
 
 function corsAllowOrigin(origin, reqHost) {
   if (!origin) return '';
+  if (CORS_ALLOW_EXT_RE.test(origin)) return origin;
   if (CORS_ALLOW_ORIGIN_RE.test(origin)) return origin;
   // 同源局域网（Origin host === Host，且 Host 是 IP/localhost）
   if (originAllowed(origin, reqHost)) {
@@ -1607,6 +2071,14 @@ function safeEqual(a, b) {
 function tokenOk(req) {
   if (!APP_CONFIG.token) return true;
   if (clientRole(req) === 'desktop') return true;
+  // <img> 标签带不了请求头：仅图片回读路由额外接受 ?t= 口令，不扩散到其他 API
+  try {
+    const u = new URL(req.url, 'http://localhost');
+    if (u.pathname.startsWith('/api/images/')) {
+      const t = String(u.searchParams.get('t') || '');
+      if (t && safeEqual(t, APP_CONFIG.token)) return true;
+    }
+  } catch { /* ignore */ }
   return safeEqual(req.headers['x-danji-token'] || '', APP_CONFIG.token);
 }
 
@@ -1614,7 +2086,9 @@ function tokenOk(req) {
 // 这是「防误操作 + 防同网段邻居」级别，不是防攻击。
 function mobileMayWrite(method, pathname) {
   if (method === 'GET' || method === 'HEAD') return true;
-  if (method === 'POST' && (pathname === '/api/ideas' || pathname === '/api/sync/push')) return true;
+  if (method === 'POST' && (pathname === '/api/ideas' || pathname === '/api/sync/push' || pathname === '/api/uploads')) return true;
+  // 阅读进度回写：浏览器扩展可能以局域网地址接入（role=mobile），只写 read_progress 无害
+  if (method === 'POST' && /^\/api\/sites\/[^/]+\/progress$/.test(pathname)) return true;
   if ((method === 'PUT' || method === 'DELETE') && /^\/api\/ideas\/[^/]+$/.test(pathname)) return true;
   return false;
 }
@@ -1653,7 +2127,9 @@ async function handleRequest(req, res) {
     }
   }
 
-  if (pathname.startsWith('/api/') && !originAllowed(req.headers.origin, req.headers.host)) {
+  // 浏览器扩展的 origin（chrome-extension://id）放行：口令门禁仍在后面兜着
+  const originIsExt = CORS_ALLOW_EXT_RE.test(String(req.headers.origin || ''));
+  if (pathname.startsWith('/api/') && !originIsExt && !originAllowed(req.headers.origin, req.headers.host)) {
     console.error(`[shisuiji] 已拒绝非本机来源的 API 请求: Origin=${req.headers.origin || '(无)'} Host=${req.headers.host || '(无)'}`);
     sendJson(res, 403, { error: 'Forbidden' });
     return;
@@ -1668,6 +2144,16 @@ async function handleRequest(req, res) {
     const role = clientRole(req);
     if (role === 'mobile' && !mobileMayWrite(req.method, pathname)) {
       sendJson(res, 403, { error: '手机端只能浏览，并可记想法', code: 'forbidden' });
+      return;
+    }
+    // 图片上传：请求体是文件字节流，必须在 readBody 之前特判走流式落盘
+    if (req.method === 'POST' && pathname === '/api/uploads') {
+      try {
+        await handleUpload(req, res, url);
+      } catch (err) {
+        console.error('[shisuiji] 上传错误:', err.message);
+        sendJson(res, 500, { error: '上传失败' });
+      }
       return;
     }
     for (const r of routes) {
@@ -1718,7 +2204,7 @@ server.on('error', (err) => {
 });
 
 Promise.all([
-  loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(),
+  loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(), loadAchievements(), loadKb(),
 ]).then(() => {
   server.listen(PORT, HOST, () => {
     const scheme = USING_TLS ? 'https' : 'http';
@@ -1737,7 +2223,14 @@ Promise.all([
   console.log(`  ➜  评价数据:  ${INSIGHTS_FILE}`);
   console.log(`  ➜  消息数据:  ${MESSAGES_FILE}`);
   console.log(`  ➜  想法数据:  ${IDEAS_FILE}`);
+  console.log(`  ➜  成果数据:  ${ACHIEVEMENTS_FILE}`);
+  console.log(`  ➜  知识数据:  ${KB_FILE}`);
     console.log(`  ➜  论文库:    ${PAPERS_DIR}`);
     console.log(`  按 Ctrl+C 停止服务\n`);
   });
+}).catch((err) => {
+  console.error(`\n[shisuiji] 数据文件加载失败，服务未启动：${(err && err.message) || err}`);
+  console.error('[shisuiji] data/ 目录下某个 JSON 可能已损坏：请先整个备份 data/ 目录，');
+  console.error('[shisuiji] 再定位并修复损坏的那个文件（或删除该文件让其重建为空）后重新启动。');
+  process.exit(1);
 });

@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Added
+- **成果与知识库板块**：成果记录（时间线 + 类别聚合）；知识卡可从随记 / 文献阅读记录 / 网页笔记三处沉淀，同名知识可合并
+- **随记增强**：支持贴图（原图存 `data/images/`，不入库）与 📌 置顶（置顶组内按最近动作排）
+- **浏览器扩展**：原页阅读进度回传 + 按锚点恢复（卡片进度徽章「读到 NN% / ✔ 已读完」）
+- **贴图通道**：原生壳走 CapacitorHttp blob、Web 端走普通 fetch，统一转 objectURL（`public/js/img-urls.js`）
+
+### Fixed
+- 启动时数据文件损坏只抛栈崩溃：现给出友好提示（备份 data/ 后定位修复）再退出
+- 蛋 / 文献 / 网页 / 花销 / 评价 / 消息六个集合并发写共用同一 `.tmp` 可能写坏文件：统一接入串行写队列 `queueWrite`
+- 手机同步：服务端返回 2xx 但 body 异常（如校园网强制门户登录页）时待同步队列被静默清空：现校验 results 异常即留队重试
+- 新克隆仓库跑 `app\build-apk.ps1` 因缺依赖失败：cap sync 前自动 `npm install`
+- 文献板块类别下拉恒空：模板用 `paperCategories` 而 setup 未返回
+- `tools/render-boards.mjs` 曾共享真实 `data/` 与文献库：改为临时目录隔离实例（AGENTS.md 红线 1、2）
+
 ## [1.1.0] - 2026-09-26
 
 ### Added

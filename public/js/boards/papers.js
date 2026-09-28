@@ -13,6 +13,7 @@ import { LOG_DRAFT_PREFIX, clearDraft, readDraft, writeDraft } from '../util/dra
 import { NOTE_FIELD_LABEL, NOTE_TEXT_FIELDS, blankPaperLog, noteBasicMissing, noteIsEmpty, notePartsText } from '../util/paper-note.js';
 import { readSortKey } from '../util/sort.js';
 import { flashCard } from '../ui.js';
+import { autoSyncFromPaperLog } from './kb.js';
 
 async function loadPapers() {
   try {
@@ -149,6 +150,14 @@ async function savePaperLog(form) {
   if (!res.ok) return toast('保存失败：' + (saved.error || res.status), 'warn');
   const i = state.papers.findIndex((p) => p.id === saved.id);
   if (i !== -1) state.papers.splice(i, 1, saved);
+  // 自动沉淀：笔记同步进知识库（仅桌面端；条目被手动调整过则弹合并层由用户定稿）
+  if (state.role === 'desktop') {
+    // 新建笔记的 form.id 是空串（id 由服务端分配），按「旧集合里没有的」找出来
+    const prevIds = new Set((paper.logs || []).map((l) => l.id));
+    const savedLog = (saved.logs || []).find((l) => l.id && l.id === form.id)
+      || (saved.logs || []).find((l) => !prevIds.has(l.id)) || null;
+    if (savedLog) autoSyncFromPaperLog(saved, savedLog).catch(() => {});
+  }
 
   clearTimeout(draftTimer);
   clearDraft(LOG_DRAFT_PREFIX, paper.id);

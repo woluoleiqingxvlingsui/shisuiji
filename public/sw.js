@@ -4,14 +4,18 @@
  * 策略：
  *   /api/*              不缓存（离线数据由 IndexedDB 镜像 + outbox 提供）
  *   导航（HTML）        network-first，失败回落缓存的 index.html
- *   其它静态资源        stale-while-revalidate
+ *   代码与样式          network-first（/js/*.js、/*.css）：
+ *                       改完前端下次刷新必须生效，绝不能喂旧代码（旧版看图层抽搐事故的根因）
+ *   其它静态资源        stale-while-revalidate（图标/图片/vendor，变化少）
  *
- * 改前端文件后看不到新样式？把 VERSION +1，或 DevTools 勾 Bypass for network。
+ * 改了缓存策略或预缓存清单就把 VERSION +1，activate 会清掉所有旧缓存。
  */
-const VERSION = 'p8-v1';
+const VERSION = 'p9-v2';
 const STATIC_CACHE = `danji-static-${VERSION}`;
 const NAV_CACHE = `danji-nav-${VERSION}`;
 const OFFLINE_URL = '/index.html';
+// 代码/样式走 network-first：保证修复与新版界面一次刷新即到位
+const FRESH_RE = /^\/(js\/.+\.js|[^/]+\.css)$/;
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -62,6 +66,21 @@ self.addEventListener('fetch', (event) => {
       } catch {
         const cache = await caches.open(NAV_CACHE);
         return (await cache.match(OFFLINE_URL)) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // 代码与样式：network-first，失败才回落缓存（离线兜底）
+  if (FRESH_RE.test(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(STATIC_CACHE);
+      try {
+        const fresh = await fetch(req);
+        if (fresh && fresh.ok) cache.put(req, fresh.clone());
+        return fresh;
+      } catch {
+        return (await cache.match(req)) || Response.error();
       }
     })());
     return;

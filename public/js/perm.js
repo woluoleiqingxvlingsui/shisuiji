@@ -1,6 +1,6 @@
 /* 拾穗集 —— 写权限（按 role，与布局 isPhone 无关）
  * desktop：全功能。
- * mobile / 离线 mobile：仅「想法」可写（走 outbox）；消息已读也不开放。
+ * mobile / 离线 mobile：仅「随记」可写（走 outbox）；消息已读也不开放。
  */
 
 import { state } from './state.js';
@@ -30,9 +30,9 @@ function mobileReadOnlyHint() {
   if (isDesktop()) return '';
   // 原生壳：本地已内置应用，不谈 HTTPS / PWA 离线壳
   if (isNativePlatform()) {
-    return 'App 模式：断网可记想法';
+    return 'App 模式：断网可记随记';
   }
-  const base = '手机端可浏览 · 想法可离线记';
+  const base = '手机端可浏览 · 随记可离线记';
   if (!isSecurePwaContext()) {
     return base + ' · 未配 HTTPS：关掉浏览器后不能冷启动';
   }

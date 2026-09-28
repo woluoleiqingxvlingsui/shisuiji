@@ -6,7 +6,7 @@ import { state } from './state.js';
 import { nextTick } from './vue-globals.js';
 import { FLASH_MS } from './util/const.js';
 
-const BOARD_IDS = new Set(['ideas', 'eggs', 'papers', 'sites', 'expenses', 'messages']);
+const BOARD_IDS = new Set(['ideas', 'eggs', 'papers', 'sites', 'expenses', 'achievements', 'kb', 'messages']);
 
 /** 支持 ?board=ideas 等直达，方便无头回归与分享链接 */
 function boardFromQuery() {

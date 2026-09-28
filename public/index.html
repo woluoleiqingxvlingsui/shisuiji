@@ -31,11 +31,13 @@
   <header class="topbar">
     <span class="logo"><span class="logo-mark">🧺</span><span class="logo-text">拾穗集</span></span>
     <nav class="board-tabs">
-      <button :class="{ active: state.board === 'ideas' }" @click="switchBoard('ideas')">💡 想法</button>
+      <button :class="{ active: state.board === 'ideas' }" @click="switchBoard('ideas')">📝 随记</button>
       <button :class="{ active: state.board === 'eggs' }" @click="switchBoard('eggs')">🥚 赛博鸡蛋</button>
       <button :class="{ active: state.board === 'papers' }" @click="switchBoard('papers')">📄 文献</button>
       <button :class="{ active: state.board === 'sites' }" @click="switchBoard('sites')">🌐 网页</button>
       <button :class="{ active: state.board === 'expenses' }" @click="switchBoard('expenses')">💰 花销</button>
+      <button :class="{ active: state.board === 'achievements' }" @click="switchBoard('achievements')">🏅 成果</button>
+      <button :class="{ active: state.board === 'kb' }" @click="switchBoard('kb')">📚 知识库</button>
     </nav>
     <button class="btn ghost theme-btn" @click="cycleTheme" :title="themeTitle">{{ themeIcon }}</button>
     <sync-status></sync-status>
@@ -63,8 +65,16 @@
       <button class="btn primary" v-if="canWriteExpenses" @click="openExpenseEditor(null)">＋ 记一笔</button>
     </template>
     <template v-else-if="state.board === 'ideas'">
-      <input class="search" type="search" v-model.trim="state.ideaSearch" placeholder="搜索想法…">
-      <button class="btn primary" @click="openIdeaEditor(null)">＋ 记想法</button>
+      <input class="search" type="search" v-model.trim="state.ideaSearch" placeholder="搜索随记…">
+      <button class="btn primary" @click="openIdeaEditor(null)">＋ 记随记</button>
+    </template>
+    <template v-else-if="state.board === 'achievements'">
+      <input class="search" type="search" v-model.trim="state.achievementSearch" placeholder="搜索成果 / 标签 / 链接…">
+      <button class="btn primary" v-if="canWriteAchievements" @click="openAchievementEditor(null)">＋ 记成果</button>
+    </template>
+    <template v-else-if="state.board === 'kb'">
+      <input class="search" type="search" v-model.trim="state.kbSearch" placeholder="搜索知识 / 标签 / 来源…">
+      <button class="btn primary" v-if="canWriteKb" @click="openKbEditor(null)">＋ 记知识</button>
     </template>
     <template v-else>
       <span class="board-hint">蛋过了使用截止，会自动记一条到这里</span>
@@ -81,29 +91,122 @@
     </button>
   </div>
 
-  <!-- ===== 想法板块 ===== -->
+  <!-- ===== 随记板块 ===== -->
   <main class="container" v-if="state.board === 'ideas'">
     <div class="empty" v-if="!state.ideasLoaded">
       <p>加载中…</p>
     </div>
     <div class="empty" v-else-if="!state.ideas.length">
-      <div class="empty-egg">💡</div>
-      <p class="empty-title">还没有记下任何想法</p>
-      <p class="empty-sub">科研、办公、开发上的灵感，随手记一句</p>
+      <div class="empty-egg">📝</div>
+      <p class="empty-title">还没有记下任何随记</p>
+      <p class="empty-sub">科研、办公、开发、生活……想到什么随手记一句，还能贴图</p>
       <div class="empty-actions">
-        <button class="btn primary" @click="openIdeaEditor(null)">＋ 记第一个想法</button>
+        <button class="btn primary" @click="openIdeaEditor(null)">＋ 记第一条随记</button>
       </div>
     </div>
     <div class="empty" v-else-if="!filteredIdeas.length">
       <div class="empty-egg">🔍</div>
-      <p class="empty-title">没有匹配的想法</p>
+      <p class="empty-title">没有匹配的随记</p>
       <p class="empty-sub">换个搜索词试试</p>
     </div>
 
     <transition-group name="list" tag="div" class="egg-list" v-else>
       <idea-card v-for="i in filteredIdeas" :key="i.id" :idea="i"
-                 @edit="openIdeaEditor(i)" @remove="removeIdea(i)">
+                 @edit="openIdeaEditor(i)" @remove="removeIdea(i)" @deposit="depositFromIdea(i)"
+                 @pin="togglePin(i)">
       </idea-card>
+    </transition-group>
+  </main>
+
+  <!-- ===== 成果板块 ===== -->
+  <main class="container" v-if="state.board === 'achievements'">
+    <!-- 类别筛选 -->
+    <div class="filters" v-if="state.achievements.length">
+      <div class="tabs">
+        <button class="tab" :class="{ active: !state.achievementCategoryFilter }"
+                @click="state.achievementCategoryFilter = ''">全部</button>
+        <button v-for="c in achievementCategories" :key="c.id" class="tab"
+                :class="{ active: state.achievementCategoryFilter === c.id }"
+                @click="pickAchievementCategory(c.id)">
+          {{ c.emoji }} {{ c.label }}<sup v-if="achievementCategoryCounts[c.id]">{{ achievementCategoryCounts[c.id] }}</sup>
+        </button>
+      </div>
+    </div>
+
+    <div class="empty" v-if="!state.achievementsLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.achievements.length">
+      <div class="empty-egg">🏅</div>
+      <p class="empty-title">还没有记下任何成果</p>
+      <p class="empty-sub">项目、奖项、论文、证书……捡到什么记什么，写简历时不用到处翻</p>
+      <div class="empty-actions" v-if="canWriteAchievements">
+        <button class="btn primary" @click="openAchievementEditor(null)">＋ 记第一项成果</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredAchievements.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的成果</p>
+      <p class="empty-sub">换个搜索词或类别试试</p>
+    </div>
+
+    <!-- 时间线：按年份分组倒序 -->
+    <div class="timeline" v-else>
+      <section class="timeline-year" v-for="g in achievementTimeline" :key="g.year">
+        <h2 class="timeline-year-title"><span class="timeline-dot"></span>{{ g.year === '时间不明' ? g.year : g.year + ' 年' }}</h2>
+        <transition-group name="list" tag="div" class="egg-list timeline-items">
+          <achievement-card v-for="a in g.items" :key="a.id" :achievement="a"
+                            @edit="openAchievementEditor(a)" @remove="removeAchievement(a)">
+          </achievement-card>
+        </transition-group>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== 知识库板块 ===== -->
+  <main class="container" v-if="state.board === 'kb'">
+    <!-- 类别筛选 -->
+    <div class="filters" v-if="state.kb.length">
+      <div class="tabs">
+        <button class="tab" :class="{ active: !state.kbCategoryFilter }"
+                @click="state.kbCategoryFilter = ''">全部</button>
+        <button v-for="c in kbCategories" :key="c.id" class="tab"
+                :class="{ active: state.kbCategoryFilter === c.id }"
+                @click="pickKbCategory(c.id)">
+          {{ c.emoji }} {{ c.label }}
+        </button>
+      </div>
+    </div>
+    <!-- 标签筛选 -->
+    <div class="kb-tags" v-if="kbTagOptions.length">
+      <button class="chip tag" :class="{ on: !state.kbTagFilter }" @click="state.kbTagFilter = ''">全部标签</button>
+      <button v-for="t in kbTagOptions" :key="t.tag" class="chip tag"
+              :class="{ on: state.kbTagFilter === t.tag }" @click="pickKbTag(t.tag)">
+        #{{ t.tag }}<sup v-if="t.count > 1">{{ t.count }}</sup>
+      </button>
+    </div>
+
+    <div class="empty" v-if="!state.kbLoaded">
+      <p>加载中…</p>
+    </div>
+    <div class="empty" v-else-if="!state.kb.length">
+      <div class="empty-egg">📚</div>
+      <p class="empty-title">知识库还是空的</p>
+      <p class="empty-sub">读到的学术表达、理论分析、方法研究……沉淀下来，随时检索复用</p>
+      <div class="empty-actions" v-if="canWriteKb">
+        <button class="btn primary" @click="openKbEditor(null)">＋ 记第一条知识</button>
+      </div>
+    </div>
+    <div class="empty" v-else-if="!filteredKb.length">
+      <div class="empty-egg">🔍</div>
+      <p class="empty-title">没有匹配的知识</p>
+      <p class="empty-sub">换个搜索词、类别或标签试试</p>
+    </div>
+
+    <transition-group name="list" tag="div" class="egg-list" v-else>
+      <kb-card v-for="k in filteredKb" :key="k.id" :entry="k"
+               @edit="openKbEditor(k)" @remove="removeKb(k)">
+      </kb-card>
     </transition-group>
   </main>
 
@@ -383,7 +486,7 @@
   <paper-log-drawer v-if="state.board === 'papers' && state.logOpen && logPaper" :paper="logPaper" :editing="state.logEditing"
                     :pending-read="state.logPendingRead" :restored="state.logRestored"
                     @save="savePaperLog" @draft="saveLogDraft" @discard-draft="discardLogDraft"
-                    @remove="removePaperLog" @edit="editPaperLog" @new="newPaperLog"
+                    @remove="removePaperLog" @edit="editPaperLog" @new="newPaperLog" @deposit="depositFromPaperLog(logPaper, $event)"
                     @back="backToLogList" @empty="toast('这条记录还是空的，写点内容再保存', 'warn')" @close="closePaperLog">
   </paper-log-drawer>
 
@@ -392,7 +495,7 @@
   <site-note-drawer v-if="state.board === 'sites' && state.siteNoteOpen && siteNoteItem" :site="siteNoteItem"
                     :editing="state.siteNoteEditing" :pending-read="state.siteNotePendingRead" :restored="state.siteNoteRestored"
                     @save="saveSiteNote" @draft="saveSiteNoteDraft" @discard-draft="discardSiteNoteDraft"
-                    @remove="removeSiteNote" @edit="editSiteNote" @new="newSiteNote"
+                    @remove="removeSiteNote" @edit="editSiteNote" @new="newSiteNote" @deposit="depositFromSiteNote(siteNoteItem, $event)"
                     @back="backToSiteNoteList" @empty="toast('这条笔记还是空的，写点内容再保存', 'warn')" @close="closeSiteNote">
   </site-note-drawer>
 
@@ -402,6 +505,14 @@
 
   <idea-editor v-if="state.board === 'ideas' && state.ideaEditorOpen" :initial="state.editingIdea"
                @save="saveIdea" @close="state.ideaEditorOpen = false"></idea-editor>
+
+  <achievement-editor v-if="state.board === 'achievements' && state.achievementEditorOpen" :initial="state.editingAchievement"
+                      @save="saveAchievement" @close="state.achievementEditorOpen = false"></achievement-editor>
+
+  <kb-editor v-if="state.kbEditorOpen" :initial="state.editingKb" :prefill="state.kbPrefill"
+             @save="saveKb" @close="state.kbEditorOpen = false"></kb-editor>
+
+  <kb-merge @resolve="resolveKbMerge"></kb-merge>
 
   <pair-drawer></pair-drawer>
 

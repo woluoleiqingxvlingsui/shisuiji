@@ -155,17 +155,65 @@ export const CONFIG = {
     ],
   },
 
-  // 想法板块：一行点题 + 一段灵感。手机端唯一能写的板块，所以字段越少越好——
-  // 灵感转瞬即逝，别让用户在表单上花时间。
+  // 随记板块（内部 id 仍为 ideas）：一行点题 + 一段内容 + 贴图。手机端唯一能写的板块，
+  // 字段越少越好——灵感转瞬即逝，别让用户在表单上花时间。
   ideas: {
     titleMax: 80,
     contentRows: 6,
-    titlePlaceholder: '例：给体感评价加个月度对比',
-    contentPlaceholder: '想到什么写什么，不用整理，回头再说……',
+    titlePlaceholder: '例：给体感评价加个月度对比；今天踩的坑',
+    contentPlaceholder: '想到什么写什么，不用整理，回头再说……有图可以直接贴',
     empty: {
-      icon: '💡',
-      title: '还没有记下任何想法',
-      sub: '科研、办公、开发上的灵感，随手记一句',
+      icon: '📝',
+      title: '还没有记下任何随记',
+      sub: '科研、办公、开发、生活……想到什么随手记一句，还能贴图',
+    },
+  },
+
+  // 成果板块：项目/奖项/论文/证书等，时间线倒序展示，写简历时直接来翻素材。
+  // category/status 的 id 与 server.js 的 ACHIEVEMENT_CATEGORIES / ACHIEVEMENT_STATUSES 同步
+  achievements: {
+    categories: [
+      { id: 'project', label: '项目/作品', emoji: '🚀', hue: 250 },
+      { id: 'award', label: '奖项/荣誉', emoji: '🏆', hue: 45 },
+      { id: 'paper', label: '论文/发表', emoji: '📄', hue: 200 },
+      { id: 'cert', label: '证书/资格', emoji: '📜', hue: 150 },
+      { id: 'other', label: '其他', emoji: '✨', hue: 320 },
+    ],
+    statuses: [
+      { id: 'doing', label: '进行中', emoji: '🔨' },
+      { id: 'done', label: '已完成', emoji: '✅' },
+    ],
+    titleMax: 120,
+    titlePlaceholder: '例：拾穂集——个人记录工具；XX 竞赛省一',
+    datePlaceholder: '随意：2026-06 / 2026 年夏 / 一段话都行',
+    contentPlaceholder: '做了什么、担任什么角色、用了什么技术、拿到什么结果……',
+    highlightPlaceholder: '提炼成一句能直接写进简历的话，例：独立开发并上线 XX，服务 XX 用户',
+    linksPlaceholder: '一行一个：仓库 / 演示 / DOI / 报道链接',
+    tagsPlaceholder: '逗号分隔，例：vue, node, 全栈',
+    empty: {
+      icon: '🏅',
+      title: '还没有记下任何成果',
+      sub: '项目、奖项、论文、证书……捡到什么记什么，写简历时不用到处翻',
+    },
+  },
+
+  // 知识库：可反复复用的精华沉淀。category 的 id 与 server.js 的 KB_CATEGORIES 同步
+  kb: {
+    categories: [
+      { id: 'expression', label: '学术表达', emoji: '✒️', hue: 210 },
+      { id: 'theory', label: '理论分析', emoji: '🧠', hue: 265 },
+      { id: 'method', label: '方法研究', emoji: '🔧', hue: 25 },
+      { id: 'inspiration', label: '灵感思路', emoji: '💡', hue: 50 },
+      { id: 'other', label: '其他', emoji: '✨', hue: 320 },
+    ],
+    titleMax: 120,
+    titlePlaceholder: '例：消融实验的表述套路；XX 理论的适用边界',
+    contentPlaceholder: '把可复用的精华原样记下来：表述、推导、做法、适用条件……',
+    tagsPlaceholder: '逗号分隔，例：写作, 消融实验, 可复用',
+    empty: {
+      icon: '📚',
+      title: '知识库还是空的',
+      sub: '读到的学术表达、理论分析、方法研究……沉淀下来，随时检索复用',
     },
   },
 

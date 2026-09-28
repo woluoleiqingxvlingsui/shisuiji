@@ -12,7 +12,7 @@ const PaperLogDrawer = {
     pendingRead: Boolean,                     // 这是"读完引导"：三行速记写满才会归档
     restored: Boolean,                        // 表单内容来自上次没写完的草稿
   },
-  emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'close'],
+  emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'deposit', 'close'],
   setup(props, { emit }) {
 
     const relevance = CONFIG.paperNote.relevance;
@@ -86,6 +86,7 @@ const PaperLogDrawer = {
       relevance, parts, form, logs, logRows, relMeta, partLabels, togglePart, save, cancel, discardDraft,
       emitNew: () => emit('new'),
       emitEdit: (log) => emit('edit', log),
+      emitDeposit: (log) => emit('deposit', log),
       emitRemove: (log) => emit('remove', log),
       close: () => emit('close'),
       onOverlayMousedown, onOverlayMouseup,
@@ -112,6 +113,7 @@ const PaperLogDrawer = {
             <span class="rel-badge" :class="'rel-' + log.rel" v-if="relMeta(log)">{{ relMeta(log).emoji }} {{ relMeta(log).label }}</span>
             <span class="spacer"></span>
             <button class="btn small ghost" @click="emitEdit(log)" title="编辑这条记录">✏️</button>
+            <button class="btn small ghost" @click="emitDeposit(log)" title="沉淀到知识库">📚</button>
             <button class="btn small danger" @click="emitRemove(log)" title="删除这条记录">🗑</button>
           </div>
           <div class="log-row" v-for="row in logRows(log)" :key="row.key">

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "拾穗集 · 原页阅读进度",
+  "version": "1.1.0",
+  "description": "在原版网页上阅读时把滚动进度回传给拾穗集，下次打开同一页面按锚点自动恢复到上次位置。",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_popup": "popup.html" }
+}

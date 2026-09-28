@@ -1,4 +1,4 @@
-/* 拾穗集 —— 想法：一行点题 + 一段灵感
+/* 拾穗集 —— 随记（内部 id 仍为 ideas）：一行点题 + 一段内容 + 贴图
  * 桌面端直连 REST；手机端走 IndexedDB 镜像 + outbox（P6）。
  */
 
@@ -27,7 +27,7 @@ async function loadIdeas() {
     const res = await api('/api/ideas');
     state.ideas = await res.json();
   } catch {
-    toast('想法加载失败', 'warn');
+    toast('随记加载失败', 'warn');
   }
   state.ideasLoaded = true;
 }
@@ -39,6 +39,20 @@ const filteredIdeas = computed(() => {
     String(i.title || '').toLowerCase().includes(kw)
     || String(i.content || '').toLowerCase().includes(kw));
 });
+
+// 与服务端 ideaSortDesc / outbox.mergeDisplayItems 同一套排序：
+// 置顶组优先，组内按"最近动作"（置顶或编辑取较新）倒序——编辑过的置顶随记浮到最前
+function pinKey(i) {
+  const p = String(i.pinned_at || '');
+  const u = String(i.updated_at || '');
+  return p > u ? p : u;
+}
+function ideaSortLocal(a, b) {
+  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)
+    || pinKey(b).localeCompare(pinKey(a))
+    || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+    || String(b.created_at || '').localeCompare(String(a.created_at || ''));
+}
 
 function openIdeaEditor(idea) {
   state.editingIdea = idea ? { ...idea } : null;
@@ -62,12 +76,13 @@ async function saveIdea(payload) {
       payload: {
         title: payload.title,
         content: payload.content,
+        images: payload.images || [],
         created_at: isEdit ? state.editingIdea.created_at : undefined,
       },
       baseUpdatedAt: base,
     });
     state.ideaEditorOpen = false;
-    toast(isEdit ? '已记入本地队列 💡' : '已记下（待同步）💡');
+    toast(isEdit ? '已记入本地队列 📝' : '已记下（待同步）📝');
     return;
   }
 
@@ -80,23 +95,62 @@ async function saveIdea(payload) {
   if (res.status === 409) {
     // 乐观锁没过：这条在别处先改了。不静默覆盖，刷新拿最新的让用户自己看
     state.ideaEditorOpen = false;
-    toast('这条想法在别处改过，已刷新为最新内容', 'warn');
+    toast('这条随记在别处改过，已刷新为最新内容', 'warn');
     loadIdeas();
     return;
   }
   if (!res.ok) return toast('保存失败：' + (saved.error || res.status), 'warn');
-  if (isEdit) {
-    const idx = state.ideas.findIndex((i) => i.id === saved.id);
-    if (idx !== -1) state.ideas.splice(idx, 1, saved);
-  } else {
-    state.ideas.unshift(saved);
-  }
+  // 编辑过 = 刚被想起，移到最前；置顶的留在置顶组内，统一按服务端同款排序
+  const idx = state.ideas.findIndex((i) => i.id === saved.id);
+  if (idx !== -1) state.ideas.splice(idx, 1);
+  state.ideas.unshift(saved);
+  state.ideas.sort(ideaSortLocal);
   state.ideaEditorOpen = false;
-  toast(isEdit ? '已保存 ✅' : '记下了 💡');
+  toast(isEdit ? '已保存 ✅' : '记下了 📝');
+}
+
+async function togglePin(idea) {
+  const next = !idea.pinned;
+
+  if (mobileSyncOn()) {
+    // 队列 payload 必须带全字段：push 时服务端按整条覆盖。
+    // idea 是 Vue reactive Proxy，直接进 IndexedDB 会 DataCloneError，深拷贝成普通对象
+    const plain = JSON.parse(JSON.stringify(idea));
+    await enqueueIdeaLocal({
+      op: 'update',
+      id: idea.id,
+      payload: {
+        title: plain.title,
+        content: plain.content,
+        images: plain.images || [],
+        pinned: next,
+        created_at: plain.created_at,
+      },
+      baseUpdatedAt: plain.base_updated_at || plain.updated_at || '',
+    });
+    toast(next ? '已置顶 📌' : '已取消置顶');
+    return;
+  }
+
+  const res = await api(`/api/ideas/${idea.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ pinned: next }),
+  });
+  const saved = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    toast('这条随记在别处改过，已刷新为最新内容', 'warn');
+    loadIdeas();
+    return;
+  }
+  if (!res.ok) return toast('操作失败：' + (saved.error || res.status), 'warn');
+  const idx = state.ideas.findIndex((i) => i.id === saved.id);
+  if (idx !== -1) state.ideas.splice(idx, 1, saved);
+  state.ideas.sort(ideaSortLocal);
+  toast(next ? '已置顶 📌' : '已取消置顶');
 }
 
 async function removeIdea(idea) {
-  const name = idea.title || (idea.content || '').slice(0, 20) || '这条想法';
+  const name = idea.title || (idea.content || '').slice(0, 20) || '这条随记';
   if (!confirm(`确定删除「${name}」吗？`)) return;
 
   if (mobileSyncOn()) {
@@ -118,4 +172,4 @@ async function removeIdea(idea) {
   toast('已删除 🗑');
 }
 
-export { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea };
+export { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin };

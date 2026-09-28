@@ -127,7 +127,11 @@ const PairDrawer = {
       try {
         const result = await testPair(base, token);
         if (!result.ok) {
-          error.value = (result.data && result.data.error) || `连不上（HTTP ${result.status || 0}）`;
+          const msg = (result.data && result.data.error) || `连不上（HTTP ${result.status || 0}）`;
+          // 网络层失败（timeout/连不上）时给自查清单：旧二维码含旧 IP 是最常见的坑
+          error.value = /timeout|连不上|failed/i.test(msg)
+            ? `${msg}。自查：① 电脑服务已启动并用最新配置重启过；② 手机与电脑同一 Wi-Fi；③ 配对码是控制台刚重新生成的（旧码含旧 IP，换网络/重启电脑后必须重出码）`
+            : msg;
           return false;
         }
         const applied = applyPair({ base, token });

@@ -10,6 +10,7 @@ import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
+import { autoSyncFromSiteNote } from './kb.js';
 import { CONFIG } from '../../config.js';
 import { SITE_DRAFT_PREFIX, clearDraft, readDraft, writeDraft } from '../util/draft.js';
 import { blankSiteNote, siteNoteFieldLabel, siteNoteIsEmpty, siteNoteKeys, siteNoteMissing } from '../util/site-note.js';
@@ -63,6 +64,7 @@ async function setSiteStatus(site, status) {
 async function openSite(site) {
   const url = normalizeUrl(site.url);
   if (!url) return toast('这条记录的链接不合法，编辑一下试试', 'warn');
+  // 直接开原站阅读；原页滚动进度由浏览器扩展回传（见 extension/ 与 README）
   // 别写成 window.open(url, '_blank', 'noopener')：带 noopener 时浏览器按规范一律返回 null
   // （不给句柄），那样会把「打开成功」误判成「被拦截」。这里正常打开后立刻抹掉 opener，效果等价。
   const win = window.open(url, '_blank');
@@ -84,6 +86,7 @@ async function openSite(site) {
   if (idx !== -1) state.sites.splice(idx, 1, data.site);
   flashCard(data.site.id);
 }
+
 async function removeSite(site) {
   if (!confirm(`确定删除「${site.title}」吗？`)) return;
   const res = await api(`/api/sites/${site.id}`, { method: 'DELETE' });
@@ -180,6 +183,14 @@ async function saveSiteNote(form) {
   if (!res.ok) return toast('保存失败：' + (saved.error || res.status), 'warn');
   const i = state.sites.findIndex((s) => s.id === saved.id);
   if (i !== -1) state.sites.splice(i, 1, saved);
+  // 自动沉淀：笔记同步进知识库（仅桌面端；条目被手动调整过则弹合并层由用户定稿）
+  if (state.role === 'desktop') {
+    // 新建笔记的 form.id 是空串（id 由服务端分配），按「旧集合里没有的」找出来
+    const prevIds = new Set((site.logs || []).map((l) => l.id));
+    const savedLog = (saved.logs || []).find((l) => l.id && l.id === form.id)
+      || (saved.logs || []).find((l) => !prevIds.has(l.id)) || null;
+    if (savedLog) autoSyncFromSiteNote(saved, savedLog).catch(() => {});
+  }
 
   clearTimeout(siteDraftTimer);
   clearDraft(SITE_DRAFT_PREFIX, site.id);

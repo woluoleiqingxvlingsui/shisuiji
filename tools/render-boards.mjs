@@ -1,10 +1,11 @@
 /**
- * 拾穗集 —— 六板块无头渲染回归
+ * 拾穗集 —— 全板块无头渲染回归
  * 启动临时服务 → Edge headless dump-dom → 检查每个板块主容器与关键节点。
  * 用法：node tools/render-boards.mjs
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,11 +15,13 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const TIMEOUT_MS = Number(process.env.DANJI_RENDER_TIMEOUT || 20000);
 
 const BOARDS = [
-  { id: 'ideas', name: '想法', markers: ['想法', '记想法'] },
+  { id: 'ideas', name: '随记', markers: ['随记', '记随记'] },
   { id: 'eggs', name: '赛博鸡蛋', markers: ['赛博鸡蛋', '记蛋'] },
   { id: 'papers', name: '文献', markers: ['文献', '记论文'] },
   { id: 'sites', name: '网页', markers: ['网页', '记网页'] },
   { id: 'expenses', name: '花销', markers: ['花销', '记一笔'] },
+  { id: 'achievements', name: '成果', markers: ['成果', '记成果'] },
+  { id: 'kb', name: '知识库', markers: ['知识库', '记知识'] },
   { id: 'messages', name: '消息', markers: ['msg-summary'] },
 ];
 
@@ -51,6 +54,16 @@ function run(cmd, args, opts = {}) {
     child.on('error', (err) => resolve({ code: -1, stdout, stderr: String(err) }));
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+// Windows 下子进程句柄/cwd 释放有延迟：先等 close，再带重试删除临时目录
+async function stopAndClean(server, dir) {
+  const closed = server.exitCode !== null
+    ? Promise.resolve()
+    : new Promise((resolve) => server.once('close', resolve));
+  server.kill();
+  await closed;
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 async function waitHealth(timeoutMs = 10000) {
@@ -109,9 +122,19 @@ async function main() {
   console.log(`browser: ${browser}`);
   console.log(`server:  ${BASE} (port ${PORT})`);
 
-  const server = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DANJI_HOST: '127.0.0.1' },
-    cwd: ROOT,
+  // 隔离实例：server.js + public 复制到临时目录再启动，data/ 与文献库都不碰真实项目
+  // （AGENTS.md 红线 1、2）；临时目录无 config.json，口令/监听也不会继承本机配置
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'danji-render-'));
+  fs.copyFileSync(path.join(ROOT, 'server.js'), path.join(tmpRoot, 'server.js'));
+  fs.cpSync(path.join(ROOT, 'public'), path.join(tmpRoot, 'public'), { recursive: true });
+  const server = spawn(process.execPath, [path.join(tmpRoot, 'server.js')], {
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      DANJI_HOST: '127.0.0.1',
+      DANJI_PAPERS_DIR: path.join(tmpRoot, 'papers'),
+      DANJI_TOKEN: '',
+    },
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -123,7 +146,7 @@ async function main() {
   if (!health) {
     console.error('✗ 服务未在超时内就绪');
     console.error(serverLog.slice(-800));
-    server.kill();
+    await stopAndClean(server, tmpRoot);
     process.exit(1);
   }
   console.log(`health: role=${health.role} needToken=${health.needToken}`);
@@ -156,14 +179,14 @@ async function main() {
       console.error(`      DOM: ${mobileHtml.replace(/\s+/g, ' ').slice(0, 240)}`);
     }
   } finally {
-    server.kill();
+    await stopAndClean(server, tmpRoot);
   }
 
   if (failed) {
-    console.error(`\n✗ 六板块无头渲染回归：${failed} 项失败`);
+    console.error(`\n✗ 全板块无头渲染回归：${failed} 项失败`);
     process.exit(1);
   }
-  console.log('\n✓ 六板块无头渲染回归全部通过');
+  console.log('\n✓ 全板块无头渲染回归全部通过');
 }
 
 main().catch((err) => {

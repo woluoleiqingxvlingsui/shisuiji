@@ -135,6 +135,14 @@ if ($Release) {
 
 $gradleTask = if ($Release) { 'assembleRelease' } else { 'assembleDebug' }
 Write-Step "Capacitor sync + $gradleTask"
+if (-not (Test-Path (Join-Path $AppRoot 'node_modules'))) {
+  Write-Step '首跑安装 app 依赖（npm install）'
+  Push-Location $AppRoot
+  try {
+    npm install
+    if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+  } finally { Pop-Location }
+}
 Push-Location $AppRoot
 try {
   npx cap sync android

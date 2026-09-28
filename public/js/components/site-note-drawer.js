@@ -12,7 +12,7 @@ const SiteNoteDrawer = {
     pendingRead: Boolean,                     // 这是"读完引导"：写满门槛字段才会归档
     restored: Boolean,                        // 表单内容来自上次没写完的草稿
   },
-  emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'close'],
+  emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'deposit', 'close'],
   setup(props, { emit }) {
 
     const kindOptions = CONFIG.siteNote.kinds;
@@ -71,6 +71,7 @@ const SiteNoteDrawer = {
       save, cancel, discardDraft,
       emitNew: () => emit('new'),
       emitEdit: (log) => emit('edit', log),
+      emitDeposit: (log) => emit('deposit', log),
       emitRemove: (log) => emit('remove', log),
       close: () => emit('close'),
       onOverlayMousedown, onOverlayMouseup,
@@ -98,6 +99,7 @@ const SiteNoteDrawer = {
             <span class="usage-badge" :class="'usage-' + log.usage" v-if="logUsage(log)">{{ logUsage(log).emoji }} {{ logUsage(log).label }}</span>
             <span class="spacer"></span>
             <button class="btn small ghost" @click="emitEdit(log)" title="编辑这条笔记">✏️</button>
+            <button class="btn small ghost" @click="emitDeposit(log)" title="沉淀到知识库">📚</button>
             <button class="btn small danger" @click="emitRemove(log)" title="删除这条笔记">🗑</button>
           </div>
           <div class="log-row" v-for="row in logRows(log)" :key="row.key">

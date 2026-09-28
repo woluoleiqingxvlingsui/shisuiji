@@ -121,9 +121,16 @@ function mergeDisplayItems(mirrorItems, outboxOps) {
     seen.add(op.id);
   }
 
-  // 与桌面列表一致：updated_at 降序
+  // 与桌面列表一致：置顶组优先；组内按"最近动作"（置顶/编辑取较新）倒序，其余按更新时间倒序
+  const pinKey = (i) => {
+    const p = String(i.pinned_at || '');
+    const u = String(i.updated_at || '');
+    return p > u ? p : u;
+  };
   out.sort((a, b) =>
-    String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+    ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
+    || pinKey(b).localeCompare(pinKey(a))
+    || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
     || String(b.created_at || '').localeCompare(String(a.created_at || '')));
   return out;
 }
@@ -176,9 +183,14 @@ function toPushPayload(entry) {
     op: entry.op,
     title: payload.title || '',
     content: payload.content || '',
+    images: Array.isArray(payload.images) ? payload.images : [],
     origin: entry.origin || payload.origin || 'mobile',
     created_at: payload.created_at || entry.created_at || '',
+    // 手机端的编辑时间：服务端落库时保留它，同步不改写内容时间
+    updated_at: payload.updated_at || entry.updated_at || '',
     base_updated_at: entry.base_updated_at || '',
+    // 置顶状态：显式设置过才随 push 上行（避免旧队列项把服务端 pinned 冲掉）
+    ...(payload.pinned !== undefined ? { pinned: !!payload.pinned } : {}),
   };
 }
 

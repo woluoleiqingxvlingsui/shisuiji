@@ -65,6 +65,23 @@ const state = reactive({
   ideaSearch: '',
   ideaEditorOpen: false,
   editingIdea: null,
+  // 成果板块：桌面端管理，手机端在线只读
+  achievements: [],
+  achievementsLoaded: false,
+  achievementSearch: '',
+  achievementCategoryFilter: '', // '' = 全部类别
+  achievementEditorOpen: false,
+  editingAchievement: null,
+  // 知识库：桌面端管理，手机端在线只读
+  kb: [],
+  kbLoaded: false,
+  kbSearch: '',
+  kbCategoryFilter: '', // '' = 全部类别
+  kbTagFilter: '',       // '' = 全部标签
+  kbEditorOpen: false,
+  editingKb: null,
+  kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
+  kbMerge: null,         // 笔记更新 vs 手动调整过的知识库条目：合并层数据
   // 角色（权限）：desktop/mobile/unknown，来自 /api/health
   // 电脑上把窗口拖窄只会改 isPhone，不会把 role 变成 mobile
   role: 'unknown',

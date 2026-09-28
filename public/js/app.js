@@ -11,7 +11,9 @@ import { loadPapers, openPaperEditor, savePaper, setPaperStatus, logPaper, openP
 import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, siteUsageOptions, siteUrls, siteHaystack, filteredSites } from './boards/sites.js';
 import { expensePeriodInit, loadExpenses, openExpenseEditor, saveExpense, removeExpense, setExpenseMode, pickExpenseCategory, clearExpenseCategory, setExpenseYear, setExpenseMonth, stepExpensePeriod, expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories, expensePeriodLabel, expenseYearOptions } from './boards/expenses.js';
 import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, expenseInsights, expenseUnmatchedText } from './boards/insights.js';
-import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea } from './boards/ideas.js';
+import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin } from './boards/ideas.js';
+import { loadAchievements, filteredAchievements, achievementTimeline, achievementCategories, achievementCategoryCounts, openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement } from './boards/achievements.js';
+import { loadKb, kbCategories, filteredKb, kbTagOptions, openKbEditor, pickKbCategory, pickKbTag, saveKb, removeKb, depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge } from './boards/kb.js';
 import { SyncStatus } from './components/sync-status.js';
 import { installSync, disposeSync } from './sync/engine.js';
 import { canWrite, canMarkMessages, mobileReadOnlyHint } from './perm.js';
@@ -126,6 +128,11 @@ import { InsightCard } from './components/insight-card.js';
 import { MessageCard } from './components/message-card.js';
 import { IdeaCard } from './components/idea-card.js';
 import { IdeaEditor } from './components/idea-editor.js';
+import { AchievementCard } from './components/achievement-card.js';
+import { AchievementEditor } from './components/achievement-editor.js';
+import { KbCard } from './components/kb-card.js';
+import { KbEditor } from './components/kb-editor.js';
+import { KbMerge } from './components/kb-merge.js';
 import { PairDrawer } from './components/pair-drawer.js';
 
 /* ---------------- 根应用 ---------------- */
@@ -286,6 +293,8 @@ const app = createApp({
       loadExpenses();
       loadInsights();
       loadIdeas();
+      loadAchievements();
+      loadKb();
     }
 
     onMounted(async () => {
@@ -316,6 +325,8 @@ const app = createApp({
         state.expensesLoaded = true;
         state.insightsLoaded = true;
         state.messagesLoaded = true;
+        state.achievementsLoaded = true;
+        state.kbLoaded = true;
         loadIdeas();
       } else {
         await load();
@@ -330,6 +341,8 @@ const app = createApp({
         loadExpenses();
         loadInsights();
         loadIdeas();
+        loadAchievements();
+        loadKb();
       }
       tickTimer = setInterval(() => {
         state.now = Date.now();
@@ -356,6 +369,7 @@ const app = createApp({
       openEditor, saveActivity, setStatus, removeActivity, jumpTo,
       loadSamples, toggleNotify, load,
       paperCounts, filteredPapers, switchBoard,
+      paperCategories: computed(() => state.paperCategories),
       openPaperEditor, savePaper, setPaperStatus, openPaper, openPaperReveal, removePaper,
       logPaper, startPaperRead, openPaperLog, savePaperLog, removePaperLog, editPaperLog, newPaperLog,
       backToLogList, closePaperLog, saveLogDraft, discardLogDraft,
@@ -370,11 +384,17 @@ const app = createApp({
       stepExpensePeriod, formatMoney, defaultExpenseDate, pickExpenseCategory, clearExpenseCategory,
       setExpenseView, saveInsightVerdict, clearInsightVerdict,
       unreadCount, gotoActivity, markMessageRead, removeMessage, markAllRead, clearReadMessages,
-      filteredIdeas, openIdeaEditor, saveIdea, removeIdea,
+      filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin,
+      filteredAchievements, achievementTimeline, achievementCategories, achievementCategoryCounts,
+      openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement,
+      filteredKb, kbCategories, kbTagOptions, openKbEditor, pickKbCategory, pickKbTag, saveKb, removeKb,
+      depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge,
       canWriteEggs: computed(() => canWrite('eggs')),
       canWritePapers: computed(() => canWrite('papers')),
       canWriteSites: computed(() => canWrite('sites')),
       canWriteExpenses: computed(() => canWrite('expenses')),
+      canWriteAchievements: computed(() => canWrite('achievements')),
+      canWriteKb: computed(() => canWrite('kb')),
       canMarkMessages: computed(() => canMarkMessages()),
       mobileHint: computed(() => mobileReadOnlyHint()),
       cycleTheme, themeIcon, themeTitle,
@@ -406,6 +426,11 @@ app.component('insight-card', InsightCard);
 app.component('message-card', MessageCard);
 app.component('idea-card', IdeaCard);
 app.component('idea-editor', IdeaEditor);
+app.component('achievement-card', AchievementCard);
+app.component('achievement-editor', AchievementEditor);
+app.component('kb-card', KbCard);
+app.component('kb-editor', KbEditor);
+app.component('kb-merge', KbMerge);
 app.component('pair-drawer', PairDrawer);
 app.component('sync-status', SyncStatus);
 

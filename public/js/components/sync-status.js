@@ -65,16 +65,18 @@ const SyncStatus = {
     });
 
     async function onPillClick() {
+      // 冲突最优先：有待处理冲突就直接弹二选一。
+      // 否则原生壳上点胶囊永远进配对页，已配对的用户会被反复弹回「连接电脑」
+      if (conflictCount.value) {
+        resolving.value = state.sync.conflicts[0].id;
+        return;
+      }
       // 原生壳：点胶囊进配对表单（未配对引导连接 / 已配对可重配、清配对、立即同步）
       if (state.sync.needPair || isNativePlatform()) {
         openPair();
         return;
       }
       if (state.sync.status === 'need_token') return;
-      if (conflictCount.value) {
-        resolving.value = state.sync.conflicts[0].id;
-        return;
-      }
       await syncNow({ reason: 'manual' });
     }
 

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 300px; margin: 0; font: 13px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #1f2328; }
+    .wrap { padding: 14px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    label { display: block; margin: 8px 0 2px; font-weight: 600; color: #6b7280; }
+    input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font: inherit; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 7px 10px; border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .msg { margin-top: 10px; font-size: 12px; color: #6b7280; white-space: pre-wrap; }
+    .msg.ok { color: #059669; }
+    .msg.bad { color: #dc2626; }
+    .tip { margin-top: 10px; font-size: 11.5px; color: #9aa1ab; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🧺 拾穗集 · 原页阅读进度</h1>
+    <label>电脑端地址</label>
+    <input id="base" placeholder="http://localhost:8642">
+    <label>访问口令（与电脑端 config.json 的 sync.token 一致）</label>
+    <input id="token" type="password" placeholder="X-Danji-Token">
+    <div class="row">
+      <button id="save" class="primary">保存</button>
+      <button id="test">测试连接</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <p class="tip">地址 = 电脑端访问地址（本机阅读填 http://localhost:8642）；口令 = 电脑 config.json 里 sync.token 那串（两格别填反）。在拾穗集「网页」板块记过的链接，直接用浏览器原页阅读即可：滚动进度自动回传，下次打开自动恢复。</p>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

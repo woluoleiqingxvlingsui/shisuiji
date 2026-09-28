@@ -12,6 +12,13 @@ const SiteCard = {
   emits: ['open', 'status', 'edit', 'remove', 'note', 'read'],
   setup(props, { emit }) {
     const isRead = computed(() => props.site.status === 'read');
+    // 阅读模式进度徽章：读了一部分显示百分比，读完显示「已读完」
+    const progressBadge = computed(() => {
+      const p = Number(props.site.read_progress) || 0;
+      if (p >= 0.98) return { text: '✔ 已读完', cls: 'rp-done' };
+      if (p > 0.02) return { text: `📖 读到 ${Math.round(p * 100)}%`, cls: 'rp-part' };
+      return null;
+    });
     const writable = computed(() => canWrite('sites'));
     const kind = computed(() => kindMeta(props.site.kind));
     const url = computed(() => normalizeUrl(props.site.url));
@@ -26,7 +33,7 @@ const SiteCard = {
     const usage = computed(() => (latestLog.value ? usageMeta(latestLog.value.usage) : null));
 
     return {
-      isRead, writable, kind, url, catStyle, lastReadText, logs, logCount, latestLog, logSummary, usage,
+      isRead, writable, kind, url, catStyle, progressBadge, lastReadText, logs, logCount, latestLog, logSummary, usage,
       emitOpen: () => emit('open'),
       emitStatus: (s) => emit('status', s),
       emitEdit: () => emit('edit'),
@@ -41,6 +48,8 @@ const SiteCard = {
       <span class="platform" :style="catStyle">{{ site.domain || '未填域名' }}</span>
       <h3 class="title">{{ site.title }}</h3>
       <span class="kind-badge" :class="'k-' + site.kind">{{ kind.emoji }} {{ kind.label }}</span>
+      <span class="status-badge read-progress" v-if="progressBadge" :class="progressBadge.cls"
+            :title="'阅读进度（阅读模式自动记录）'">{{ progressBadge.text }}</span>
       <span class="status-badge" :class="isRead ? 'st-read' : 'st-to_read'">{{ isRead ? '✅ 已读' : '📖 待读' }}</span>
     </div>
     <div class="site-url" v-if="site.url">🔗 <a :href="url" target="_blank" rel="noopener" @click.stop>{{ site.url }}</a></div>
@@ -58,7 +67,7 @@ const SiteCard = {
     </div>
 
     <div class="card-actions" @click.stop v-if="site.url || writable">
-      <button class="btn small primary" v-if="site.url" @click="emitOpen">🌐 打开</button>
+      <button class="btn small primary" v-if="site.url" @click="emitOpen" title="在原站新标签页打开；装扩展后原页阅读进度自动回传">🌐 打开</button>
       <template v-if="writable">
         <button class="btn small ghost" v-if="!isRead" @click="emitRead">✅ 读完了</button>
         <button class="btn small ghost" v-else @click="emitStatus('to_read')">↩️ 移回待读</button>
