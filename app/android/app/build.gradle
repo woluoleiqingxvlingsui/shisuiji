@@ -56,6 +56,10 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // NotificationCompat / ServiceCompat / ContextCompat / ActivityCompat：后台同步前台服务要用。
+    // capacitor-android 用 implementation 引 androidx.core，不会传递到本模块的编译类路径，
+    // 这里显式声明，不去赌 appcompat 的传递依赖。
+    implementation "androidx.core:core:$androidxCoreVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

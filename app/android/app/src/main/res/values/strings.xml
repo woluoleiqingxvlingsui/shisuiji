@@ -4,4 +4,11 @@
     <string name="title_activity_main">拾穗集</string>
     <string name="package_name">app.shisuiji.danji</string>
     <string name="custom_url_scheme">app.shisuiji.danji</string>
+    <string name="bg_sync_channel_name">后台同步</string>
+    <string name="bg_sync_notif_title">拾穗集 · 后台同步中</string>
+    <!-- 同步已改为「电脑端一有改动就推」，不再是固定间隔轮询，所以这里只讲保活与兜底，
+         不再报「每 N 分钟」——那个数字会让人以为同步周期由它决定，实际它只是兜底闹钟。 -->
+    <string name="bg_sync_notif_text">电脑端有改动就自动同步</string>
+    <!-- 折叠行才显示：把「兜底闹钟周期」和「同步触发条件」分开讲，免得混为一谈 -->
+    <string name="bg_sync_notif_subtext">兜底保活每 %1$d 分钟一次</string>
 </resources>

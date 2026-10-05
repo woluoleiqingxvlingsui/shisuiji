@@ -34,6 +34,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- 后台同步保活服务。exported=false：只有本 App（插件 / 闹钟 PendingIntent）能拉起。
+             foregroundServiceType 在 API 29 以下被系统忽略，无需资源限定符分支。 -->
+        <service
+            android:name=".SyncForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <!-- 仅 Google Play 审核读取；本 App 自签名侧载，写上只为表明用途 -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="lan_sync_keepalive" />
+        </service>
     </application>
 
     <!-- Permissions -->
@@ -42,4 +54,11 @@
     <!-- 扫码配对（html5-qrcode getUserMedia）：声明后 Capacitor 会在首次调用时弹系统授权框 -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- API 28+ 任何 startForeground 都需要；23-27 上是无害的空声明 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- API 34+ 声明 specialUse 类型的前置权限，缺失直接 SecurityException；normal 级，安装即授无弹窗 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- API 33+ 运行时权限。只影响那条常驻通知可不可见，不影响服务能否运行 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>
