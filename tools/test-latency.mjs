@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { withTimeout, DEFAULT_TIMEOUT_MS, HEALTH_TIMEOUT_MS } from '../public/js/api.js';
-import { pickIntervalMs, SYNC_INTERVAL_MS, SYNC_INTERVAL_BUSY_MS } from '../public/js/sync/net.js';
+import { pickIntervalMs, SYNC_INTERVAL_FALLBACK_MS, SYNC_INTERVAL_BUSY_MS } from '../public/js/sync/net.js';
 
 let passed = 0;
 function ok(name, fn) {
@@ -45,10 +45,11 @@ ok('timeout 常量', () => {
   assert.equal(HEALTH_TIMEOUT_MS, 4000);
 });
 
-ok('pickIntervalMs：空闲 60s / 待同步 8s', () => {
-  assert.equal(pickIntervalMs(0), 60000);
-  assert.equal(pickIntervalMs(1), 8000);
-  assert.equal(pickIntervalMs(5), 8000);
+ok('pickIntervalMs：待推送 8s / 推送断 3min / 推送连着不轮询', () => {
+  assert.equal(pickIntervalMs(1, false), SYNC_INTERVAL_BUSY_MS);
+  assert.equal(pickIntervalMs(5, true), SYNC_INTERVAL_BUSY_MS);
+  assert.equal(pickIntervalMs(0, false), SYNC_INTERVAL_FALLBACK_MS);
+  assert.equal(pickIntervalMs(0, true), 0);
 });
 
 await okAsync('withTimeout：快速 resolve 原样返回', async () => {

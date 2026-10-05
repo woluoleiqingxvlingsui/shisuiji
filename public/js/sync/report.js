@@ -47,14 +47,16 @@ function writePending(list) {
 /**
  * 记一条待回报的同步结论。**不直接发**——发不出去正是常态（连不上电脑），
  * 直接发等于白丢。真正的发送交给 flushReports，由同步流程每轮捎带。
- * @param {{ ok: boolean, reason?: string, attempts?: number }} outcome
+ * @param {{ ok: boolean, reason?: string, attempts?: number, pushed?: number, caughtUp?: boolean }} o
  */
-function reportOutcomes({ ok, reason = '', attempts = 0 }) {
+function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false }) {
   const list = readPending();
   list.push({
     sync_ok: ok ? '1' : '0',
     sync_attempts: Math.max(0, Math.min(99, attempts | 0)),
     sync_reason: String(reason || '').slice(0, 120),
+    sync_pushed: String(Math.max(0, Math.min(999, pushed | 0))),
+    sync_caught_up: caughtUp ? '1' : '0',
     kind: 'bg-sync',
     queued_at: new Date().toISOString(),
   });
@@ -92,6 +94,57 @@ async function flushReports() {
 
 function pendingReportCount() {
   return readPending().length;
+}
+
+/* ---------------- 手机端：成功回报（唯一入口） ---------------- */
+
+/** 成功回报的合并窗口：连着记三条随记，电脑端只响一次 */
+const SUCCESS_COOLDOWN_MS = 60 * 1000;
+let lastSuccessAt = 0;
+
+/**
+ * 这一轮同步成功，要不要回报电脑端？**纯函数**：不读时钟、不碰状态，
+ * 时间与上次时间都由调用方给进来 —— 测试才能连着断言很多次而不会被冷却干扰。
+ *
+ * 两个条件都要满足：
+ *  1. 这一轮**真的有事发生**。空跑（打开 App 看了眼、定时器转了一圈、
+ *     推了自己刚写的东西）一律不报，否则光是定时轮询就能把电脑端刷爆。
+ *  2. 距离上一次成功回报超过冷却窗口，否则连着改 3 条会响 3 回。
+ *
+ * @param {{ pushed?: number, fromEvent?: boolean, caughtUp?: boolean, now?: number, lastAt?: number }} o
+ * @returns {boolean}
+ */
+function shouldReportSuccess({ pushed = 0, fromEvent = false, caughtUp = false, now = 0, lastAt = 0 } = {}) {
+  const n = Math.max(0, pushed | 0);
+  // 三样都没有 = 这一轮什么都没发生（打开 App 看了眼、定时器空转…），不必打扰
+  if (n === 0 && !fromEvent && !caughtUp) return false;
+  if (now - lastAt < SUCCESS_COOLDOWN_MS) return false;
+  return true;
+}
+
+/**
+ * 同步成功后回报电脑端 —— **成功回报的唯一入口**。
+ *
+ * 以前这件事只写在 push.js 的 drain() 里，而 syncNow() 有十三处调用
+ * （init / local-write / manual / visibility / interval / bg-tick…）全都绕开它，
+ * 于是「手机同步成功了」这件事永远到不了电脑端 —— data/messages.json 里
+ * bg-sync 一直是 0 条就是这么来的。
+ * 现在下沉到 engine.syncNow()，无论从哪条路进来都会经过这里。
+ *
+ * @param {{ pushed?: number, fromEvent?: boolean, caughtUp?: boolean }} info
+ *   pushed>0    这轮真的把本机改动推上去了（用户在手机上记了东西）
+ *   fromEvent   这轮是电脑端推来的变更被拉下来了（SSE 广播驱动）
+ *   caughtUp    发现服务端版本变了，说明睡着期间电脑端改过、这轮补齐了
+ * @returns {boolean} 是否真的发出去了
+ */
+function reportSyncSuccess({ pushed = 0, fromEvent = false, caughtUp = false } = {}) {
+  const now = Date.now();
+  if (!shouldReportSuccess({ pushed, fromEvent, caughtUp, now, lastAt: lastSuccessAt })) return false;
+  lastSuccessAt = now;
+  // 发报本身是异步的（flushReports 自己吞异常），这里只回答「该不该报」，
+  // 所以不等它 —— 同步流程是主线程路径，不该被一次网络往返挂住。
+  reportOutcomes({ ok: true, pushed, caughtUp });
+  return true;
 }
 
 /* ---------------- 电脑端：监听回报并提醒 ---------------- */
@@ -259,8 +312,8 @@ function stopReportSweep() {
 }
 
 export {
-  PENDING_KEY, PENDING_MAX, POLL_MS,
-  reportOutcomes, flushReports, pendingReportCount,
+  PENDING_KEY, PENDING_MAX, POLL_MS, SUCCESS_COOLDOWN_MS,
+  reportOutcomes, reportSyncSuccess, shouldReportSuccess, flushReports, pendingReportCount,
   startReportInbox, ensureReportInbox, stopReportInbox,
   startReportSweep, ensureReportSweep, stopReportSweep, sweepReports,
 };

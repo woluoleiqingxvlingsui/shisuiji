@@ -1334,9 +1334,15 @@ function addSyncReport(ctx) {
   const ok = String((ctx.body && ctx.body.sync_ok) || '') === '1';
   const attempts = Math.max(0, Math.min(99, parseInt((ctx.body && ctx.body.sync_attempts) || '0', 10) || 0));
   const reason = String((ctx.body && ctx.body.sync_reason) || '').slice(0, SYNC_REASON_MAX);
+  const pushed = Math.max(0, Math.min(999, parseInt((ctx.body && ctx.body.sync_pushed) || '0', 10) || 0));
+  const caughtUp = String((ctx.body && ctx.body.sync_caught_up) || '') === '1';
   const at = new Date().toISOString();
   // 文案由服务端生成，不采信手机传来的 title/body
-  const title = ok ? '手机已同步 ✅' : '手机同步失败 ❌';
+  const title = ok
+    ? (pushed > 0
+      ? `手机推来了 ${pushed} 条改动 ✅`
+      : (caughtUp ? '手机补齐了后台的更新 ✅' : '手机已同步 ✅'))
+    : '手机同步失败 ❌';
   const body = ok
     ? `手机在 ${at.slice(11, 16)} UTC 把电脑端的更新拉下来了`
     : `重试 ${attempts} 次仍未成功${reason ? `：${reason}` : ''}`;
@@ -1352,6 +1358,8 @@ function addSyncReport(ctx) {
     sync_ok: ok ? '1' : '0',
     sync_attempts: String(attempts),
     sync_reason: reason,
+    sync_pushed: String(pushed),
+    sync_caught_up: caughtUp ? '1' : '0',
     read: false,
     created_at: at,
   };
@@ -1989,6 +1997,8 @@ route('GET', '/api/sync/pull', async (ctx) => {
   ctx.json({
     schema_version: SCHEMA_VERSION,
     server_time: new Date().toISOString(),
+    // 手机靠它发现「我睡着的这段时间电脑端改过东西」，从而决定要不要回报电脑端
+    data_version: dataVersion,
     activities: db.activities,
     papers: paperDb.papers.map((p) => ({ ...p, file_exists: !!findPaperFile(p) })),
     sites: siteDb.sites,

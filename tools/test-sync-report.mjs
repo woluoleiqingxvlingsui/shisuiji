@@ -57,8 +57,11 @@ globalThis.fetch = async (url, init = {}) => {
 // Node 24 的 navigator 是只读 getter，只能定义不能赋值
 Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
 
-const { PENDING_KEY, PENDING_MAX, reportOutcomes, flushReports, pendingReportCount } =
-  await import('../public/js/sync/report.js');
+const {
+  PENDING_KEY, PENDING_MAX, SUCCESS_COOLDOWN_MS,
+  reportOutcomes, reportSyncSuccess, shouldReportSuccess,
+  flushReports, pendingReportCount,
+} = await import('../public/js/sync/report.js');
 
 let passed = 0;
 function ok(name, fn) {
@@ -184,6 +187,76 @@ await okAsync('队列不是数组：同样当空', async () => {
   reset();
   store.set(PENDING_KEY, '"字符串"');
   assert.equal(pendingReportCount(), 0);
+});
+
+console.log('成功回报的唯一入口（回归：以前只有 push 那条路会报）');
+
+await okAsync('pushed>0：无论从哪条路进来都会回报电脑端', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: true }));
+  const r = reportSyncSuccess({ pushed: 3 });
+  assert.equal(r, true, '真的推了东西上去就必须回报');
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.sync_pushed, '3', '要带上推了几条，服务端据此写文案');
+  assert.equal(posted[0].body.sync_ok, '1');
+});
+
+await okAsync('空跑一轮（pushed=0、无事件、无补齐）：不回报', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: true }));
+  assert.equal(reportSyncSuccess({ pushed: 0, fromEvent: false, caughtUp: false }), false);
+  assert.equal(posted.length, 0);
+});
+
+await okAsync('fromEvent：电脑端推来的变更被拉下来时报一次', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: true }));
+  assert.equal(shouldReportSuccess({ fromEvent: true, now: 10_000_000, lastAt: 0 }), true);
+  await reportOutcomes({ ok: true });
+  assert.equal(posted[0].body.sync_pushed, '0');
+  assert.equal(posted[0].body.sync_caught_up, '0');
+});
+
+await okAsync('caughtUp：补齐了睡着期间的更新，带上标记', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: true }));
+  assert.equal(shouldReportSuccess({ caughtUp: true, now: 10_000_000, lastAt: 0 }), true);
+  await reportOutcomes({ ok: true, caughtUp: true });
+  assert.equal(posted[0].body.sync_caught_up, '1');
+});
+
+await okAsync('60 秒内的连续成功合并成一条（连记三条随记不该响三回）', async () => {
+  // 上一条已经报过一次，冷却期内再报必须被吞掉
+  reset();
+  globalThis.__setApi(() => ({ ok: true }));
+  assert.equal(reportSyncSuccess({ pushed: 1 }), false, '冷却期内应被吞掉');
+  assert.equal(posted.length, 0);
+  // 冷却本身用纯函数钉死（时间由调用方给，能反复断言而互不干扰）
+  const t0 = 1_000_000;
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0, lastAt: 0 }), true, '第一次必报');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + 1, lastAt: t0 }), false, '刚报过就再报：吞');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS - 1, lastAt: t0 }), false, '差 1 毫秒仍在窗口内');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS, lastAt: t0 }), true, '满 60 秒才放行');
+});
+
+await okAsync('字段清洗：sync_pushed 夹到 0~999，缺省为 0', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: false, status: 500 }));  // 发不出去才留在队列里供检查
+  await reportOutcomes({ ok: true, pushed: -8 });
+  assert.equal(readQ().at(-1).sync_pushed, '0');
+  await reportOutcomes({ ok: true, pushed: 99999 });
+  assert.equal(readQ().at(-1).sync_pushed, '999');
+  await reportOutcomes({ ok: true });                       // 老客户端不带这两个字段
+  assert.equal(readQ().at(-1).sync_pushed, '0');
+  assert.equal(readQ().at(-1).sync_caught_up, '0', '缺省必须是 0，不能是 undefined');
+});
+
+await okAsync('成功回报只有一个出口：push.js 里不许再单独报成功', async () => {
+  // 回归钉子：成功回报下沉到 engine.syncNow() 后，push.js 里的 onSyncSuccess
+  // 必须不再调 reportOutcomes({ok:true}) —— 两处都留着就是每轮报两次。
+  const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../public/js/sync/push.js', import.meta.url), 'utf8'));
+  assert.ok(!/reportOutcomes\(\s*\{\s*ok:\s*true/.test(src), 'push.js 里仍有第二处成功回报');
+  assert.ok(src.includes('reportSyncSuccess'), 'engine.js 的 syncNow 必须走 reportSyncSuccess');
 });
 
 if (process.exitCode) {

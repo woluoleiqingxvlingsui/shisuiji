@@ -6,8 +6,9 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   shouldRunBackgroundService, isBackgroundSyncOk,
-  classifySyncResult, nextSyncRetry,
+  classifySyncResult, nextSyncRetry, pickIntervalMs,
   SYNC_RETRY_DELAY_MS, SYNC_QUIET_RETRIES,
+  SYNC_INTERVAL_BUSY_MS, SYNC_INTERVAL_FALLBACK_MS,
 } from '../public/js/sync/net.js';
 
 // server.js 是 CJS 且一 require 就起服务，防抖策略因此拆在 lib/ 里，这里用 require 拿
@@ -183,6 +184,21 @@ ok('可覆盖安静窗口长度（便于将来调参而不必改逻辑）', () =
   const t0 = 1_000_000;
   assert.equal(debounceElapsed(t0, t0 + 60 * 1000, 90 * 1000), false);
   assert.equal(debounceElapsed(t0, t0 + 90 * 1000, 90 * 1000), true);
+});
+
+console.log('pickIntervalMs（推送连着就别轮询）');
+
+ok('有待推送数据：8 秒快轮询（往上传，优先级最高，与推送无关）', () => {
+  assert.equal(pickIntervalMs(2, true), SYNC_INTERVAL_BUSY_MS);
+  assert.equal(pickIntervalMs(2, false), SYNC_INTERVAL_BUSY_MS);
+});
+
+ok('推送连着 + 没待推送：返回 0，完全不轮询', () => {
+  assert.equal(pickIntervalMs(0, true), 0);
+});
+
+ok('推送断了 + 没待推送：退回慢速兜底', () => {
+  assert.equal(pickIntervalMs(0, false), SYNC_INTERVAL_FALLBACK_MS);
 });
 
 if (process.exitCode) {

@@ -3,8 +3,9 @@
  * 网页仍尊重 online，避免断网时刷一串失败。
  */
 
-const SYNC_INTERVAL_MS = 60 * 1000;
 const SYNC_INTERVAL_BUSY_MS = 8 * 1000;
+// 推送连着的时候完全不轮询（0）；推送断了才用这个慢速兜底
+const SYNC_INTERVAL_FALLBACK_MS = 3 * 60 * 1000;
 
 // ---------- 后台同步的重试节奏（电脑端推送触发的那一轮）----------
 // 需求原文：同步失败就等 5 分钟再试；若再次失败，再过 5 分钟再试；如果还失败，
@@ -92,9 +93,21 @@ function nextSyncRetry(attempts) {
   };
 }
 
-/** 待同步时短轮询，空闲 60s */
-function pickIntervalMs(pendingCount) {
-  return (pendingCount > 0) ? SYNC_INTERVAL_BUSY_MS : SYNC_INTERVAL_MS;
+/**
+ * 该以什么节奏轮询。
+ * pendingCount>0  有待推送数据 → 8 秒快轮询。这是**往上传**本地改动，优先级最高，
+ *                 与推送广播无关，必须保留。
+ * pushConnected   SSE 推送连着 → 0（不轮询）。服务端本来就会广播，
+ *                 再自己每分钟全量拉一遍纯属浪费电和流量。
+ * 否则            推送断了 → 3 分钟慢速兜底，不至于彻底瞎掉。
+ * @param {number} pendingCount
+ * @param {boolean} pushConnected
+ * @returns {number} 毫秒；0 表示关掉轮询
+ */
+function pickIntervalMs(pendingCount, pushConnected) {
+  if (pendingCount > 0) return SYNC_INTERVAL_BUSY_MS;
+  if (pushConnected) return 0;
+  return SYNC_INTERVAL_FALLBACK_MS;
 }
 
-export { shouldAttemptSync, shouldRunBackgroundService, isBackgroundSyncOk, classifySyncResult, nextSyncRetry, pickIntervalMs, isClientOutdated, CLIENT_VERSION, SYNC_INTERVAL_MS, SYNC_INTERVAL_BUSY_MS, SYNC_RETRY_DELAY_MS, SYNC_QUIET_RETRIES };
+export { shouldAttemptSync, shouldRunBackgroundService, isBackgroundSyncOk, classifySyncResult, nextSyncRetry, pickIntervalMs, isClientOutdated, CLIENT_VERSION, SYNC_INTERVAL_FALLBACK_MS, SYNC_INTERVAL_BUSY_MS, SYNC_RETRY_DELAY_MS, SYNC_QUIET_RETRIES };

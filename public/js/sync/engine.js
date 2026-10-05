@@ -10,6 +10,7 @@ import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
 import { shouldAttemptSync, pickIntervalMs, isClientOutdated } from './net.js';
+import { reportSyncSuccess } from './report.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -27,6 +28,18 @@ import {
 } from './outbox.js';
 
 const MOBILE_FORCE_KEY = 'danji-mobile';
+
+/* ---- 服务端数据版本号：用来发现「我睡着的这段时间电脑端改过东西」 ----
+ * /api/sync/pull 会返回 data_version（服务端每次写入 +1）。
+ * 记下上次看到的版本，下次同步时不一致就说明落后了，该回报电脑端。
+ * 必须存 localStorage：进程被杀后还在，否则每次冷启动都会误报一次。 */
+const VERSION_KEY = 'danji.lastDataVersion';
+function readStoredVersion() {
+  try { return parseInt(localStorage.getItem(VERSION_KEY) || '0', 10) || 0; } catch { return 0; }
+}
+function writeStoredVersion(v) {
+  try { localStorage.setItem(VERSION_KEY, String(v)); } catch { /* 隐私模式忽略 */ }
+}
 
 let syncing = false;
 let started = false;
@@ -308,16 +321,18 @@ function stopInterval() {
 }
 
 function startInterval() {
-  const want = pickIntervalMs(state.sync.pendingCount || 0);
+  // 推送连着就不轮询，完全靠服务端广播；断开了才退回慢速兜底
+  const want = pickIntervalMs(state.sync.pendingCount || 0, !!(state.sync && state.sync.pushLive));
   if (intervalTimer && intervalMs === want) return;
   stopInterval();
   intervalMs = want;
+  if (want === 0) return;          // 0 = 关掉轮询
   intervalTimer = setInterval(() => {
     if (syncEnabled()) syncNow({ reason: 'interval' });
   }, want);
 }
 
-/** pending 变化后切换 60s / 8s */
+/** pending 数 / 推送连接状态变化后重新评估轮询节奏（推送连着 = 0，即关掉） */
 function rearmInterval() {
   if (!intervalTimer && intervalMs === 0 && !started) return;
   startInterval();
@@ -432,7 +447,7 @@ async function pullOnce() {
     throw new Error((data && data.error) || `pull 失败 HTTP ${status}`);
   }
   await writeMirror(data);
-  return { pulled: true, server_time: data.server_time };
+  return { pulled: true, server_time: data.server_time, data_version: data.data_version };
 }
 
 /** 主同步循环 */
@@ -449,6 +464,8 @@ async function syncNow(opts = {}) {
   }
   syncing = true;
   setStatus('syncing');
+  // 同步开始前先记住上次的版本号，pull 回来一比就知道这轮有没有落后
+  const prevVersion = readStoredVersion();
   try {
     if (!getToken() && state.sync.needToken) {
       setStatus('need_token');
@@ -467,6 +484,10 @@ async function syncNow(opts = {}) {
       return { skipped: true, reason: 'need_token' };
     }
 
+    // 服务端版本变了 & 这次不是我自己推上去的 → 我睡着期间电脑端改过，这轮补齐了
+    const serverVersion = Number(pull && pull.data_version) || 0;
+    const caughtUp = prevVersion > 0 && serverVersion > prevVersion;
+
     await refreshPendingCount();
     await reloadIdeasDisplay();
 
@@ -480,6 +501,18 @@ async function syncNow(opts = {}) {
     } else {
       setStatus('synced');
     }
+
+    // 只有真的成功了才记版本：失败时数据没拿到，记了就等于假装自己是最新的
+    if (serverVersion) writeStoredVersion(serverVersion);
+
+    // 同步成功 → 回报电脑端。**这是成功回报的唯一出口**：
+    // 以前它挂在 push.js 的 drain() 上，而 syncNow() 十三处调用全都绕开它。
+    reportSyncSuccess({
+      pushed: (push && push.pushed) || 0,
+      fromEvent: !!(opts.fromEvent || opts.recovered),
+      caughtUp,
+    });
+
     return { ok: true, push, pull, reason: opts.reason };
   } catch (e) {
     state.sync.lastError = (e && e.message) || String(e);
@@ -649,4 +682,5 @@ export {
   refreshPendingCount,
   syncIsPhone,
   shouldAttemptSync,
+  rearmInterval,
 };

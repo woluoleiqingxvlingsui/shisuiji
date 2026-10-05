@@ -25,7 +25,8 @@
 
 import { getToken, resolveApiUrl } from '../api.js';
 import { isPaired } from '../pair.js';
-import { syncNow } from './engine.js';
+import { state } from '../state.js';
+import { syncNow, rearmInterval } from './engine.js';
 import { pushLocalMessage } from '../boards/messages.js';
 import { createSseParser } from './sse-parse.js';
 import { classifySyncResult, nextSyncRetry, SYNC_QUIET_RETRIES } from './net.js';
@@ -77,6 +78,8 @@ async function connect() {
     const res = await fetch(resolveApiUrl('/api/events'), { headers, signal: my.signal });
     if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
     lastServerActivity = Date.now();
+    state.sync.pushLive = true;   // 推送活着 → engine 会关掉轮询
+    rearmInterval();              // 重连成功同样要按新状态重评估轮询
     onConnected();
     const parser = createSseParser();
     const reader = res.body.getReader();
@@ -95,6 +98,7 @@ async function connect() {
     // 被 stop / 重连 / 看门狗取代的旧流，报错不作数
     if (controller !== my) return;
     controller = null;
+    state.sync.pushLive = false;
     if (running && isPaired()) scheduleReconnect();
   }
 }
@@ -168,7 +172,8 @@ async function drain() {
       const recovery = owedRecovery;
       owedFromEvent = false;
       owedRecovery = false;
-      const r = await syncNow({ reason: lastReason });
+      // fromEvent / recovered 必须透传：syncNow() 里的回报要靠它们判断该不该报
+      const r = await syncNow({ reason: lastReason, fromEvent, recovered: recovery });
       verdict = classifySyncResult(r);
       if (verdict === 'success') {
         synced = true;
@@ -210,12 +215,7 @@ function onSyncSuccess(result, fromEvent, recovery) {
     body: `${formatDate(new Date().toISOString())} 已与电脑端同步${extra}`,
     notify: true,
   });
-  // 手机端自己的提示没人看，结论要送到电脑端去——那才是人盯着的地方
-  reportOutcomes({
-    ok: true,
-    attempts: tried,
-    reason: wasFailing ? `此前重试 ${tried} 次失败后恢复` : '',
-  });
+  // 【成功回报已下沉到 engine.syncNow() → reportSyncSuccess()，这里不再重复报】
 }
 
 function onSyncFail(result) {
@@ -275,6 +275,7 @@ function startWatchdog() {
 function startPushListener() {
   if (running || !isPaired()) return;
   running = true;
+  rearmInterval();   // 让轮询按新的连接状态重新评估
   startWatchdog();
   connect();
 }
@@ -291,6 +292,7 @@ function stopPushListener() {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  state.sync.pushLive = false;
   if (controller) {
     const my = controller;
     controller = null;
