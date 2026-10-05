@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import {
   shouldRunBackgroundService, isBackgroundSyncOk,
-  classifySyncResult, nextSyncRetry, pickIntervalMs,
+  classifySyncResult, nextSyncRetry, pickIntervalMs, isCaughtUp,
   SYNC_RETRY_DELAY_MS, SYNC_QUIET_RETRIES,
   SYNC_INTERVAL_BUSY_MS, SYNC_INTERVAL_FALLBACK_MS,
 } from '../public/js/sync/net.js';
@@ -199,6 +199,32 @@ ok('推送连着 + 没待推送：返回 0，完全不轮询', () => {
 
 ok('推送断了 + 没待推送：退回慢速兜底', () => {
   assert.equal(pickIntervalMs(0, false), SYNC_INTERVAL_FALLBACK_MS);
+});
+
+console.log('isCaughtUp（这一轮是不是把睡着期间漏掉的更新补上了）');
+
+ok('首次同步（没存过版本）：不算落后', () => {
+  assert.equal(isCaughtUp({ prevVersion: 0, prevBoot: '', serverVersion: 9, serverBoot: 'B1' }), false);
+});
+
+ok('同一次进程、服务端版本上升：补齐了，该回报', () => {
+  assert.equal(isCaughtUp({ prevVersion: 9, prevBoot: 'B1', serverVersion: 12, serverBoot: 'B1' }), true);
+});
+
+ok('服务端重启过：boot 对不上就不算补齐（版本号跨进程不可比，不能拿它比大小）', () => {
+  // 关键：serverVersion 必须**大于** prevVersion，否则去掉 boot 比较也照样返回 false，
+  // 这条断言就成了测不到任何东西的假钉子。restart 后版本会归 1，但手机存着的大数
+  // 可能被后续写入超过，所以「版本变大但 boot 不同」才是真正区分这两种情况的用例。
+  assert.equal(isCaughtUp({ prevVersion: 5, prevBoot: 'B1', serverVersion: 9, serverBoot: 'B2' }), false,
+    'boot 不同就不该报，哪怕版本号看起来变大了');
+});
+
+ok('老手机没存 bootId：沿用旧逻辑，只比版本号', () => {
+  assert.equal(isCaughtUp({ prevVersion: 9, prevBoot: '', serverVersion: 12, serverBoot: 'B1' }), true);
+});
+
+ok('版本没变（同一次进程内没有任何新写入）：不报', () => {
+  assert.equal(isCaughtUp({ prevVersion: 12, prevBoot: 'B1', serverVersion: 12, serverBoot: 'B1' }), false);
 });
 
 if (process.exitCode) {

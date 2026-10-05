@@ -9,7 +9,7 @@ import { toast } from '../toast.js';
 import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
-import { shouldAttemptSync, pickIntervalMs, isClientOutdated } from './net.js';
+import { shouldAttemptSync, pickIntervalMs, isCaughtUp, isClientOutdated } from './net.js';
 import { reportSyncSuccess } from './report.js';
 import { idbAvailable } from './idb.js';
 import {
@@ -495,12 +495,14 @@ async function syncNow(opts = {}) {
     }
 
     // 服务端版本变了 & 这次不是我自己推上去的 → 我睡着期间电脑端改过，这轮补齐了。
-    // boot_id 对不上说明服务端重启过、版本号跨进程不可比：这一轮只重新对齐，不报
-    // （否则每重启一次服务就会冒出一条假的「补齐」通知）。
+    // 判定收敛在 net.js 的纯函数 isCaughtUp 里（含「服务端重启过则版本不可比」那条），
+    // 改坏了能被 test-bg-sync 的五条分支断言立刻抓住。
     const serverVersion = Number(pull && pull.data_version) || 0;
     const serverBoot = String((pull && pull.boot_id) || '');
-    const sameBoot = !prevBoot || serverBoot === prevBoot;
-    const caughtUp = prevVersion > 0 && sameBoot && serverVersion > prevVersion;
+    const caughtUp = isCaughtUp({
+      prevVersion, prevBoot,
+      serverVersion, serverBoot,
+    });
 
     await refreshPendingCount();
     await reloadIdeasDisplay();
