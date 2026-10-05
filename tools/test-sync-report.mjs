@@ -201,28 +201,34 @@ await okAsync('pushed>0：无论从哪条路进来都会回报电脑端', async 
   assert.equal(posted[0].body.sync_ok, '1');
 });
 
-await okAsync('空跑一轮（pushed=0、无事件、无补齐）：不回报', async () => {
+await okAsync('空跑一轮（pushed=0、无补齐）：不回报', async () => {
   reset();
   globalThis.__setApi(() => ({ ok: true }));
-  assert.equal(reportSyncSuccess({ pushed: 0, fromEvent: false, caughtUp: false }), false);
+  assert.equal(reportSyncSuccess({ pushed: 0, caughtUp: false }), false);
   assert.equal(posted.length, 0);
 });
 
-await okAsync('fromEvent：电脑端推来的变更被拉下来时报一次', async () => {
+await okAsync('caughtUp：电脑端推来的变更被拉下来时报一次', async () => {
   reset();
   globalThis.__setApi(() => ({ ok: true }));
-  assert.equal(shouldReportSuccess({ fromEvent: true, now: 10_000_000, lastAt: 0 }), true);
-  await reportOutcomes({ ok: true });
-  assert.equal(posted[0].body.sync_pushed, '0');
-  assert.equal(posted[0].body.sync_caught_up, '0');
-});
-
-await okAsync('caughtUp：补齐了睡着期间的更新，带上标记', async () => {
-  reset();
-  globalThis.__setApi(() => ({ ok: true }));
+  // 判定只看 caughtUp（服务端版本上升 = 真的落后过），不看 fromEvent
   assert.equal(shouldReportSuccess({ caughtUp: true, now: 10_000_000, lastAt: 0 }), true);
   await reportOutcomes({ ok: true, caughtUp: true });
+  assert.equal(posted[0].body.sync_pushed, '0');
   assert.equal(posted[0].body.sync_caught_up, '1');
+});
+
+await okAsync('fromEvent 本身不再触发（否则自己引发的广播会多报一次）', async () => {
+  // fromEvent 由任何 sync 帧置位，包括手机自己那次写入引发的广播，
+  // 它和「补齐」不是独立信号 —— 当触发条件只会多出一条噪音通知
+  assert.equal(shouldReportSuccess({ fromEvent: true, now: 10_000_000, lastAt: 0 }), false);
+  assert.equal(shouldReportSuccess({ fromEvent: true, caughtUp: true, now: 10_000_000, lastAt: 0 }), true,
+    '配合 caughtUp 仍然要报（它只是不再单独触发）');
+});
+
+await okAsync('不传 now 时用真实时间，而不是恒定判成「冷却中」', async () => {
+  // 旧默认值 now=0,lastAt=0 → 0-0<60000 恒成立 → 不传时间永远返回 false
+  assert.equal(shouldReportSuccess({ pushed: 1 }), true, '不传时间参数也该能正常判定');
 });
 
 await okAsync('60 秒内的连续成功合并成一条（连记三条随记不该响三回）', async () => {
@@ -257,6 +263,22 @@ await okAsync('成功回报只有一个出口：push.js 里不许再单独报成
   const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('../public/js/sync/push.js', import.meta.url), 'utf8'));
   assert.ok(!/reportOutcomes\(\s*\{\s*ok:\s*true/.test(src), 'push.js 里仍有第二处成功回报');
   assert.ok(src.includes('reportSyncSuccess'), 'engine.js 的 syncNow 必须走 reportSyncSuccess');
+});
+
+await okAsync('自己推上去的东西，5 分钟后的广播补拉不该再报一次', async () => {
+  // 场景 A：手机写一条随记
+  //   (1) 推送并同步 → 该报；这里顺带钉住「自己推的也会被本轮 pull 吸收成最新版本」
+  assert.equal(shouldReportSuccess({ pushed: 1, caughtUp: true, now: 1_000_000, lastAt: 0 }), true);
+  //   (2) 5 分钟后广播引发的补拉：pushed=0、版本没再上升 → caughtUp=false → 不报
+  assert.equal(shouldReportSuccess({ pushed: 0, caughtUp: false, now: 1_300_000, lastAt: 1_000_000 }), false,
+    '手机自己引发的广播不该让电脑端再响一次');
+});
+
+await okAsync('电脑端真的改了：版本上升 → 该报', async () => {
+  // 场景 B/C：电脑端改一条（连改两次也各自报，不会互相吞掉）
+  assert.equal(shouldReportSuccess({ pushed: 0, caughtUp: true, now: 2_000_000, lastAt: 0 }), true);
+  assert.equal(shouldReportSuccess({ pushed: 0, caughtUp: true, now: 3_000_000, lastAt: 2_000_000 }), true,
+    '第二次改动间隔够久，也要独立报一次');
 });
 
 if (process.exitCode) {

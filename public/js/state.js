@@ -97,6 +97,7 @@ const state = reactive({
     offline: false, // health 不可达时的离线优先模式
     status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error
     pendingCount: 0,
+    pushLive: false,   // SSE 推送是否连着（push.js 维护）：连着就不轮询
     conflicts: [], // [{ id, op, entry, server, local }]
     lastSyncAt: null,
     lastError: '',

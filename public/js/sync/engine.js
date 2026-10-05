@@ -29,16 +29,25 @@ import {
 
 const MOBILE_FORCE_KEY = 'danji-mobile';
 
-/* ---- 服务端数据版本号：用来发现「我睡着的这段时间电脑端改过东西」 ----
- * /api/sync/pull 会返回 data_version（服务端每次写入 +1）。
- * 记下上次看到的版本，下次同步时不一致就说明落后了，该回报电脑端。
+/* ---- 服务端数据版本号 + 进程标识：用来发现「我睡着的这段时间电脑端改过东西」 ----
+ * /api/sync/pull 返回 data_version（每次写入 +1）与 boot_id（进程内不变、重启即换）。
+ * 只存版本号是不够的：服务端一重启版本就归 1，而手机存的还是上次那个大数，
+ * 于是「服务端版本 > 我存的版本」永远不成立，补齐通知会静默失效。
+ * 带上 boot_id 才能判断两个版本号是否可比。
  * 必须存 localStorage：进程被杀后还在，否则每次冷启动都会误报一次。 */
 const VERSION_KEY = 'danji.lastDataVersion';
+const BOOT_KEY = 'danji.lastBootId';
 function readStoredVersion() {
   try { return parseInt(localStorage.getItem(VERSION_KEY) || '0', 10) || 0; } catch { return 0; }
 }
-function writeStoredVersion(v) {
-  try { localStorage.setItem(VERSION_KEY, String(v)); } catch { /* 隐私模式忽略 */ }
+function readStoredBootId() {
+  try { return String(localStorage.getItem(BOOT_KEY) || ''); } catch { return ''; }
+}
+function writeStoredVersion(v, bootId) {
+  try {
+    localStorage.setItem(VERSION_KEY, String(v));
+    localStorage.setItem(BOOT_KEY, String(bootId || ''));
+  } catch { /* 隐私模式忽略 */ }
 }
 
 let syncing = false;
@@ -464,8 +473,9 @@ async function syncNow(opts = {}) {
   }
   syncing = true;
   setStatus('syncing');
-  // 同步开始前先记住上次的版本号，pull 回来一比就知道这轮有没有落后
+  // 同步开始前先记住上次的版本号与进程标识，pull 回来一比就知道这轮有没有落后
   const prevVersion = readStoredVersion();
+  const prevBoot = readStoredBootId();
   try {
     if (!getToken() && state.sync.needToken) {
       setStatus('need_token');
@@ -484,9 +494,13 @@ async function syncNow(opts = {}) {
       return { skipped: true, reason: 'need_token' };
     }
 
-    // 服务端版本变了 & 这次不是我自己推上去的 → 我睡着期间电脑端改过，这轮补齐了
+    // 服务端版本变了 & 这次不是我自己推上去的 → 我睡着期间电脑端改过，这轮补齐了。
+    // boot_id 对不上说明服务端重启过、版本号跨进程不可比：这一轮只重新对齐，不报
+    // （否则每重启一次服务就会冒出一条假的「补齐」通知）。
     const serverVersion = Number(pull && pull.data_version) || 0;
-    const caughtUp = prevVersion > 0 && serverVersion > prevVersion;
+    const serverBoot = String((pull && pull.boot_id) || '');
+    const sameBoot = !prevBoot || serverBoot === prevBoot;
+    const caughtUp = prevVersion > 0 && sameBoot && serverVersion > prevVersion;
 
     await refreshPendingCount();
     await reloadIdeasDisplay();
@@ -503,13 +517,14 @@ async function syncNow(opts = {}) {
     }
 
     // 只有真的成功了才记版本：失败时数据没拿到，记了就等于假装自己是最新的
-    if (serverVersion) writeStoredVersion(serverVersion);
+    if (serverVersion) writeStoredVersion(serverVersion, serverBoot);
 
     // 同步成功 → 回报电脑端。**这是成功回报的唯一出口**：
     // 以前它挂在 push.js 的 drain() 上，而 syncNow() 十三处调用全都绕开它。
+    // fromEvent 不作触发条件（手机自己那次写入引发的广播也会置位它），
+    // 判定收敛在 shouldReportSuccess 里：只有 pushed / caughtUp 值得打扰电脑端。
     reportSyncSuccess({
       pushed: (push && push.pushed) || 0,
-      fromEvent: !!(opts.fromEvent || opts.recovered),
       caughtUp,
     });
 

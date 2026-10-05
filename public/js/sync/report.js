@@ -111,13 +111,17 @@ let lastSuccessAt = 0;
  *     推了自己刚写的东西）一律不报，否则光是定时轮询就能把电脑端刷爆。
  *  2. 距离上一次成功回报超过冷却窗口，否则连着改 3 条会响 3 回。
  *
- * @param {{ pushed?: number, fromEvent?: boolean, caughtUp?: boolean, now?: number, lastAt?: number }} o
+ * @param {{ pushed?: number, caughtUp?: boolean, now?: number, lastAt?: number }} o
  * @returns {boolean}
  */
-function shouldReportSuccess({ pushed = 0, fromEvent = false, caughtUp = false, now = 0, lastAt = 0 } = {}) {
+function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), lastAt = 0 } = {}) {
   const n = Math.max(0, pushed | 0);
-  // 三样都没有 = 这一轮什么都没发生（打开 App 看了眼、定时器空转…），不必打扰
-  if (n === 0 && !fromEvent && !caughtUp) return false;
+  // 只有两种情况值得打扰电脑端：
+  //   1) 这轮真的把本机改动推上去了（用户在手机上记了东西）
+  //   2) 服务端版本变了且这轮补齐了（睡着期间电脑端改过）
+  // **不再用 fromEvent 触发**：它由任何 sync 帧置位，包括手机自己那次写入引发的广播，
+  // 和「补齐」不是独立信号；拿它当触发条件只会多出一条「什么都没发生」的噪音通知。
+  if (n === 0 && !caughtUp) return false;
   if (now - lastAt < SUCCESS_COOLDOWN_MS) return false;
   return true;
 }
@@ -131,15 +135,14 @@ function shouldReportSuccess({ pushed = 0, fromEvent = false, caughtUp = false, 
  * bg-sync 一直是 0 条就是这么来的。
  * 现在下沉到 engine.syncNow()，无论从哪条路进来都会经过这里。
  *
- * @param {{ pushed?: number, fromEvent?: boolean, caughtUp?: boolean }} info
+ * @param {{ pushed?: number, caughtUp?: boolean }} info
  *   pushed>0    这轮真的把本机改动推上去了（用户在手机上记了东西）
- *   fromEvent   这轮是电脑端推来的变更被拉下来了（SSE 广播驱动）
- *   caughtUp    发现服务端版本变了，说明睡着期间电脑端改过、这轮补齐了
- * @returns {boolean} 是否真的发出去了
+ *   caughtUp    发现服务端版本上升且这轮补齐了，说明睡着期间电脑端改过
+ * @returns {boolean} 该不该发（真正的发送交给 reportOutcomes → flushReports 异步去做）
  */
-function reportSyncSuccess({ pushed = 0, fromEvent = false, caughtUp = false } = {}) {
+function reportSyncSuccess({ pushed = 0, caughtUp = false } = {}) {
   const now = Date.now();
-  if (!shouldReportSuccess({ pushed, fromEvent, caughtUp, now, lastAt: lastSuccessAt })) return false;
+  if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt })) return false;
   lastSuccessAt = now;
   // 发报本身是异步的（flushReports 自己吞异常），这里只回答「该不该报」，
   // 所以不等它 —— 同步流程是主线程路径，不该被一次网络往返挂住。

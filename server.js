@@ -1458,6 +1458,9 @@ function saveIdeas() {
 const { SYNC_DEBOUNCE_MS, SYNC_DEBOUNCE_TICK_MS, debounceElapsed } = require('./lib/sync-debounce');
 
 let dataVersion = 1;
+// 进程标识：版本号只在同一次进程内可比，重启后要靠它让手机重新对齐
+// （否则手机存着 47、服务端重启后说 1，「补齐」通知会静默失效几天）
+const BOOT_ID = crypto.randomUUID().slice(0, 8);
 let pendingSince = 0;                  // 最近一次落盘的时刻；0 = 窗口内没有待推送的改动
 const sseClients = new Set();           // 每个 client 就是一个挂起的 res
 const SSE_MAX_CLIENTS = 8;              // 手机 + 浏览器标签页足够了，防连接泄漏
@@ -1489,7 +1492,9 @@ setInterval(() => {
   if (!debounceElapsed(pendingSince, Date.now())) return;
   const changedAt = pendingSince;
   pendingSince = 0;
-  dataVersion += 1;
+  // 广播不是数据变更，**不能动 dataVersion**：它在 markDataChanged 时已经加过了。
+  // 这里再 +1 的话，手机自己推一次东西 → 5 分钟后自己引发的广播又让版本变一次 →
+  // 手机补拉时误判成「我落后了」，电脑端就会收到一条多余的「补齐」通知。
   broadcastFrame(`event: sync\ndata: ${JSON.stringify({ v: dataVersion, changedAt, t: Date.now() })}\n\n`);
 }, SYNC_DEBOUNCE_TICK_MS);
 
@@ -1997,8 +2002,10 @@ route('GET', '/api/sync/pull', async (ctx) => {
   ctx.json({
     schema_version: SCHEMA_VERSION,
     server_time: new Date().toISOString(),
-    // 手机靠它发现「我睡着的这段时间电脑端改过东西」，从而决定要不要回报电脑端
+    // 手机靠它发现「我睡着的这段时间电脑端改过东西」，从而决定要不要回报电脑端。
+    // boot_id 一起给：dataVersion 是进程内计数，重启后归 1，跨进程不可比
     data_version: dataVersion,
+    boot_id: BOOT_ID,
     activities: db.activities,
     papers: paperDb.papers.map((p) => ({ ...p, file_exists: !!findPaperFile(p) })),
     sites: siteDb.sites,

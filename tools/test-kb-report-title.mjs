@@ -106,12 +106,28 @@ try {
   ok('缺省字段归一成 0 而不是 undefined', plain.sync_pushed === '0' && plain.sync_caught_up === '0',
     `${plain.sync_pushed}/${plain.sync_caught_up}`);
 
-  console.log('pull 的 data_version（手机发现「我落后了」的依据）');
+  console.log('pull 的 data_version + boot_id（手机发现「我落后了」的依据）');
   const pull = await (await fetch(`${base}/api/sync/pull`, { headers: auth })).json();
   ok('pull 返回 data_version', 'data_version' in pull, Object.keys(pull).join(','));
   ok('data_version 是数字', typeof pull.data_version === 'number' && Number.isFinite(pull.data_version),
     String(pull.data_version));
   ok('data_version >= 1（起始版本号）', pull.data_version >= 1, String(pull.data_version));
+  ok('pull 返回 boot_id', 'boot_id' in pull, Object.keys(pull).join(','));
+  ok('boot_id 是非空字符串（跨进程判断版本可比性靠它）',
+    typeof pull.boot_id === 'string' && pull.boot_id.length > 0, String(pull.boot_id));
+  // 同一次进程内 boot_id 必须稳定，否则手机每轮都以为服务端重启了 → 补齐通知永不上报
+  const pull2 = await (await fetch(`${base}/api/sync/pull`, { headers: auth })).json();
+  ok('boot_id 在同一进程内不变', pull2.boot_id === pull.boot_id, `${pull.boot_id} vs ${pull2.boot_id}`);
+
+  // 广播不得再自增版本号。跑不到那 5 分钟窗口（lib/sync-debounce.js 里写死），
+  // 所以在这里钉源码：只要这行回来，手机推一次东西 5 分钟后就会多出一条「补齐」通知。
+  const src = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  const broadcastBlock = src.slice(src.indexOf('setInterval(() => {', src.indexOf("require('./lib/sync-debounce')")));
+  ok('广播块里没有 dataVersion += 1（广播不是数据变更）',
+    !/dataVersion\s*\+=\s*1/.test(broadcastBlock.slice(0, broadcastBlock.indexOf('}, SYNC_DEBOUNCE_TICK_MS)'))),
+    broadcastBlock.slice(0, 400));
+  ok('数据落盘时仍然会自增（markDataChanged 没被误删）',
+    /function markDataChanged\(\)[\s\S]{0,80}dataVersion\s*\+=\s*1/.test(src));
 } catch (e) {
   console.error(e);
   process.exitCode = 1;
