@@ -197,15 +197,8 @@ export const CONFIG = {
     },
   },
 
-  // 知识库：可反复复用的精华沉淀。category 的 id 与 server.js 的 KB_CATEGORIES 同步
+  // 知识库：可反复复用的精华沉淀。标签是唯一的归类与检索维度（不再有类别）
   kb: {
-    categories: [
-      { id: 'expression', label: '学术表达', emoji: '✒️', hue: 210 },
-      { id: 'theory', label: '理论分析', emoji: '🧠', hue: 265 },
-      { id: 'method', label: '方法研究', emoji: '🔧', hue: 25 },
-      { id: 'inspiration', label: '灵感思路', emoji: '💡', hue: 50 },
-      { id: 'other', label: '其他', emoji: '✨', hue: 320 },
-    ],
     titleMax: 120,
     titlePlaceholder: '例：消融实验的表述套路；XX 理论的适用边界',
     contentPlaceholder: '把可复用的精华原样记下来：表述、推导、做法、适用条件……',

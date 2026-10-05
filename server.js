@@ -81,7 +81,10 @@ const SCHEMA_VERSION = 1;
 // 版本门禁（P10 / M5）：apiVersion=当前 REST 协议版本；minClient=App 壳最低可接受版本。
 // 改 /api 行为时递增 apiVersion；旧 App 会静默出错时才递增 minClient。
 const API_VERSION = 1;
-const MIN_CLIENT = 1;
+// minClient=2：后台同步改为事件驱动后，推送事件名从 changed 变成 sync、hello 帧多了
+// pendingSince。v1 旧壳只认 changed，配上这台服务会一条推送都收不到，只剩 15 分钟兜底
+// 闹钟——从外面看就是「同步时好时坏」，属于典型静默出错，必须提示重装而不是默默不同步。
+const MIN_CLIENT = 2;
 const STATUSES = ['pending', 'claimed', 'used', 'expired', 'closed'];
 // 老数据里的状态名 → 现在的名字，遇到就顺手升级，别把它当非法值打回 pending
 const LEGACY_STATUS = { missed: 'closed' };
@@ -128,7 +131,9 @@ const INSIGHTS_FILE = path.join(DATA_DIR, 'insights.json');
 const INSIGHT_DECISIONS = ['continue', 'reduce', 'hold', 'stop'];
 
 // 消息中心：目前有「已过期」（过了使用截止）与「已截止」（过了领取截止）两个来源
-const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until', 'claim_deadline'];
+// kind='bg-sync' 的消息是手机端后台同步的成败回报（不是蛋到期），走独立处理：
+// 手机只回报结论、不自造文案，文案由服务端按 ok/attempts/reason 统一生成
+const MESSAGE_FIELDS = ['activity_id', 'platform', 'title', 'body', 'valid_until', 'claim_deadline', 'kind', 'sync_ok', 'sync_attempts', 'sync_reason'];
 
 // 想法板块：一行点题 + 一段灵感，手机端唯一能写的板块
 const IDEA_FIELDS = ['title', 'content'];
@@ -149,8 +154,7 @@ const ACHIEVEMENT_STATUSES = ['doing', 'done'];
 const ACHIEVEMENT_FIELDS = ['title', 'content', 'highlight'];
 
 // 知识库：可反复复用的精华沉淀（学术表达/理论分析/方法研究…），桌面端管理，手机端在线只读
-// category 枚举与 public/config.js 的 kb 段同步；source 记这条从哪儿沉淀来的
-const KB_CATEGORIES = ['expression', 'theory', 'method', 'inspiration', 'other'];
+// 归类与检索只走 tags；category 已废弃，老客户端仍会带上这个字段，服务端直接忽略（不影响保存）
 const KB_SOURCES = ['paper', 'site', 'idea', 'manual'];
 const KB_FIELDS = ['title', 'content'];
 // 时间是自由文本（"2026-08 开始，9 月下旬开源"这种也收），date_key 是从中猜出的
@@ -1299,20 +1303,73 @@ route('GET', '/api/messages', async (ctx) => {
   ctx.json([...messageDb.messages].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
 });
 
-// 新增消息：同一颗蛋同一类到期（activity_id + 使用截止 + 领取截止）只记一条，
-// 多个标签页各扫一遍也不会写出重复消息；两侧 || '' 归一，兼容没有 claim_deadline 的老消息
+// 新增消息：蛋到期类消息同一颗蛋同一类到期（activity_id + 使用截止 + 领取截止）只记一条，
+// 多个标签页各扫一遍也不会写出重复消息；两侧 || '' 归一，兼容没有 claim_deadline 的老消息。
+// 系统/全局消息（没有 activity_id，如手动 POST 的通知）不去重，直接追加
 route('POST', '/api/messages', async (ctx) => {
+  // 手机端唯一能写的消息类型就是后台同步回报。放开它是为了闭合「手机同步 → 电脑提醒」，
+  // 但绝不能顺带开放通用消息写入：否则同网段任何人往你消息中心塞东西。
+  if (String((ctx.body && ctx.body.kind) || '') === 'bg-sync') {
+    return addSyncReport(ctx);
+  }
+  if (ctx.role === 'mobile') return ctx.json({ error: '手机端不能写入消息', code: 'forbidden' }, 403);
   const msg = normalizeMessage(ctx.body);
-  const dup = messageDb.messages.find(
+  const dup = msg.activity_id ? messageDb.messages.find(
     (m) => m.activity_id === msg.activity_id
       && (m.valid_until || '') === (msg.valid_until || '')
       && (m.claim_deadline || '') === (msg.claim_deadline || '')
-  );
+  ) : null;
   if (dup) return ctx.json(dup, 200);
   messageDb.messages.push(msg);
   await saveMessages();
   ctx.json(msg, 201);
 });
+
+/** bg-sync 消息最多留这么多条，防止长期运行把消息中心撑爆 */
+const SYNC_REPORT_MAX = 30;
+/** 失败原因截断：手机传的是错误串，不限长的话能把整条消息撑成一大坨 */
+const SYNC_REASON_MAX = 120;
+
+function addSyncReport(ctx) {
+  const ok = String((ctx.body && ctx.body.sync_ok) || '') === '1';
+  const attempts = Math.max(0, Math.min(99, parseInt((ctx.body && ctx.body.sync_attempts) || '0', 10) || 0));
+  const reason = String((ctx.body && ctx.body.sync_reason) || '').slice(0, SYNC_REASON_MAX);
+  const at = new Date().toISOString();
+  // 文案由服务端生成，不采信手机传来的 title/body
+  const title = ok ? '手机已同步 ✅' : '手机同步失败 ❌';
+  const body = ok
+    ? `手机在 ${at.slice(11, 16)} UTC 把电脑端的更新拉下来了`
+    : `重试 ${attempts} 次仍未成功${reason ? `：${reason}` : ''}`;
+  const msg = {
+    id: crypto.randomUUID(),
+    kind: 'bg-sync',
+    platform: '同步',
+    title,
+    body,
+    activity_id: '',
+    valid_until: '',
+    claim_deadline: '',
+    sync_ok: ok ? '1' : '0',
+    sync_attempts: String(attempts),
+    sync_reason: reason,
+    read: false,
+    created_at: at,
+  };
+  messageDb.messages.push(msg);
+  // 只保留最近若干条回报，老的丢掉（蛋到期类消息不受影响）
+  const reports = messageDb.messages.filter((m) => m.kind === 'bg-sync');
+  if (reports.length > SYNC_REPORT_MAX) {
+    const drop = new Set(reports.slice(0, reports.length - SYNC_REPORT_MAX).map((m) => m.id));
+    messageDb.messages = messageDb.messages.filter((m) => !drop.has(m.id));
+  }
+  // 关键：绕开 5 分钟防抖，立刻推。防抖是为「数据改动」设计的（连改 10 条只同步一次），
+  // 而同步结论是低频且用户在等的，等 5 分钟等于白做。
+  const frame = `event: report\ndata: ${JSON.stringify({
+    id: msg.id, ok, title: msg.title, body: msg.body, at,
+  })}\n\n`;
+  broadcastFrame(frame);
+  return saveMessages().then(() => ctx.json(msg, 201));
+}
 
 route('PUT', '/api/messages/:id', async (ctx) => {
   const idx = messageDb.messages.findIndex((m) => m.id === ctx.params.id);
@@ -1379,13 +1436,81 @@ async function saveIdeasNow() {
 // 写盘串行化：同一集合并发写会共用同一个 .tmp 文件名，不排队会互相覆盖
 let ioQueue = Promise.resolve();
 function queueWrite(fn) {
-  const run = ioQueue.then(fn, fn);
+  const run = ioQueue.then(fn, fn).then(markDataChanged, markDataChanged);
   ioQueue = run.catch(() => {}); // 出错不能把队列毒死
   return run;
 }
 function saveIdeas() {
   return queueWrite(saveIdeasNow);
 }
+
+// ---------- 变更推送（SSE）：改动聚合 5 分钟后推一次 sync，手机端据此发起后台同步 ----------
+// queueWrite 是全部写盘的汇合点：挂在这里，蛋/随记/文献/网站/花销/消息……改动一个不漏
+// 防抖策略在 lib/sync-debounce.js（纯函数，能脱离进程单测）
+const { SYNC_DEBOUNCE_MS, SYNC_DEBOUNCE_TICK_MS, debounceElapsed } = require('./lib/sync-debounce');
+
+let dataVersion = 1;
+let pendingSince = 0;                  // 最近一次落盘的时刻；0 = 窗口内没有待推送的改动
+const sseClients = new Set();           // 每个 client 就是一个挂起的 res
+const SSE_MAX_CLIENTS = 8;              // 手机 + 浏览器标签页足够了，防连接泄漏
+
+function markDataChanged() {
+  dataVersion += 1;
+  // 每次改动都把窗口往后推：电脑端连改 10 条，安静下来 5 分钟也只推一次
+  pendingSince = Date.now();
+}
+
+function writeFrame(res, frame) {
+  try {
+    res.write(frame);
+    return true;
+  } catch {
+    try { res.end(); } catch { /* ignore */ }
+    sseClients.delete(res);
+    return false;
+  }
+}
+
+function broadcastFrame(frame) {
+  for (const res of [...sseClients]) writeFrame(res, frame);
+}
+
+// 安静窗口一满就推一把 sync。没人在线时也消费掉：下次客户端连上来的 hello 帧带 pendingSince，
+// 由客户端自己补同步（见 /api/events），不必让服务端记住「谁还没拉」
+setInterval(() => {
+  if (!debounceElapsed(pendingSince, Date.now())) return;
+  const changedAt = pendingSince;
+  pendingSince = 0;
+  dataVersion += 1;
+  broadcastFrame(`event: sync\ndata: ${JSON.stringify({ v: dataVersion, changedAt, t: Date.now() })}\n\n`);
+}, SYNC_DEBOUNCE_TICK_MS);
+
+// 心跳：空注释行只保活不触发客户端逻辑；移动网络/NAT 会掐静默连接，25 秒一口氣
+setInterval(() => {
+  if (!sseClients.size) return;
+  broadcastFrame(`: hb ${Date.now()}\n\n`);
+}, 25 * 1000);
+
+// 手机端用 fetch 流式读取（EventSource 带不了 X-Danji-Token 头），帧格式仍是标准 SSE
+route('GET', '/api/events', async (ctx) => {
+  const { req, res } = ctx;
+  if (sseClients.size >= SSE_MAX_CLIENTS) return ctx.json({ error: '事件流连接已达上限' }, 429);
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  if (res.socket) res.socket.setNoDelay(true);
+  sseClients.add(res);
+  // 首帧：retry 给 EventSource 客户端的重连间隔；pendingSince 告诉客户端「你连上时还有一个
+  // 正在聚合的改动窗口」，让刚上线的手机立刻补一次同步，不用干等那 5 分钟
+  res.write(
+    `retry: 5000\nevent: hello\ndata: ${JSON.stringify({ v: dataVersion, t: Date.now(), pendingSince })}\n\n`
+  );
+  req.on('close', () => sseClients.delete(res));
+  // 不 end：连接挂起，由心跳 / 广播持续写
+});
 
 // id 可能是客户端自己生成的（离线想法带着 UUID 重放），只认 UUID 形态，别让奇怪的值落进 JSON
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1713,8 +1838,8 @@ function normalizeKb(input, existing = {}) {
     k[field] = input[field] === null || input[field] === undefined ? '' : String(input[field]).trim();
   }
   for (const field of KB_FIELDS) if (k[field] === undefined) k[field] = '';
-  if ('category' in input && KB_CATEGORIES.includes(input.category)) k.category = input.category;
-  if (!KB_CATEGORIES.includes(k.category)) k.category = 'other';
+  // category 已废弃：既不校验也不写入。老客户端（老 APK 里打包的前端）还会带上它，忽略即可，
+  // 已有数据里的 category 原样保留（不迁移、不重写本地数据）。
   if ('tags' in input) {
     k.tags = Array.isArray(input.tags)
       ? input.tags.map((t) => String(t).trim()).filter(Boolean)
@@ -2087,6 +2212,9 @@ function tokenOk(req) {
 function mobileMayWrite(method, pathname) {
   if (method === 'GET' || method === 'HEAD') return true;
   if (method === 'POST' && (pathname === '/api/ideas' || pathname === '/api/sync/push' || pathname === '/api/uploads')) return true;
+  // 后台同步回报：手机只能往这里报「我同步成没成功」，别的消息一律拒绝（见 addSyncReport）。
+  // 放行到路由这一层是为了能读到 body 里的 kind；不在这里放行的话连读都读不到就被 403 了。
+  if (method === 'POST' && pathname === '/api/messages') return true;
   // 阅读进度回写：浏览器扩展可能以局域网地址接入（role=mobile），只写 read_progress 无害
   if (method === 'POST' && /^\/api\/sites\/[^/]+\/progress$/.test(pathname)) return true;
   if ((method === 'PUT' || method === 'DELETE') && /^\/api\/ideas\/[^/]+$/.test(pathname)) return true;

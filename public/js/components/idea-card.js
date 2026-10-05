@@ -1,11 +1,11 @@
 /* ---------------- 组件：随记卡片 ---------------- */
 // 随记：一行点题 + 一段内容 + 贴图。origin 标明这条是从哪儿来的，
 // 手机记的能改，电脑记的在手机上只能看。
-// 灵感默认折叠 3 行：列表要能一屏扫完，细看再展开。
+// 桌面端默认折叠 3 行：列表要能一屏扫完，细看再展开；手机端默认全展开：版面小，怕漏看。
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { state } from '../state.js';
-import { canWrite } from '../perm.js';
+import { canWrite, isDesktop } from '../perm.js';
 import { formatDate } from '../util/date.js';
 import { useImageUrls } from '../img-urls.js';
 
@@ -52,15 +52,20 @@ const IdeaCard = {
       try { document.body.style.overflow = ''; } catch { /* ignore */ }
     });
 
-    const expanded = ref(false);
+    // 手机端版面小、一屏扫不完几条，默认全展开避免漏看内容；桌面端仍默认折 3 行
+    const expanded = ref(!isDesktop());
     const contentEl = ref(null);
     const clampable = ref(false);
-    // 带 clamped 类时 scrollHeight 仍是全文高度、clientHeight 是 3 行高度，
-    // 两者差就是"被折掉的部分"；窗口宽度变了行数会变，重测
+    // 阈值固定 3 行：默认展开时元素上没有 clamped 类，
+    // clientHeight 就等于全文高度，不能再拿它跟 scrollHeight 比（那样永远测不出"可折叠"，
+    // 手机端收起后就再没有展开按钮了）；窗口宽度变了行数会变，重测
     function measure() {
       const el = contentEl.value;
       if (!el) return;
-      clampable.value = el.scrollHeight > el.clientHeight + 2;
+      const lh = parseFloat(getComputedStyle(el).lineHeight);
+      clampable.value = lh
+        ? el.scrollHeight > lh * 3 + 2
+        : el.scrollHeight > el.clientHeight + 2; // 拿不到行高时退回旧比法（此时元素多半是折叠态）
     }
     const onResize = () => measure();
     onMounted(async () => {
@@ -93,7 +98,7 @@ const IdeaCard = {
     </div>
     <p class="idea-content" :class="{ clamped: !expanded }" ref="contentEl" v-if="idea.content">{{ idea.content }}</p>
     <p class="idea-content empty-content" v-else>还没写内容</p>
-    <button type="button" class="idea-toggle" v-if="idea.content && (clampable || expanded)" @click.stop="toggleExpand">
+    <button type="button" class="idea-toggle" v-if="idea.content && clampable" @click.stop="toggleExpand">
       {{ expanded ? '收起 ⌃' : '展开 ⌄' }}
     </button>
     <div class="idea-imgs" v-if="images.length" @click.stop>

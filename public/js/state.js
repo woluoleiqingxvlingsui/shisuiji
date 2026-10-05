@@ -76,8 +76,7 @@ const state = reactive({
   kb: [],
   kbLoaded: false,
   kbSearch: '',
-  kbCategoryFilter: '', // '' = 全部类别
-  kbTagFilter: '',       // '' = 全部标签
+  kbTagFilter: '',       // '' = 全部标签（标签是知识库唯一的归类与检索维度）
   kbEditorOpen: false,
   editingKb: null,
   kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
@@ -108,6 +107,11 @@ const state = reactive({
   notifPermission: typeof Notification !== 'undefined' ? Notification.permission : 'denied',
   // 用户级软开关：浏览器权限无法被 JS 撤销，关闭提醒只能靠自己存状态
   notifyOn: localStorage.getItem('danji.notifyOn') !== '0',
+  // 全局通知软开关（后台同步成败等）。必须放进 state：顶栏那个铃铛的 computed 只跟踪
+  // 响应式依赖，直接读 localStorage 的话切换后 computed 不重算，图标看起来「没区别」。
+  notifyGlobalOn: localStorage.getItem('danji.notifySync') !== '0',
+  // 电脑端回报通道（SSE /api/events）状态：idle 未启动 | connecting 连接中 | live 已连上 | down 断了
+  reportInbox: 'idle',
 });
 
 export { state };

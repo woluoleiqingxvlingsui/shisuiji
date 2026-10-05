@@ -286,7 +286,12 @@ function unbindListeners() {
 
 function onVisibility() {
   if (!syncEnabled()) return;
-  if (document.visibilityState === 'visible') syncNow({ reason: 'visibility' });
+  if (document.visibilityState === 'visible') {
+    syncNow({ reason: 'visibility' });
+  } else if ((state.sync.pendingCount || 0) > 0) {
+    // 退到后台的瞬间尽力把待发队列推出去：进程随时可能被冻结
+    syncNow({ reason: 'hidden-flush' });
+  }
 }
 
 function onOnline() {

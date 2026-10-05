@@ -41,14 +41,27 @@
     </nav>
     <button class="btn ghost theme-btn" @click="cycleTheme" :title="themeTitle">{{ themeIcon }}</button>
     <sync-status></sync-status>
-    <template v-if="state.board === 'eggs'">
-      <input class="search" type="search" v-model.trim="state.search" placeholder="搜索活动 / 平台 / 备注…">
-      <button class="btn ghost msg-btn" @click="switchBoard('messages')" title="消息中心：蛋过期的记录都在这里">
+    <!-- 消息 / 通知：电脑端专属。手机在手上改东西走前台同步，本来就即时可见；
+         真正需要后台同步时手机又不在视线内，提示栏没人看。提醒只留在电脑端。
+         手机上看同步状态靠上面的同步胶囊（已同步 / 离线 / 冲突 + 最后同步时间）。 -->
+    <template v-if="isDesktopApp">
+      <button class="btn ghost msg-btn" @click="switchBoard('messages')"
+              title="消息中心：后台同步成功 / 失败 / 恢复、蛋到期等记录都在这里">
         💬 消息<span class="badge" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
       </button>
-      <button class="btn ghost notif" v-if="canWriteEggs" :class="{ off: !notifActive }" @click="toggleNotify" :title="notifTitle">
-        {{ notifActive ? '🔔' : '🔕' }}
-        <span v-if="state.notifPermission === 'default'" class="dot"></span>
+      <button class="btn ghost notif-pill" :class="notifPill.cls"
+              @click="toggleGlobalNotify" :title="globalNotifyTitle">
+        <span class="notif-icon">{{ notifPill.icon }}</span>
+        <span class="notif-label">通知</span>
+      </button>
+    </template>
+    <template v-if="state.board === 'eggs'">
+      <input class="search" type="search" v-model.trim="state.search" placeholder="搜索活动 / 平台 / 备注…">
+      <button class="btn ghost notif-pill" v-if="canWriteEggs"
+              :class="notifActive ? 'on' : (state.notifPermission !== 'granted' ? 'blocked' : 'off')"
+              @click="toggleNotify" :title="notifTitle">
+        <span class="notif-icon">{{ notifActive ? '🔔' : (state.notifPermission !== 'granted' ? '⚠️' : '🔕') }}</span>
+        <span class="notif-label">蛋</span>
       </button>
       <button class="btn primary" v-if="canWriteEggs" @click="openEditor(null)">＋ 记蛋</button>
     </template>
@@ -76,8 +89,11 @@
       <input class="search" type="search" v-model.trim="state.kbSearch" placeholder="搜索知识 / 标签 / 来源…">
       <button class="btn primary" v-if="canWriteKb" @click="openKbEditor(null)">＋ 记知识</button>
     </template>
+    <template v-else-if="state.board === 'messages'">
+      <span class="board-hint">后台同步的成功 / 失败 / 恢复，和蛋到期都会自动记一条到这里</span>
+    </template>
     <template v-else>
-      <span class="board-hint">蛋过了使用截止，会自动记一条到这里</span>
+      <span class="board-hint">蛋过了使用截止，会自动记一条到消息中心</span>
     </template>
   </header>
 
@@ -165,19 +181,7 @@
 
   <!-- ===== 知识库板块 ===== -->
   <main class="container" v-if="state.board === 'kb'">
-    <!-- 类别筛选 -->
-    <div class="filters" v-if="state.kb.length">
-      <div class="tabs">
-        <button class="tab" :class="{ active: !state.kbCategoryFilter }"
-                @click="state.kbCategoryFilter = ''">全部</button>
-        <button v-for="c in kbCategories" :key="c.id" class="tab"
-                :class="{ active: state.kbCategoryFilter === c.id }"
-                @click="pickKbCategory(c.id)">
-          {{ c.emoji }} {{ c.label }}
-        </button>
-      </div>
-    </div>
-    <!-- 标签筛选 -->
+    <!-- 标签是知识库唯一的归类与检索维度：搜索框里直接输入 #标签 也能命中 -->
     <div class="kb-tags" v-if="kbTagOptions.length">
       <button class="chip tag" :class="{ on: !state.kbTagFilter }" @click="state.kbTagFilter = ''">全部标签</button>
       <button v-for="t in kbTagOptions" :key="t.tag" class="chip tag"
@@ -200,7 +204,7 @@
     <div class="empty" v-else-if="!filteredKb.length">
       <div class="empty-egg">🔍</div>
       <p class="empty-title">没有匹配的知识</p>
-      <p class="empty-sub">换个搜索词、类别或标签试试</p>
+      <p class="empty-sub">换个搜索词或标签试试（也可以直接输入 #标签）</p>
     </div>
 
     <transition-group name="list" tag="div" class="egg-list" v-else>
@@ -258,7 +262,8 @@
     <transition-group name="list" tag="div" class="egg-list" v-else>
       <egg-card v-for="a in filteredActivities" :key="a.id" :id="'card-' + a.id"
                 :activity="a" :now="state.now" :flash="state.flashId === a.id"
-                @edit="openEditor(a)" @remove="removeActivity(a)" @status="setStatus(a, $event)">
+                @edit="openEditor(a)" @remove="removeActivity(a)" @status="setStatus(a, $event)"
+                @reopen="reopenActivity(a)">
       </egg-card>
     </transition-group>
   </main>
@@ -457,10 +462,14 @@
         <span class="msg-summary">
           {{ unreadCount ? `${unreadCount} 条未读 / ` : '' }}共 {{ state.messages.length }} 条
         </span>
+        <span class="msg-inbox-state" :class="'st-' + reportInboxState" :title="reportInboxText">
+          {{ reportInboxText }}
+        </span>
       </div>
       <div class="filter-right">
         <button class="btn ghost small" v-if="canMarkMessages && unreadCount" @click="markAllRead">全部已读</button>
         <button class="btn ghost small" v-if="canMarkMessages && state.messages.length > unreadCount" @click="clearReadMessages">清空已读</button>
+        <button class="btn ghost small" @click="testNotify">🔔 测试通知</button>
       </div>
     </div>
 
@@ -470,7 +479,10 @@
     <div class="empty" v-else-if="!state.messages.length">
       <div class="empty-egg">💬</div>
       <p class="empty-title">还没有消息</p>
-      <p class="empty-sub">已领取的蛋过了使用截止，会自动记一条到这里，不怕一闪而过漏掉</p>
+      <p class="empty-sub">后台同步的成功 / 失败会自动记到这里。想第一时间收到提醒？点顶栏的「通知」开启系统通知，或点下面的按钮先试一条</p>
+      <div class="empty-actions" v-if="canMarkMessages">
+        <button class="btn ghost" @click="testNotify">🔔 测试通知</button>
+      </div>
     </div>
 
     <transition-group name="list" tag="div" class="egg-list" v-else>

@@ -21,7 +21,6 @@ const KbEditor = {
     const base = props.initial || props.prefill || {};
 
     const form = reactive({
-      category: base.category || 'other',
       title: base.title || '',
       content: base.content || '',
       tagsText: (base.tags || []).join(', '),
@@ -38,7 +37,6 @@ const KbEditor = {
     function save() {
       if (!form.title.trim() && !form.content.trim()) return alert('标题和内容至少写一个');
       emit('save', {
-        category: form.category,
         title: form.title.trim(),
         content: form.content.trim(),
         tags: splitTags(form.tagsText),
@@ -79,13 +77,6 @@ const KbEditor = {
         <button class="btn ghost small" @click="close">✕</button>
       </header>
       <form class="drawer-form" @submit.prevent="save">
-        <p class="drawer-section">类别</p>
-        <div class="chip-picks">
-          <button type="button" class="chip-pick" v-for="c in cfg.categories" :key="c.id"
-                  :class="{ on: form.category === c.id }" @click="form.category = c.id">
-            {{ c.emoji }} {{ c.label }}
-          </button>
-        </div>
         <p class="kb-source-line" v-if="source">📎 源自：{{ source.label }}</p>
         <label>标题
           <input ref="titleInput" v-model="form.title" :maxlength="cfg.titleMax" :placeholder="cfg.titlePlaceholder">

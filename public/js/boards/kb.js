@@ -1,5 +1,5 @@
 /* 拾穗集 —— 知识库：可反复复用的精华沉淀
- * 手动记录 + 论文/网页笔记、想法一键沉淀；类别 + 标签 + 全文叠加检索。
+ * 手动记录 + 论文/网页笔记、想法一键沉淀；标签 + 全文叠加检索（类别已废弃）。
  * 桌面端直连 REST 管理；手机端在线只读浏览（不接 outbox）。
  */
 
@@ -7,7 +7,6 @@ import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
-import { CONFIG } from '../../config.js';
 import { NOTE_TEXT_FIELDS, NOTE_FIELD_LABEL } from '../util/paper-note.js';
 import { siteNoteFields, siteNoteFieldLabel } from '../util/site-note.js';
 
@@ -27,17 +26,17 @@ async function loadKb() {
   state.kbLoaded = true;
 }
 
-const kbCategories = computed(() => CONFIG.kb.categories);
-
 const filteredKb = computed(() => {
-  const kw = state.kbSearch.trim().toLowerCase();
-  const cat = state.kbCategoryFilter;
+  // 允许直接输入 #标签 当搜索词：先剥掉井号，标签命中按整词匹配优先
+  const raw = state.kbSearch.trim().toLowerCase();
+  const kw = raw.replace(/^#/, '');
   const tag = state.kbTagFilter;
   return state.kb.filter((k) => {
-    if (cat && k.category !== cat) return false;
     if (tag && !(k.tags || []).includes(tag)) return false;
     if (!kw) return true;
-    return [k.title, k.content, (k.tags || []).join(' '), (k.source && k.source.label) || '']
+    const tags = (k.tags || []).map((t) => String(t).toLowerCase());
+    if (tags.includes(kw)) return true;              // 标签整词命中
+    return [k.title, k.content, tags.join(' '), (k.source && k.source.label) || '']
       .join(' ').toLowerCase().includes(kw);
   });
 });
@@ -62,10 +61,6 @@ function openKbWithPrefill(prefill) {
   state.editingKb = null;
   state.kbPrefill = prefill;
   state.kbEditorOpen = true;
-}
-
-function pickKbCategory(id) {
-  state.kbCategoryFilter = state.kbCategoryFilter === id ? '' : id;
 }
 
 function pickKbTag(tag) {
@@ -108,7 +103,6 @@ function depositFromIdea(idea) {
   openKbWithPrefill({
     title: idea.title || '',
     content: idea.content || '',
-    category: 'inspiration',
     tags: [],
     source: { type: 'idea', ref_id: idea.id || '', label: idea.title || '想法' },
   });
@@ -121,7 +115,6 @@ function depositFromPaperLog(paper, log) {
   openKbWithPrefill({
     title: paper && paper.title ? `${paper.title} · 沉淀` : '论文沉淀',
     content: lines.join('\n'),
-    category: 'method',
     tags: [],
     source: { type: 'paper', ref_id: (paper && paper.id) || '', label: (paper && paper.title) || '' },
   });
@@ -135,7 +128,6 @@ function depositFromSiteNote(site, log) {
   openKbWithPrefill({
     title: site && site.title ? `${site.title} · 沉淀` : '网页沉淀',
     content: lines.join('\n'),
-    category: 'method',
     tags: [],
     source: { type: 'site', ref_id: (site && site.id) || '', label: (site && site.title) || '' },
   });
@@ -177,7 +169,7 @@ async function autoSyncFromNote({ type, refId, label, title, content, noteUpdate
   if (!existing) {
     const res = await api('/api/kb', {
       method: 'POST',
-      body: JSON.stringify({ ...base, category: 'method', tags: [] }),
+      body: JSON.stringify({ ...base, tags: [] }),
     });
     if (!res.ok) return;
     const saved = await res.json();
@@ -200,7 +192,6 @@ async function autoSyncFromNote({ type, refId, label, title, content, noteUpdate
     method: 'PUT',
     body: JSON.stringify({
       ...base,
-      category: existing.category,
       tags: existing.tags,
       base_updated_at: existing.updated_at,
     }),
@@ -249,7 +240,6 @@ async function resolveKbMerge(choice) {
     ? {
       title: m.incoming.title,
       content: m.incoming.content,
-      category: m.entry.category,
       tags: m.entry.tags,
       source: m.entry.source,
     }
@@ -269,8 +259,8 @@ async function resolveKbMerge(choice) {
 }
 
 export {
-  loadKb, kbCategories, filteredKb, kbTagOptions,
-  openKbEditor, pickKbCategory, pickKbTag, saveKb, removeKb,
+  loadKb, filteredKb, kbTagOptions,
+  openKbEditor, pickKbTag, saveKb, removeKb,
   depositFromIdea, depositFromPaperLog, depositFromSiteNote,
   autoSyncFromPaperLog, autoSyncFromSiteNote, resolveKbMerge,
 };

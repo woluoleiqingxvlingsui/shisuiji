@@ -10,7 +10,7 @@ import { normalizeUrl, platformStyle } from '../util/text.js';
 const EggCard = {
   name: 'EggCard',
   props: { activity: { type: Object, required: true }, now: { type: Number, required: true }, flash: Boolean },
-  emits: ['edit', 'remove', 'status'],
+  emits: ['edit', 'remove', 'status', 'reopen'],
   setup(props, { emit }) {
     const expanded = ref(false);
     const writable = computed(() => canWrite('eggs'));
@@ -55,6 +55,7 @@ const EggCard = {
       linkUrl, linkLabel, openLink, platformStyle, formatDate,
       emitEdit: () => emit('edit'), emitRemove: () => emit('remove'),
       emitStatus: (s) => emit('status', s),
+      emitReopen: () => emit('reopen'),
     };
   },
   template: `
@@ -95,6 +96,7 @@ const EggCard = {
       </template>
       <template v-else-if="writable && activity.status === 'closed'">
         <button class="btn small ghost" @click="emitStatus('claimed')">✅ 其实领到了</button>
+        <button class="btn small ghost" @click="emitReopen">↩️ 未截止</button>
       </template>
       <template v-else-if="writable && activity.status === 'expired'">
         <button class="btn small ghost" @click="emitStatus('claimed')">↩️ 还能用</button>

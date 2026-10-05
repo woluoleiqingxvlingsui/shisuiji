@@ -112,13 +112,36 @@ input, select, textarea { font: inherit; color: inherit; }
 .search:focus { border-color: var(--accent); }
 .search::placeholder { color: var(--muted); }
 .topbar .btn.ghost { margin-left: 0; }
-.notif, .msg-btn { position: relative; }
-.notif.off { opacity: .45; }
-.notif .dot {
-  position: absolute; top: 4px; right: 4px;
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--red);
+.msg-btn { position: relative; }
+
+/* 通知开关胶囊：开启 / 关闭 / 被拦截 三态。
+   不用「灰度 + 斜杠」表达状态 —— emoji 已经能说明开关，灰度斜杠只会糊成一片，
+   斜杠还容易横穿旁边的文字。状态一律靠颜色 + 图标 + 文案表达。 */
+.notif-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; line-height: 1.2;
 }
+.notif-pill .notif-icon { font-size: 14px; line-height: 1; }
+.notif-pill .notif-label { font-size: 13px; font-weight: 600; }
+
+.notif-pill.on {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent-strong);
+}
+.notif-pill.off {
+  background: var(--card);
+  color: var(--muted);
+}
+.notif-pill.off:hover { color: var(--text); border-color: var(--border); }
+
+/* 未授权 / 被拦截 / 环境不支持：这是「坏了」，不是「关了」，必须长得不一样 */
+.notif-pill.blocked {
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-color: color-mix(in srgb, var(--orange) 38%, transparent);
+  color: var(--orange);
+}
+.notif-pill.blocked:hover { border-color: var(--orange); }
 .topbar .btn.primary { margin-left: auto; }
 
 /* ---------- 板块切换 ---------- */
@@ -169,6 +192,19 @@ input, select, textarea { font: inherit; color: inherit; }
 .sync-pill-btn.warn { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 40%, var(--border)); }
 
 .sync-hint { color: var(--muted); margin: 0 0 12px; }
+.bg-sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-2);
+  cursor: pointer;
+}
+.bg-sync-row input { margin-top: 3px; flex: 0 0 auto; }
+.bg-sync-sub { margin: 0 0 12px; font-size: 12px; opacity: 0.75; }
 .conflict-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .conflict-side h3 { margin: 0 0 8px; font-size: 14px; }
 .conflict-text {
@@ -187,6 +223,27 @@ input, select, textarea { font: inherit; color: inherit; }
   .conflict-sides { grid-template-columns: 1fr; }
 }
 .msg-summary { color: var(--muted); font-size: 13px; font-weight: 600; padding: 0 4px; }
+/* 回报通道状态：让「为什么没收到通知」一眼可查，不用去开 DevTools 猜 */
+.msg-inbox-state {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 10px; padding: 3px 9px; border-radius: 999px;
+  font-size: 11.5px; color: var(--muted); white-space: nowrap;
+  border: 1px solid var(--border); background: var(--card-2);
+}
+.msg-inbox-state::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--muted); flex: none;
+}
+.msg-inbox-state.st-live {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+}
+.msg-inbox-state.st-live::before { background: var(--green); }
+.msg-inbox-state.st-down {
+  color: var(--orange);
+  border-color: color-mix(in srgb, var(--orange) 38%, transparent);
+}
+.msg-inbox-state.st-down::before { background: var(--orange); }
 .msg-flag {
   margin-left: auto; flex-shrink: 0;
   font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;

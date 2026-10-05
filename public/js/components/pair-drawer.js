@@ -16,6 +16,7 @@ import {
   parsePairPayload,
 } from '../pair.js';
 import { notifyPaired, closePair, openPair, syncNow } from '../sync/engine.js';
+import { bgSyncWanted, setBgSyncWanted, bgSyncAvailable, refreshBackgroundService } from '../sync/bg-sync.js';
 
 /** 原生 ML Kit 扫码插件（@capacitor-mlkit/barcode-scanning）；浏览器/未安装时返回 null */
 function getNativeBarcodeScanner() {
@@ -55,6 +56,8 @@ const PairDrawer = {
 
     const open = computed(() => !!(state.sync && state.sync.pairOpen));
     const hasPair = ref(isPaired());
+    const bgAvailable = bgSyncAvailable();
+    const bgOn = ref(bgSyncWanted());
 
     let scanner = null;
     // 一次性闸门：二维码在镜头前会被连续解码多帧，回调必须同步上闸，
@@ -118,6 +121,7 @@ const PairDrawer = {
       scanMsg.value = '';
       hasPair.value = isPaired();
       pairedBase.value = getServerBase();
+      bgOn.value = bgSyncWanted();
     });
 
     async function connectWith({ base, token }) {
@@ -267,6 +271,17 @@ const PairDrawer = {
       hasPair.value = false;
       state.sync.needPair = true;
       toast('已清除配对', 'warn');
+      refreshBackgroundService(); // 未配对后服务只会白耗电 + 白挂通知，停掉
+    }
+
+    async function onToggleBg(e) {
+      const v = !!(e && e.target && e.target.checked);
+      bgOn.value = v;
+      setBgSyncWanted(v);
+      const ok = await refreshBackgroundService();
+      if (!v) toast('后台同步已关闭', 'ok');
+      else if (ok) toast('后台同步已开启', 'ok');
+      else toast('后台同步开启失败，请重试', 'warn');
     }
 
     async function onSyncNow() {
@@ -284,11 +299,14 @@ const PairDrawer = {
       scanMsg,
       hasNativeScanner: !!getNativeBarcodeScanner(),
       SCAN_DOM_ID,
+      bgAvailable,
+      bgOn,
       onStartScan,
       stopScan,
       onLater,
       onClear,
       onSyncNow,
+      onToggleBg,
     };
   },
   template: `
@@ -310,6 +328,15 @@ const PairDrawer = {
           <button type="button" class="btn ghost" v-if="scanning" @click="stopScan">停止扫码</button>
           <p class="pair-error" v-if="error" style="color:#ff8e8e;margin-top:8px">{{ error }}</p>
         </div>
+
+        <label class="sync-hint bg-sync-row" v-if="hasPair && bgAvailable">
+          <input type="checkbox" :checked="bgOn" :disabled="busy" @change="onToggleBg">
+          <span>后台同步：熄屏后约每 15 分钟自动同步一次（通知栏会显示一条常驻通知）</span>
+        </label>
+        <p class="sync-hint bg-sync-sub" v-if="hasPair && bgAvailable && bgOn">
+          长时间没同步？请在系统设置里允许本应用「自启动」，并把省电策略设为「无限制」——部分国产系统会强杀后台应用。
+        </p>
+
         <footer class="drawer-foot">
           <button type="button" class="btn ghost" :disabled="busy" @click="onSyncNow" v-if="hasPair">立即同步</button>
           <button type="button" class="btn ghost" :disabled="busy" @click="onLater">稍后离线使用</button>

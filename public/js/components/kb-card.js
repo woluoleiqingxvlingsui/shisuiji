@@ -1,15 +1,9 @@
 /* ---------------- 组件：知识库卡片 ---------------- */
-// 类别徽章 + 标题 + 内容（默认折 3 行）+ 标签 + 来源引用。桌面可编辑删除，手机只读。
+// 标题 + 内容（默认折 3 行）+ 标签 + 来源引用。桌面可编辑删除，手机只读。
 import { computed, ref, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
-import { CONFIG } from '../../config.js';
 import { canWrite } from '../perm.js';
 import { formatDate } from '../util/date.js';
-
-function categoryMeta(id) {
-  return CONFIG.kb.categories.find((c) => c.id === id)
-    || { id: 'other', label: '其他', emoji: '✨', hue: 320 };
-}
 
 const SOURCE_LABEL = { paper: '论文', site: '网页', idea: '想法', manual: '手动' };
 
@@ -18,8 +12,6 @@ const KbCard = {
   props: { entry: { type: Object, required: true } },
   emits: ['edit', 'remove'],
   setup(props, { emit }) {
-    const cat = computed(() => categoryMeta(props.entry.category));
-    const catStyle = computed(() => ({ '--h': cat.value.hue }));
     const timeText = computed(() => formatDate(props.entry.updated_at || props.entry.created_at));
     const sourceText = computed(() => {
       const s = props.entry.source;
@@ -47,7 +39,7 @@ const KbCard = {
     function toggleExpand() { expanded.value = !expanded.value; }
 
     return {
-      cat, catStyle, timeText, sourceText, writable,
+      timeText, sourceText, writable,
       expanded, contentEl, clampable, toggleExpand,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
@@ -56,7 +48,6 @@ const KbCard = {
   template: `
   <article class="card kb-card">
     <div class="card-head">
-      <span class="cat-chip" :style="catStyle">{{ cat.emoji }} {{ cat.label }}</span>
       <h3 class="title">{{ entry.title || '（没写标题）' }}</h3>
       <span class="idea-time">{{ timeText }}</span>
     </div>

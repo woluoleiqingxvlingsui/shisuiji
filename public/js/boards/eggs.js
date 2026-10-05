@@ -85,6 +85,12 @@ async function setStatus(activity, status) {
   if (!saved) return toast('更新失败', 'warn');
   toast(`已标记为「${statusMeta(status).label}」${statusMeta(status).emoji}`);
 }
+/** 已截止 → 未截止：截止日期填错了的后悔药。回「待领取」，领取截止清成「待定」待确认 */
+async function reopenActivity(activity) {
+  const saved = await patchActivity(activity, { status: 'pending', claim_deadline: '待定' });
+  if (!saved) return toast('更新失败', 'warn');
+  toast('已改回「待领取」🥚，领取截止待确认 ❓');
+}
 async function removeActivity(activity) {
   if (!confirm(`确定删除「${activity.platform} · ${activity.title}」吗？`)) return;
   const res = await api(`/api/activities/${activity.id}`, { method: 'DELETE' });
@@ -349,4 +355,4 @@ async function loadSamples() {
   toast('已填入 4 条示例数据，可随意编辑或删除 🧪');
 }
 
-export { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, setNotify, toggleNotify, checkReminders, settleRunning, settleOverdue, notifyExpired, notifyClosed, loadSamples };
+export { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, setNotify, toggleNotify, checkReminders, settleRunning, settleOverdue, notifyExpired, notifyClosed, loadSamples };
