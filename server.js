@@ -1341,6 +1341,7 @@ function addSyncReport(ctx) {
   const pushed = Math.max(0, Math.min(999, parseInt((ctx.body && ctx.body.sync_pushed) || '0', 10) || 0));
   const caughtUp = String((ctx.body && ctx.body.sync_caught_up) || '') === '1';
   const at = new Date().toISOString();
+  dbg(`[report] 收到回报:pushed=${pushed},caught_up=${caughtUp ? 1 : 0},ok=${ok ? 1 : 0}`);
   // 文案由服务端生成，不采信手机传来的 title/body
   // 「补齐」绝大多数发生在用户把 App 切回前台的那一刻,说「后台」名不副实
   // (2026-10-06 用户实测吐槽),改成不带场景的诚实文案。
@@ -1464,6 +1465,17 @@ function saveIdeas() {
 // 防抖策略在 lib/sync-debounce.js（纯函数，能脱离进程单测）
 const { SYNC_DEBOUNCE_MS, SYNC_DEBOUNCE_TICK_MS, debounceElapsed } = require('./lib/sync-debounce');
 
+// ---------- 可选调试日志:仅当环境变量 DANJI_DEBUG=1 时启用,默认零输出 ----------
+// M13 曾删过无条件埋点;2026-10-06 排查「回报丢失」时发现没有服务端日志寸步难行,
+// 改为环境变量开关:排查时 setx DANJI_DEBUG 1 并重启服务,平时保持关闭。
+const DBG_ENABLED = process.env.DANJI_DEBUG === '1';
+function dbg(line) {
+  if (!DBG_ENABLED) return;
+  require('fs').promises.appendFile(
+    require('path').join(require('os').tmpdir(), 'danji-debug.log'),
+    new Date().toISOString() + ' ' + line + '\n'
+  ).catch(() => {});
+}
 let dataVersion = 1;
 // 进程标识：版本号只在同一次进程内可比，重启后要靠它让手机重新对齐
 // （否则手机存着 47、服务端重启后说 1，「补齐」通知会静默失效几天）
@@ -1473,6 +1485,7 @@ const sseClients = new Set();           // 每个 client 就是一个挂起的 r
 const SSE_MAX_CLIENTS = 8;              // 手机 + 浏览器标签页足够了，防连接泄漏
 
 function markDataChanged() {
+  dbg('[mark] 数据有变更,防抖窗口重置');
   dataVersion += 1;
   // 每次改动都把窗口往后推：电脑端连改 10 条，安静下来 5 分钟也只推一次
   pendingSince = Date.now();
@@ -1499,6 +1512,7 @@ setInterval(() => {
   if (!debounceElapsed(pendingSince, Date.now())) return;
   const changedAt = pendingSince;
   pendingSince = 0;
+  dbg(`[broadcast] 安静窗口已满 → 广播 sync 帧,在线客户端 = ${sseClients.size}`);
   // 广播不是数据变更，**不能动 dataVersion**：它在 markDataChanged 时已经加过了。
   // 这里再 +1 的话，手机自己推一次东西 → 5 分钟后自己引发的广播又让版本变一次 →
   // 手机补拉时误判成「我落后了」，电脑端就会收到一条多余的「补齐」通知。
@@ -1513,6 +1527,7 @@ setInterval(() => {
 
 // 手机端用 fetch 流式读取（EventSource 带不了 X-Danji-Token 头），帧格式仍是标准 SSE
 route('GET', '/api/events', async (ctx) => {
+  dbg('[sse] 新 SSE 连接请求');
   const { req, res } = ctx;
   if (sseClients.size >= SSE_MAX_CLIENTS) return ctx.json({ error: '事件流连接已达上限' }, 429);
   res.writeHead(200, {
@@ -2006,6 +2021,7 @@ route('GET', '/api/images/:id', async (ctx) => {
 // ---------- 手机同步 ----------
 // pull 一次返回全部集合：手机要是发 7 个并行 GET，两个请求之间电脑端改的数据会让它拿到撕裂的快照
 route('GET', '/api/sync/pull', async (ctx) => {
+  dbg('[pull] 手机拉取全量数据');
   ctx.json({
     schema_version: SCHEMA_VERSION,
     server_time: new Date().toISOString(),
@@ -2027,6 +2043,7 @@ route('GET', '/api/sync/pull', async (ctx) => {
 
 // push 批量应用手机端的想法变更（目前只有想法能由手机写）。一次 push 只落一次盘。
 route('POST', '/api/sync/push', async (ctx) => {
+  dbg(`[push] 手机推送,操作数 = ${((ctx.body && ctx.body.ideas && ctx.body.ideas.length) || 0)}`);
   const ops = Array.isArray(ctx.body && ctx.body.ideas) ? ctx.body.ideas : [];
   const results = [];
   let changed = false;

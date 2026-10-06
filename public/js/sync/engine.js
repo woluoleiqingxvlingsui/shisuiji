@@ -10,7 +10,7 @@ import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
 import { shouldAttemptSync, pickIntervalMs, isCaughtUp, isClientOutdated } from './net.js';
-import { reportSyncSuccess } from './report.js';
+import { reportSyncSuccess, flushReports } from './report.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -494,6 +494,12 @@ async function syncNow(opts = {}) {
       return { skipped: true, reason: 'need_token' };
     }
 
+    // 推送一成功就立刻把「推来了 N 条」记进回报队列,**不等整轮跑完**:
+    // 2026-10-06 12:51 实测,推送成功后轮次在中途死掉(切后台冻结/响应超时),
+    // 挂在轮次末尾的回报整个丢失,电脑端永远收不到「手机推来了 N 条」。
+    // reportOutcomes 本身就是先入队、异步补发;轮次末尾那次回报会被 60 秒冷却合并。
+    if ((push.pushed || 0) > 0) reportSyncSuccess({ pushed: push.pushed });
+
     const pull = await pullOnce();
     if (pull && pull.needToken) {
       await reloadIdeasDisplay();
@@ -535,6 +541,10 @@ async function syncNow(opts = {}) {
       pushed: (push && push.pushed) || 0,
       caughtUp,
     });
+
+    // 每轮同步成功都顺手把回报队列里的积压补发掉:此前只有「产生新回报」才会触发
+    // 补发,卡在队列里的旧回报可能永远等不到重发机会。
+    flushReports();
 
     return { ok: true, push, pull, reason: opts.reason };
   } catch (e) {

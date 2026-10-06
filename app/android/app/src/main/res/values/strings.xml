@@ -16,4 +16,6 @@
          时间不推进 = 闹钟没响;只踢没执行 = 踢不到 JS;出现「已执行 ✅」 = 全链路通。 -->
     <string name="bg_sync_notif_tick">上次踢同步 %1$s</string>
     <string name="bg_sync_notif_tick_done">上次踢同步 %1$s，已执行 %2$s%3$s</string>
+    <!-- 精确闹钟不可用时的降级提示(折叠行),让用户一眼看出兜底可能被推迟 -->
+    <string name="bg_sync_notif_no_exact_suffix">(精确闹钟未授权,兜底可能被系统推迟)</string>
 </resources>

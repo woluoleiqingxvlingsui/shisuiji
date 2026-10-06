@@ -41,11 +41,16 @@ import java.util.Locale;
  * 定时用 AlarmManager 链式一次性闹钟而非 Handler.postDelayed:后者基于 uptimeMillis,
  * CPU 深度睡眠期间不走表,熄屏半小时可能只"过了"两分钟。
  *
+ * M15:闹钟升级为精确闹钟(setExactAndAllowWhileIdle)。非精确的
+ * setAndAllowWhileIdle 在部分 ROM 上会被无限期推迟(2026-10-06 实测 20 分钟不响)。
+ * 精确闹钟权限通过 Manifest 的 SCHEDULE_EXACT_ALARM(31/32)+ USE_EXACT_ALARM(33+)
+ * 声明即授予,无需用户操作;万一仍不可用,自动降级非精确并在常驻通知折叠行标注。
+ *
  * 类型选 specialUse 而非 dataSync:targetSdk 35 下 Android 15 给 dataSync 设了 6 小时/24 小时
  * 硬超时,到点必须 stopSelf 否则崩,与"常驻保活"语义冲突。specialUse 无此限制,代价只有
  * 上架 Google Play 需填用途声明——本 App 自签名侧载,永不上架。
  *
- * M14 新增:常驻通知的折叠行(subText)是**闹钟链路诊断窗口**——
+ * 常驻通知的折叠行(subText)是**闹钟链路诊断窗口**——
  *  - 每次闹钟触发 → 折叠行刷成「上次踢同步 HH:MM」
  *  - JS 踢完回报(reportResult)→ 刷成「上次踢同步 HH:MM,已执行 HH:MM ✅/❌」
  * 用户在通知栏看一眼即可分辨:时间不推进=闹钟没响;只踢没执行=JS 被冻结;
@@ -75,6 +80,8 @@ public class SyncForegroundService extends Service {
     static WeakReference<SyncForegroundService> selfRef = null;
 
     private long intervalMs = DEFAULT_INTERVAL_MS;
+    /** 精确闹钟是否可用:onStartCommand 里算一次,scheduleNext 与通知文案共用 */
+    private boolean exactAlarm = true;
     /** 最近一次闹钟踢同步的时刻(HH:mm)。reportResult 刷「已执行」时要带上它,
      *  两个时刻一对比就能看出 JS 是准时执行的还是被冻结后补执行的 */
     private String lastTickHm = "";
@@ -88,6 +95,7 @@ public class SyncForegroundService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent != null ? intent.getAction() : ACTION_START;
+        exactAlarm = exactAlarmAvailable();
 
         // 先解析间隔:通知文案要用它,调试时压短周期才不至于显示成 15 分钟
         if (intent != null && intent.hasExtra(EXTRA_INTERVAL_MS)) {
@@ -154,6 +162,18 @@ public class SyncForegroundService extends Service {
         return Math.max(MIN_INTERVAL_MS, Math.min(v, MAX_INTERVAL_MS));
     }
 
+    /**
+     * 精确闹钟是否可用。canScheduleExactAlarms() 是 API 31 才有的;
+     * <31 没有精确闹钟权限的概念,视为可用。声明 USE_EXACT_ALARM 后 33+ 恒为 true,
+     * 声明 SCHEDULE_EXACT_ALARM 后 31/32 默认 true——false 意味着用户/ROM 显式收走了。
+     */
+    private boolean exactAlarmAvailable() {
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am == null) return false;
+        if (Build.VERSION.SDK_INT < 31) return true;
+        return am.canScheduleExactAlarms();
+    }
+
     /** @return true 表示成功进入前台;false 表示已被拒绝并正在退场 */
     private boolean startAsForeground() {
         if (Build.VERSION.SDK_INT >= 26) {
@@ -173,10 +193,14 @@ public class SyncForegroundService extends Service {
         // 文案里不报「每 N 分钟」:同步已改为电脑端一有改动就推(服务端安静 5 分钟后发
         // sync 事件),这里的 15 分钟只是保活 + 断流兜底。报个分钟数会让人误以为同步
         // 周期由它决定,当年「拿起手机一看变成『现在』」的误解就是这么来的。
+        String sub = getString(R.string.bg_sync_notif_subtext, minutes);
+        if (!exactAlarm) {
+            sub = sub + getString(R.string.bg_sync_notif_no_exact_suffix);
+        }
         Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.bg_sync_notif_title))
             .setContentText(getString(R.string.bg_sync_notif_text))
-            .setSubText(getString(R.string.bg_sync_notif_subtext, minutes))
+            .setSubText(sub)
             .setSmallIcon(R.drawable.ic_stat_sync)
             .setContentIntent(contentIntent())
             .setOngoing(true)
@@ -255,11 +279,15 @@ public class SyncForegroundService extends Service {
         if (am == null) {
             return;
         }
-        am.setAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + delayMs,
-            tickPendingIntent()
-        );
+        long triggerAt = SystemClock.elapsedRealtime() + delayMs;
+        if (exactAlarm) {
+            // 精确闹钟:Doze 深休眠也保证在设定时刻唤醒(同应用最密 9 分钟一次,15 分钟无压力)
+            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, tickPendingIntent());
+        } else {
+            // 非精确:系统可无限期推迟——2026-10-06 实测这台手机上 20 分钟都不响,就是走的这条。
+            // 折叠行此时会带「精确闹钟未授权」后缀,用户一眼能看出为什么
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, tickPendingIntent());
+        }
     }
 
     private PendingIntent tickPendingIntent() {

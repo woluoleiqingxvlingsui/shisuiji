@@ -65,14 +65,18 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
 }
 
 /**
- * 尽力把队列里的结论发给电脑。逐条发，失败就留着下次再试（队首失败即停，
- * 免得电脑刚恢复就被一串陈旧结论刷屏）。
- * @returns {Promise<{ sent: number, left: number }>}
+ * 尽力把队列里的结论发给电脑。逐条独立处理:
+ *  - 成功 → 出队,继续下一条;
+ *  - 服务端明确拒收(4xx,除 401/429 外)→ 视为毒丸,丢弃该条、继续发后面的
+ *    (否则一条坏数据把队首选死,后面的永远发不出去);
+ *  - 401(口令)/ 429(限流)/ 5xx(服务端临时故障)/ 网络错误、超时 → 保留,下次再试。
+ * @returns {Promise<{ sent: number, dropped: number, left: number }>}
  */
 async function flushReports() {
   let list = readPending();
-  if (!list.length) return { sent: 0, left: 0 };
+  if (!list.length) return { sent: 0, dropped: 0, left: 0 };
   let sent = 0;
+  let dropped = 0;
   while (list.length) {
     const one = list[0];
     try {
@@ -81,15 +85,21 @@ async function flushReports() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(one),
       });
-      if (!res.ok) break; // 电脑还不可达 / 被拒：留在队列里等下一轮
+      if (res.ok) {
+        list = list.slice(1);
+        sent += 1;
+        writePending(list);
+        continue;
+      }
+      if (res.status === 401 || res.status === 429 || res.status >= 500) break; // 值得等下次
+      list = list.slice(1);   // 其余 4xx:服务端永远不会收这条,留着只会堵死后面的
+      dropped += 1;
+      writePending(list);
     } catch {
-      break; // 网络错误同上
+      break; // 网络错误 / 超时:留着下次再试
     }
-    list = list.slice(1);
-    sent += 1;
-    writePending(list);
   }
-  return { sent, left: list.length };
+  return { sent, dropped, left: list.length };
 }
 
 function pendingReportCount() {
@@ -98,54 +108,41 @@ function pendingReportCount() {
 
 /* ---------------- 手机端：成功回报（唯一入口） ---------------- */
 
-/** 成功回报的合并窗口：连着记三条随记，电脑端只响一次 */
+/** 成功回报的合并窗口:连着记三条随记,电脑端只响一次 */
 const SUCCESS_COOLDOWN_MS = 60 * 1000;
-let lastSuccessAt = 0;
+let lastSuccessAt = 0;   // 上一次成功回报(任意种类)
+let lastPushedAt = 0;    // 上一次「推来了 N 条」回报(用户动作的直接回执)
 
 /**
- * 这一轮同步成功，要不要回报电脑端？**纯函数**：不读时钟、不碰状态，
- * 时间与上次时间都由调用方给进来 —— 测试才能连着断言很多次而不会被冷却干扰。
+ * 这一轮同步成功,要不要回报电脑端?**纯函数**:时间与上次时间都由调用方给进来。
  *
- * 两个条件都要满足：
- *  1. 这一轮**真的有事发生**。空跑（打开 App 看了眼、定时器转了一圈、
- *     推了自己刚写的东西）一律不报，否则光是定时轮询就能把电脑端刷爆。
- *  2. 距离上一次成功回报超过冷却窗口，否则连着改 3 条会响 3 回。
+ * 冷却分槽(2026-10-06 实测):「推来了 N 条」只被上一条「推来了」冷却,
+ * **不被「已补齐」冷却**——否则进前台补齐后的第一条随记回执会悄无声息。
+ * 「已补齐」仍被任意成功回报冷却(它是低频兜底,防刷屏方向不变)。
  *
- * @param {{ pushed?: number, caughtUp?: boolean, now?: number, lastAt?: number }} o
+ * @param {{ pushed?: number, caughtUp?: boolean, now?: number, lastAt?: number, lastPushedAt?: number }} o
  * @returns {boolean}
  */
-function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), lastAt = 0 } = {}) {
+function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), lastAt = 0, lastPushedAt = 0 } = {}) {
   const n = Math.max(0, pushed | 0);
-  // 只有两种情况值得打扰电脑端：
-  //   1) 这轮真的把本机改动推上去了（用户在手机上记了东西）
-  //   2) 服务端版本变了且这轮补齐了（睡着期间电脑端改过）
-  // **不再用 fromEvent 触发**：它由任何 sync 帧置位，包括手机自己那次写入引发的广播，
-  // 和「补齐」不是独立信号；拿它当触发条件只会多出一条「什么都没发生」的噪音通知。
+  // 三样都没有 = 这一轮什么都没发生(打开 App 看了眼、定时器空转…),不必打扰
   if (n === 0 && !caughtUp) return false;
-  if (now - lastAt < SUCCESS_COOLDOWN_MS) return false;
-  return true;
+  if (n > 0) return now - lastPushedAt >= SUCCESS_COOLDOWN_MS;
+  return now - lastAt >= SUCCESS_COOLDOWN_MS;
 }
 
 /**
  * 同步成功后回报电脑端 —— **成功回报的唯一入口**。
- *
- * 以前这件事只写在 push.js 的 drain() 里，而 syncNow() 有十三处调用
- * （init / local-write / manual / visibility / interval / bg-tick…）全都绕开它，
- * 于是「手机同步成功了」这件事永远到不了电脑端 —— data/messages.json 里
- * bg-sync 一直是 0 条就是这么来的。
- * 现在下沉到 engine.syncNow()，无论从哪条路进来都会经过这里。
- *
  * @param {{ pushed?: number, caughtUp?: boolean }} info
- *   pushed>0    这轮真的把本机改动推上去了（用户在手机上记了东西）
- *   caughtUp    发现服务端版本上升且这轮补齐了，说明睡着期间电脑端改过
- * @returns {boolean} 该不该发（真正的发送交给 reportOutcomes → flushReports 异步去做）
+ * @returns {boolean} 该不该发(真正的发送交给 reportOutcomes → flushReports 异步去做)
  */
 function reportSyncSuccess({ pushed = 0, caughtUp = false } = {}) {
   const now = Date.now();
-  if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt })) return false;
+  if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt, lastPushedAt })) return false;
   lastSuccessAt = now;
-  // 发报本身是异步的（flushReports 自己吞异常），这里只回答「该不该报」，
-  // 所以不等它 —— 同步流程是主线程路径，不该被一次网络往返挂住。
+  if ((pushed | 0) > 0) lastPushedAt = now;
+  // 发报本身是异步的(flushReports 自己吞异常),这里只回答「该不该报」,
+  // 所以不等它 —— 同步流程是主线程路径,不该被一次网络往返挂住。
   reportOutcomes({ ok: true, pushed, caughtUp });
   return true;
 }

@@ -147,11 +147,47 @@ await okAsync('队首失败就停下：避免电脑一恢复就被陈旧结论�
   assert.equal(r.left, 2);
 });
 
+await okAsync('毒丸：服务端明确拒收（4xx）的条目丢弃，后面的继续发（不再队首堵死）', async () => {
+  reset();
+  store.set(PENDING_KEY, JSON.stringify([
+    { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'bad' },
+    { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: '' },
+  ]));
+  posted = [];
+  let call = 0;
+  globalThis.__setApi(() => { call += 1; return call === 1 ? { ok: false, status: 403 } : { ok: true, status: 201 }; });
+  const r = await flushReports();
+  assert.equal(posted.length, 2, '两条都要尝试');
+  assert.equal(r.sent, 1, '第二条送达');
+  assert.equal(r.dropped, 1, '第一条按毒丸丢弃');
+  assert.equal(r.left, 0);
+});
+
+await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
+  reset();
+  store.set(PENDING_KEY, JSON.stringify([
+    { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: '' },
+    { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'x' },
+  ]));
+  posted = [];
+  globalThis.__setApi(() => ({ ok: false, status: 401 }));
+  let r = await flushReports();
+  assert.equal(r.left, 2, '401 口令问题:保留等下次');
+  assert.equal(r.dropped, 0);
+
+  reset();
+  store.set(PENDING_KEY, JSON.stringify([{ kind: 'bg-sync', sync_ok: '1' }]));
+  globalThis.__setApi(() => ({ throw: 'timeout' }));
+  r = await flushReports();
+  assert.equal(r.left, 1, '网络错:保留');
+  assert.equal(r.dropped, 0);
+});
+
 console.log('队列上限与字段清洗');
 
 await okAsync('队列封顶，长期连不上也不会无限膨胀', async () => {
   reset();
-  globalThis.__setApi(() => ({ ok: false }));
+  globalThis.__setApi(() => ({ ok: false, status: 500 }));
   for (let i = 0; i < PENDING_MAX + 8; i++) {
     await reportOutcomes({ ok: false, attempts: i, reason: 'x' });
   }
@@ -239,10 +275,28 @@ await okAsync('60 秒内的连续成功合并成一条（连记三条随记不�
   assert.equal(posted.length, 0);
   // 冷却本身用纯函数钉死（时间由调用方给，能反复断言而互不干扰）
   const t0 = 1_000_000;
-  assert.equal(shouldReportSuccess({ pushed: 1, now: t0, lastAt: 0 }), true, '第一次必报');
-  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + 1, lastAt: t0 }), false, '刚报过就再报：吞');
-  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS - 1, lastAt: t0 }), false, '差 1 毫秒仍在窗口内');
-  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS, lastAt: t0 }), true, '满 60 秒才放行');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0, lastAt: 0, lastPushedAt: 0 }), true, '第一次必报');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + 1, lastAt: t0, lastPushedAt: t0 }), false, '刚报过就再报：吞');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS - 1, lastAt: t0, lastPushedAt: t0 }), false, '差 1 毫秒仍在窗口内');
+  assert.equal(shouldReportSuccess({ pushed: 1, now: t0 + SUCCESS_COOLDOWN_MS, lastAt: t0, lastPushedAt: t0 }), true, '满 60 秒才放行');
+});
+
+await okAsync('「已补齐」不冷却「推来了」：进前台补齐后马上记随记，回执照样要报（2026-10-06 实测被吞）', async () => {
+  const t0 = 2_000_000;
+  assert.equal(
+    shouldReportSuccess({ pushed: 1, now: t0, lastAt: t0 - 5000, lastPushedAt: 0 }),
+    true,
+    '5 秒前刚报过「已补齐」，随记回执不许被它吞掉'
+  );
+});
+
+await okAsync('「推来了」之后 60 秒内的「已补齐」仍被吞（防刷屏方向不变）', async () => {
+  const t0 = 3_000_000;
+  assert.equal(
+    shouldReportSuccess({ caughtUp: true, now: t0 + 5000, lastAt: t0, lastPushedAt: t0 }),
+    false,
+    '刚推送过一次（lastAt 已随推送刷新），60 秒内的补齐不再单独报'
+  );
 });
 
 await okAsync('字段清洗：sync_pushed 夹到 0~999，缺省为 0', async () => {

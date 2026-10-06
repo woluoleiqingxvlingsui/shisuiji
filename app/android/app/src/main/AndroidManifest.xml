@@ -61,4 +61,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- API 33+ 运行时权限。只影响那条常驻通知可不可见，不影响服务能否运行 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 精确闹钟(M15):缺陷A——非精确闹钟(setAndAllowWhileIdle)在部分 ROM 上会被
+         无限期推迟,2026-10-06 实测 20 分钟不响。SCHEDULE_EXACT_ALARM 管 Android 12/12L
+         (API 31/32,声明即默认授予),USE_EXACT_ALARM 管 Android 13+(API 33+,声明即自动
+         授予);两者都无需用户手动授权。本 App 永不上架,无 Play 政策顾虑。 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 </manifest>
