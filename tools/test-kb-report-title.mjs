@@ -98,8 +98,14 @@ try {
   ok('推了几条被记进消息（sync_pushed 落库）', pushed.sync_pushed === '3', String(pushed.sync_pushed));
 
   const caught = await report({ sync_caught_up: '1' });
-  ok('补齐了更新 → 「手机已补齐电脑端的更新 ✅」', caught.title === '手机已补齐电脑端的更新 ✅', caught.title);
+  ok('补齐了更新、没说场景 → 「手机在前台补齐了电脑端的更新 ✅」（缺省按前台，兼容老客户端）',
+    caught.title === '手机在前台补齐了电脑端的更新 ✅', caught.title);
   ok('补齐标记被记进消息（sync_caught_up 落库）', caught.sync_caught_up === '1', String(caught.sync_caught_up));
+
+  const caughtBg = await report({ sync_caught_up: '1', sync_background: '1' });
+  ok('后台补齐 → 「手机在后台补齐了电脑端的更新 ✅」',
+    caughtBg.title === '手机在后台补齐了电脑端的更新 ✅', caughtBg.title);
+  ok('场景标记被记进消息（sync_background 落库）', caughtBg.sync_background === '1', String(caughtBg.sync_background));
 
   const plain = await report({});
   ok('老客户端（不带新字段）→ 仍是「手机已同步 ✅」', plain.title === '手机已同步 ✅', plain.title);

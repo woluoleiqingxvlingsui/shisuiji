@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Added
+- **WebView 渲染进程后台保活(缺陷 A 最后一块)**:MainActivity 对 WebView 调 `setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANCE, false)`。默认策略是「页面不可见即降级」,渲染进程随后被系统冻结:2026-10-06 17:43 实测 15 分钟精确闹钟已能准时响(原生链路通),但 `evaluateJavascript` 踢不到冻结的渲染进程,后台 JS(SSE 处理 / 3 分钟兜底轮询 / 闹钟踢同步)全部停摆。渲染进程常驻后,后台同步整条链路真正可用
+- 补齐通知区分场景:手机上报 `sync_background`,标题分为「手机在前台补齐了电脑端的更新 ✅」/「手机在后台补齐了电脑端的更新 ✅」(老客户端不带该字段,缺省按前台,兼容不变)
 - **精确闹钟兜底(缺陷 A 第一步)**:声明 `SCHEDULE_EXACT_ALARM`(Android 12/12L,声明即授予)与 `USE_EXACT_ALARM`(Android 13+,声明即自动授予),15 分钟兜底闹钟改用 `setExactAndAllowWhileIdle`——非精确闹钟在这台手机上实测 20 分钟都不响。万一仍不可用,自动降级并在常驻通知折叠行标注「精确闹钟未授权」
 - 服务端可选调试日志:环境变量 `DANJI_DEBUG=1` 时把 [mark]/[broadcast]/[sse]/[pull]/[push]/[report] 写进 `%TEMP%\danji-debug.log`,默认零输出
 - 前台服务常驻通知的折叠行变成「闹钟链路诊断窗口」:闹钟每次踢同步刷成「上次踢同步 HH:MM」,JS 执行完回报后刷成「上次踢同步 HH:MM,已执行 HH:MM ✅/❌」——手机放后台 15 分钟后看一眼通知,即可分辨 闹钟没响 / 踢不到 JS / 全链路通 三种情况(缺陷 A 排查用)

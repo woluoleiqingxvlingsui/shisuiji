@@ -211,6 +211,15 @@ await okAsync('attempts 夹到 0~99，reason 截断到 120 字', async () => {
   assert.equal(last.sync_reason, '');
 });
 
+await okAsync('sync_background 落库：缺省 0，传 true 为 1（前台/后台文案靠它）', async () => {
+  reset();
+  globalThis.__setApi(() => ({ ok: false, status: 500 }));  // 发不出去才留在队列里供检查
+  await reportOutcomes({ ok: true, caughtUp: true });
+  assert.equal(readQ().at(-1).sync_background, '0', '缺省必须是 0（= 前台）');
+  await reportOutcomes({ ok: true, caughtUp: true, background: true });
+  assert.equal(readQ().at(-1).sync_background, '1');
+});
+
 await okAsync('本地存储被写坏：当作空队列，不炸', async () => {
   reset();
   store.set(PENDING_KEY, '{ 这不是 JSON');

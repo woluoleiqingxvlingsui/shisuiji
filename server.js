@@ -1340,6 +1340,7 @@ function addSyncReport(ctx) {
   const reason = String((ctx.body && ctx.body.sync_reason) || '').slice(0, SYNC_REASON_MAX);
   const pushed = Math.max(0, Math.min(999, parseInt((ctx.body && ctx.body.sync_pushed) || '0', 10) || 0));
   const caughtUp = String((ctx.body && ctx.body.sync_caught_up) || '') === '1';
+  const background = String((ctx.body && ctx.body.sync_background) || '') === '1';
   const at = new Date().toISOString();
   dbg(`[report] 收到回报:pushed=${pushed},caught_up=${caughtUp ? 1 : 0},ok=${ok ? 1 : 0}`);
   // 文案由服务端生成，不采信手机传来的 title/body
@@ -1348,7 +1349,9 @@ function addSyncReport(ctx) {
   const title = ok
     ? (pushed > 0
       ? `手机推来了 ${pushed} 条改动 ✅`
-      : (caughtUp ? '手机已补齐电脑端的更新 ✅' : '手机已同步 ✅'))
+      : (caughtUp
+        ? (background ? '手机在后台补齐了电脑端的更新 ✅' : '手机在前台补齐了电脑端的更新 ✅')
+        : '手机已同步 ✅'))
     : '手机同步失败 ❌';
   // 时间给人看:北京时间,不再显示 UTC(用户曾因 UTC 时间困惑过一轮排查)
   const body = ok
@@ -1368,6 +1371,7 @@ function addSyncReport(ctx) {
     sync_reason: reason,
     sync_pushed: String(pushed),
     sync_caught_up: caughtUp ? '1' : '0',
+    sync_background: background ? '1' : '0',
     read: false,
     created_at: at,
   };

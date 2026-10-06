@@ -49,7 +49,7 @@ function writePending(list) {
  * 直接发等于白丢。真正的发送交给 flushReports，由同步流程每轮捎带。
  * @param {{ ok: boolean, reason?: string, attempts?: number, pushed?: number, caughtUp?: boolean }} o
  */
-function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false }) {
+function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false, background = false }) {
   const list = readPending();
   list.push({
     sync_ok: ok ? '1' : '0',
@@ -57,6 +57,7 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
     sync_reason: String(reason || '').slice(0, 120),
     sync_pushed: String(Math.max(0, Math.min(999, pushed | 0))),
     sync_caught_up: caughtUp ? '1' : '0',
+    sync_background: background ? '1' : '0',
     kind: 'bg-sync',
     queued_at: new Date().toISOString(),
   });
@@ -136,14 +137,14 @@ function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), l
  * @param {{ pushed?: number, caughtUp?: boolean }} info
  * @returns {boolean} 该不该发(真正的发送交给 reportOutcomes → flushReports 异步去做)
  */
-function reportSyncSuccess({ pushed = 0, caughtUp = false } = {}) {
+function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } = {}) {
   const now = Date.now();
   if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt, lastPushedAt })) return false;
   lastSuccessAt = now;
   if ((pushed | 0) > 0) lastPushedAt = now;
   // 发报本身是异步的(flushReports 自己吞异常),这里只回答「该不该报」,
   // 所以不等它 —— 同步流程是主线程路径,不该被一次网络往返挂住。
-  reportOutcomes({ ok: true, pushed, caughtUp });
+  reportOutcomes({ ok: true, pushed, caughtUp, background });
   return true;
 }
 

@@ -482,6 +482,8 @@ async function syncNow(opts = {}) {
   // 同步开始前先记住上次的版本号与进程标识，pull 回来一比就知道这轮有没有落后
   const prevVersion = readStoredVersion();
   const prevBoot = readStoredBootId();
+  // 顺便记下这轮开始时是否在后台:补齐文案要区分「前台补齐」/「后台补齐」(M16)
+  const wasHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
   try {
     if (!getToken() && state.sync.needToken) {
       setStatus('need_token');
@@ -498,7 +500,7 @@ async function syncNow(opts = {}) {
     // 2026-10-06 12:51 实测,推送成功后轮次在中途死掉(切后台冻结/响应超时),
     // 挂在轮次末尾的回报整个丢失,电脑端永远收不到「手机推来了 N 条」。
     // reportOutcomes 本身就是先入队、异步补发;轮次末尾那次回报会被 60 秒冷却合并。
-    if ((push.pushed || 0) > 0) reportSyncSuccess({ pushed: push.pushed });
+    if ((push.pushed || 0) > 0) reportSyncSuccess({ pushed: push.pushed, background: wasHidden });
 
     const pull = await pullOnce();
     if (pull && pull.needToken) {
@@ -540,6 +542,7 @@ async function syncNow(opts = {}) {
     reportSyncSuccess({
       pushed: (push && push.pushed) || 0,
       caughtUp,
+      background: wasHidden,
     });
 
     // 每轮同步成功都顺手把回报队列里的积压补发掉:此前只有「产生新回报」才会触发
