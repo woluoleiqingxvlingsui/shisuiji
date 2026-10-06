@@ -2,7 +2,6 @@ package app.shisuiji.danji;
 
 import android.os.Build;
 import android.os.Bundle;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
@@ -26,7 +25,7 @@ public class MainActivity extends BridgeActivity {
         // bridge 为 null,也要防住。
         if (Build.VERSION.SDK_INT >= 29 && bridge != null && bridge.getWebView() != null) {
             bridge.getWebView().setRendererPriorityPolicy(
-                WebSettings.RendererPriority.RENDERER_PRIORITY_IMPORTANCE, false);
+                WebView.RENDERER_PRIORITY_IMPORTANT, false);
         }
     }
 }
