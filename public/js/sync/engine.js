@@ -308,10 +308,13 @@ function unbindListeners() {
 
 function onVisibility() {
   if (!syncEnabled()) return;
+  // 前台/后台切换会改变「该不该信任推送」的判断,轮询节奏必须跟着重估。
+  // 否则推送连着时 interval 已被关成 0,退后台后兜底轮询永远不会启动。
+  rearmInterval();
   if (document.visibilityState === 'visible') {
     syncNow({ reason: 'visibility' });
   } else if ((state.sync.pendingCount || 0) > 0) {
-    // 退到后台的瞬间尽力把待发队列推出去：进程随时可能被冻结
+    // 退到后台的瞬间尽力把待发队列推出去:进程随时可能被冻结
     syncNow({ reason: 'hidden-flush' });
   }
 }
@@ -330,8 +333,11 @@ function stopInterval() {
 }
 
 function startInterval() {
-  // 推送连着就不轮询，完全靠服务端广播；断开了才退回慢速兜底
-  const want = pickIntervalMs(state.sync.pendingCount || 0, !!(state.sync && state.sync.pushLive));
+  // 前台:推送连着就不轮询,完全靠服务端广播;断开了才退回慢速兜底。
+  // 后台:不信任 pushLive —— WebView 冻结/断流时它仍是 true(假象),
+  // 而后台兜底轮询是冻结之外所有场景的生命线,必须保留(见 docs/m14-bg-sync-recovery.md)。
+  const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  const want = pickIntervalMs(state.sync.pendingCount || 0, !!(state.sync && state.sync.pushLive), hidden);
   if (intervalTimer && intervalMs === want) return;
   stopInterval();
   intervalMs = want;

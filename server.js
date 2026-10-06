@@ -1330,6 +1330,10 @@ const SYNC_REPORT_MAX = 30;
 /** 失败原因截断：手机传的是错误串，不限长的话能把整条消息撑成一大坨 */
 const SYNC_REASON_MAX = 120;
 
+/** 报文里的时间给人看:转成北京时间 HH:MM(自托管,机器在国内时区,不求通用) */
+function beijingHHMM(iso) {
+  return new Date(new Date(iso).getTime() + 8 * 3600 * 1000).toISOString().slice(11, 16);
+}
 function addSyncReport(ctx) {
   const ok = String((ctx.body && ctx.body.sync_ok) || '') === '1';
   const attempts = Math.max(0, Math.min(99, parseInt((ctx.body && ctx.body.sync_attempts) || '0', 10) || 0));
@@ -1338,13 +1342,16 @@ function addSyncReport(ctx) {
   const caughtUp = String((ctx.body && ctx.body.sync_caught_up) || '') === '1';
   const at = new Date().toISOString();
   // 文案由服务端生成，不采信手机传来的 title/body
+  // 「补齐」绝大多数发生在用户把 App 切回前台的那一刻,说「后台」名不副实
+  // (2026-10-06 用户实测吐槽),改成不带场景的诚实文案。
   const title = ok
     ? (pushed > 0
       ? `手机推来了 ${pushed} 条改动 ✅`
-      : (caughtUp ? '手机补齐了后台的更新 ✅' : '手机已同步 ✅'))
+      : (caughtUp ? '手机已补齐电脑端的更新 ✅' : '手机已同步 ✅'))
     : '手机同步失败 ❌';
+  // 时间给人看:北京时间,不再显示 UTC(用户曾因 UTC 时间困惑过一轮排查)
   const body = ok
-    ? `手机在 ${at.slice(11, 16)} UTC 把电脑端的更新拉下来了`
+    ? `手机在 ${beijingHHMM(at)} 把电脑端的更新拉下来了`
     : `重试 ${attempts} 次仍未成功${reason ? `：${reason}` : ''}`;
   const msg = {
     id: crypto.randomUUID(),

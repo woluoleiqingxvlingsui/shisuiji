@@ -3,7 +3,7 @@
  * 用法：node tools/test-kb-report-title.mjs
  *
  * 为什么要有这个：文案是**服务端生成**的（不采信手机传来的 title/body），
- * 「手机推来了 3 条改动」「手机补齐了后台的更新」都取决于手机传上来的新字段，
+ * 「手机推来了 3 条改动」「手机已补齐电脑端的更新」都取决于手机传上来的新字段，
  * 字段名拼错或类型不对，手机端就改了代码也永远只看到旧文案。
  * data_version 同理：手机靠它发现「我睡着的这段时间电脑端改过东西」，
  * 服务端漏了这个字段，手机的补齐回报就永远不会触发。
@@ -98,7 +98,7 @@ try {
   ok('推了几条被记进消息（sync_pushed 落库）', pushed.sync_pushed === '3', String(pushed.sync_pushed));
 
   const caught = await report({ sync_caught_up: '1' });
-  ok('补齐了后台更新 → 「手机补齐了后台的更新 ✅」', caught.title === '手机补齐了后台的更新 ✅', caught.title);
+  ok('补齐了更新 → 「手机已补齐电脑端的更新 ✅」', caught.title === '手机已补齐电脑端的更新 ✅', caught.title);
   ok('补齐标记被记进消息（sync_caught_up 落库）', caught.sync_caught_up === '1', String(caught.sync_caught_up));
 
   const plain = await report({});

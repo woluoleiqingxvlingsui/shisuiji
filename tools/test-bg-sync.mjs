@@ -186,18 +186,28 @@ ok('可覆盖安静窗口长度（便于将来调参而不必改逻辑）', () =
   assert.equal(debounceElapsed(t0, t0 + 90 * 1000, 90 * 1000), true);
 });
 
-console.log('pickIntervalMs（推送连着就别轮询）');
+console.log('pickIntervalMs（三态：只有前台才信任推送连接）');
 
-ok('有待推送数据：8 秒快轮询（往上传，优先级最高，与推送无关）', () => {
-  assert.equal(pickIntervalMs(2, true), SYNC_INTERVAL_BUSY_MS);
-  assert.equal(pickIntervalMs(2, false), SYNC_INTERVAL_BUSY_MS);
+ok('有待推送数据：8 秒快轮询（往上传，优先级最高，与前后台无关）', () => {
+  assert.equal(pickIntervalMs(2, true, false), SYNC_INTERVAL_BUSY_MS);
+  assert.equal(pickIntervalMs(2, true, true), SYNC_INTERVAL_BUSY_MS);
+  assert.equal(pickIntervalMs(2, false, false), SYNC_INTERVAL_BUSY_MS);
 });
 
-ok('推送连着 + 没待推送：返回 0，完全不轮询', () => {
+ok('前台 + 推送连着 + 没待推送：返回 0，完全不轮询', () => {
+  assert.equal(pickIntervalMs(0, true, false), 0);
+});
+
+ok('前台 + 推送断了 + 没待推送：退回慢速兜底', () => {
+  assert.equal(pickIntervalMs(0, false, false), SYNC_INTERVAL_FALLBACK_MS);
+});
+
+ok('后台 + 推送“连着”：不许返回 0 —— 冻结时 pushLive 是假象，后台必须保留兜底轮询（2026-10-06 回归钉子）', () => {
+  assert.equal(pickIntervalMs(0, true, true), SYNC_INTERVAL_FALLBACK_MS);
+});
+
+ok('缺省第三参（老调用方）：按前台处理，行为与旧版一致', () => {
   assert.equal(pickIntervalMs(0, true), 0);
-});
-
-ok('推送断了 + 没待推送：退回慢速兜底', () => {
   assert.equal(pickIntervalMs(0, false), SYNC_INTERVAL_FALLBACK_MS);
 });
 

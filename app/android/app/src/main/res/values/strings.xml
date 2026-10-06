@@ -11,4 +11,9 @@
     <string name="bg_sync_notif_text">电脑端有改动就自动同步</string>
     <!-- 折叠行才显示：把「兜底闹钟周期」和「同步触发条件」分开讲，免得混为一谈 -->
     <string name="bg_sync_notif_subtext">兜底保活每 %1$d 分钟一次</string>
+    <!-- 诊断窗口(缺陷A排查):折叠行从「兜底周期」逐步切换成「上次踢同步状态」。
+         手机放后台 15 分钟后看一眼通知栏即可分辨:
+         时间不推进 = 闹钟没响;只踢没执行 = 踢不到 JS;出现「已执行 ✅」 = 全链路通。 -->
+    <string name="bg_sync_notif_tick">上次踢同步 %1$s</string>
+    <string name="bg_sync_notif_tick_done">上次踢同步 %1$s，已执行 %2$s%3$s</string>
 </resources>

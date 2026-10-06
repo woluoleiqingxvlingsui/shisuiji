@@ -94,19 +94,26 @@ function nextSyncRetry(attempts) {
 }
 
 /**
- * 璇ヤ互浠€涔堣妭濂忚疆璇€?
- * pendingCount>0  鏈夊緟鎺ㄩ€佹暟鎹?鈫?8 绉掑揩杞銆傝繖鏄?*寰€涓婁紶**鏈湴鏀瑰姩锛屼紭鍏堢骇鏈€楂橈紝
- *                 涓庢帹閫佸箍鎾棤鍏筹紝蹇呴』淇濈暀銆?
- * pushConnected   SSE 鎺ㄩ€佽繛鐫€ 鈫?0锛堜笉杞锛夈€傛湇鍔＄鏈潵灏变細骞挎挱锛?
- *                 鍐嶈嚜宸辨瘡鍒嗛挓鍏ㄩ噺鎷変竴閬嶇函灞炴氮璐圭數鍜屾祦閲忋€?
- * 鍚﹀垯            鎺ㄩ€佹柇浜?鈫?3 鍒嗛挓鎱㈤€熷厹搴曪紝涓嶈嚦浜庡交搴曠瀻鎺夈€?
+ * 该以什么节奏轮询。
+ * pendingCount>0  有待推送数据 → 8 秒快轮询。这是**往上传**本地改动,优先级最高,
+ *                 与推送广播无关,必须保留。
+ * 前台 + pushConnected
+ *                 SSE 推送连着 → 0(不轮询)。前台页面活着,服务端广播一定收得到。
+ * 其他一切情况    → 3 分钟慢速兜底。
+ *                 关键:**只有前台才信任推送连接**。手机退后台后 WebView JS 冻结,
+ *                 SSE 断流也无人察觉,此时 pushConnected 仍是 true(假象)——
+ *                 若后台也信它,后台就彻底不轮询,后台同步名存实亡
+ *                 (2026-10-06 实测回归,见 docs/m14-bg-sync-recovery.md 第 0 节)。
+ *                 JS 真被冻结时定时器本来就不跑,这条兜底零成本;JS 没被冻结时,
+ *                 它就是后台同步的生命线。
  * @param {number} pendingCount
  * @param {boolean} pushConnected
- * @returns {number} 姣锛? 琛ㄧず鍏虫帀杞
+ * @param {boolean} documentHidden 页面是否在后台(document.visibilityState === 'hidden')
+ * @returns {number} 毫秒;0 表示关掉轮询
  */
-function pickIntervalMs(pendingCount, pushConnected) {
+function pickIntervalMs(pendingCount, pushConnected, documentHidden = false) {
   if (pendingCount > 0) return SYNC_INTERVAL_BUSY_MS;
-  if (pushConnected) return 0;
+  if (!documentHidden && pushConnected) return 0;
   return SYNC_INTERVAL_FALLBACK_MS;
 }
 
