@@ -1281,8 +1281,16 @@ async function saveMessagesNow() {
   await fsp.writeFile(tmp, JSON.stringify(messageDb, null, 2), 'utf8');
   await fsp.rename(tmp, MESSAGES_FILE);
 }
+// M17:消息(含 bg-sync 回报、已读标记、清空、蛋到期消息)的落盘**不再走 queueWrite**——
+// queueWrite 会顺手 markDataChanged,而 dataVersion 是手机判断「电脑端改过数据」的唯一信号。
+// 2026-10-06 实测:每条回报落盘都把版本 +1,手机下一轮 pull 误判「又落后了」再发一条回报,
+// 版本再 +1……「回报→版本+1→误判→再回报」自激励循环,电脑端被「手机已补齐」刷屏。
+// 消息不是同步数据,永远不该推动版本号。独立的串行队列只保证写盘不并发,版本号碰都不碰。
+let messageIoQueue = Promise.resolve();
 function saveMessages() {
-  return queueWrite(saveMessagesNow);
+  const run = messageIoQueue.then(saveMessagesNow, saveMessagesNow);
+  messageIoQueue = run.catch(() => {});
+  return run;
 }
 
 function normalizeMessage(input, existing = {}) {
@@ -1342,6 +1350,13 @@ function addSyncReport(ctx) {
   const caughtUp = String((ctx.body && ctx.body.sync_caught_up) || '') === '1';
   const background = String((ctx.body && ctx.body.sync_background) || '') === '1';
   const at = new Date().toISOString();
+  // M17:同一条回报(sync_rid 相同)重发只算一条——手机端 flush 去重 + 网络层重试
+  // 都可能把同一份报文送来两次,消息中心不该出现一对双胞胎
+  const rid = String((ctx.body && ctx.body.sync_rid) || '').slice(0, 64);
+  if (rid) {
+    const dup = messageDb.messages.find((m) => m.kind === 'bg-sync' && m.sync_rid === rid);
+    if (dup) return ctx.json(dup, 200);
+  }
   dbg(`[report] 收到回报:pushed=${pushed},caught_up=${caughtUp ? 1 : 0},ok=${ok ? 1 : 0}`);
   // 文案由服务端生成，不采信手机传来的 title/body
   // 「补齐」绝大多数发生在用户把 App 切回前台的那一刻,说「后台」名不副实
@@ -1372,6 +1387,7 @@ function addSyncReport(ctx) {
     sync_pushed: String(pushed),
     sync_caught_up: caughtUp ? '1' : '0',
     sync_background: background ? '1' : '0',
+    sync_rid: rid,
     read: false,
     created_at: at,
   };
@@ -1524,8 +1540,17 @@ setInterval(() => {
 }, SYNC_DEBOUNCE_TICK_MS);
 
 // 心跳：空注释行只保活不触发客户端逻辑；移动网络/NAT 会掐静默连接，25 秒一口氣
+// M17:顺手把「写不进去的僵尸连接」请出去——后台 WebView 冻结后它那条 SSE 变成
+// 半开连接,内核发送缓冲越积越多,却一直占着 SSE_MAX_CLIENTS 的名额
 setInterval(() => {
   if (!sseClients.size) return;
+  for (const res of [...sseClients]) {
+    const sock = res.socket;
+    if (sock && typeof sock.writableLength === 'number' && sock.writableLength > 64 * 1024) {
+      sseClients.delete(res);
+      try { res.end(); } catch { /* ignore */ }
+    }
+  }
   broadcastFrame(`: hb ${Date.now()}\n\n`);
 }, 25 * 1000);
 

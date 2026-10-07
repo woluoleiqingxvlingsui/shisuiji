@@ -86,8 +86,16 @@ async function okAsync(name, fn) {
     process.exitCode = 1;
   }
 }
+// ---- M17 假时钟(2026-10-07 裁定):冷却读 Date.now(),夹具接管,被测代码零改动 ----
+// reset() 刻意不推进时钟——既有用例「60 秒内的连续成功合并成一条」依赖
+// 『上一条 reportSyncSuccess 刚成功过』;只在需要跨冷却的新用例内显式推进。
+let fakeNow = 1_700_000_000_000;
+Date.now = () => fakeNow;
 const readQ = () => JSON.parse(store.get(PENDING_KEY) || '[]');
-function reset() {
+async function reset() {
+  // 先等在途 flush 落地(flushing 守卫会复用它),再清场——
+  // 否则上一条用例 fire-and-forget 的 flush 会泄漏到下一条用例(2026-10-07 实测)
+  try { await flushReports(); } catch { /* 队列可能被上一条用例写坏,下面兜底清掉 */ }
   store.delete(PENDING_KEY);
   posted = [];
   nextResult = () => ({ ok: true });
@@ -96,7 +104,7 @@ function reset() {
 console.log('回报队列（发不出去才是常态，绝不能丢）');
 
 await okAsync('成功：立刻送达并清空队列', async () => {
-  reset();
+  await reset();
   await reportOutcomes({ ok: true, attempts: 0 });
   assert.equal(pendingReportCount(), 0, '队列应清空');
   assert.equal(posted.length, 1);
@@ -105,7 +113,7 @@ await okAsync('成功：立刻送达并清空队列', async () => {
 });
 
 await okAsync('失败：留在队列里等下一轮补报', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: false, status: 500 }));
   await reportOutcomes({ ok: false, attempts: 3, reason: 'timeout' });
   assert.equal(pendingReportCount(), 1, '发不出去必须留着');
@@ -113,14 +121,14 @@ await okAsync('失败：留在队列里等下一轮补报', async () => {
 });
 
 await okAsync('网络异常：同样留在队列里', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ throw: 'network down' }));
   await reportOutcomes({ ok: false, attempts: 1, reason: 'offline' });
   assert.equal(pendingReportCount(), 1);
 });
 
 await okAsync('补报：网络恢复后把欠的都送出去', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ throw: 'down' }));
   await reportOutcomes({ ok: false, attempts: 1, reason: 'a' });
   await reportOutcomes({ ok: false, attempts: 2, reason: 'b' });
@@ -134,7 +142,7 @@ await okAsync('补报：网络恢复后把欠的都送出去', async () => {
 });
 
 await okAsync('队首失败就停下：避免电脑一恢复就被陈旧结论刷屏', async () => {
-  reset();
+  await reset();
   store.set(PENDING_KEY, JSON.stringify([
     { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'x' },
     { kind: 'bg-sync', sync_ok: '0', sync_attempts: '2', sync_reason: 'y' },
@@ -148,7 +156,7 @@ await okAsync('队首失败就停下：避免电脑一恢复就被陈旧结论�
 });
 
 await okAsync('毒丸：服务端明确拒收（4xx）的条目丢弃，后面的继续发（不再队首堵死）', async () => {
-  reset();
+  await reset();
   store.set(PENDING_KEY, JSON.stringify([
     { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'bad' },
     { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: '' },
@@ -164,7 +172,7 @@ await okAsync('毒丸：服务端明确拒收（4xx）的条目丢弃，后面�
 });
 
 await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
-  reset();
+  await reset();
   store.set(PENDING_KEY, JSON.stringify([
     { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: '' },
     { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'x' },
@@ -175,7 +183,7 @@ await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
   assert.equal(r.left, 2, '401 口令问题:保留等下次');
   assert.equal(r.dropped, 0);
 
-  reset();
+  await reset();
   store.set(PENDING_KEY, JSON.stringify([{ kind: 'bg-sync', sync_ok: '1' }]));
   globalThis.__setApi(() => ({ throw: 'timeout' }));
   r = await flushReports();
@@ -186,7 +194,7 @@ await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
 console.log('队列上限与字段清洗');
 
 await okAsync('队列封顶，长期连不上也不会无限膨胀', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: false, status: 500 }));
   for (let i = 0; i < PENDING_MAX + 8; i++) {
     await reportOutcomes({ ok: false, attempts: i, reason: 'x' });
@@ -195,7 +203,7 @@ await okAsync('队列封顶，长期连不上也不会无限膨胀', async () =>
 });
 
 await okAsync('attempts 夹到 0~99，reason 截断到 120 字', async () => {
-  reset();
+  await reset();
   // 让发送失败，条目才会留在队列里供检查
   globalThis.__setApi(() => ({ ok: false, status: 500 }));
   await reportOutcomes({ ok: false, attempts: -5, reason: 'r'.repeat(500) });
@@ -212,7 +220,7 @@ await okAsync('attempts 夹到 0~99，reason 截断到 120 字', async () => {
 });
 
 await okAsync('sync_background 落库：缺省 0，传 true 为 1（前台/后台文案靠它）', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: false, status: 500 }));  // 发不出去才留在队列里供检查
   await reportOutcomes({ ok: true, caughtUp: true });
   assert.equal(readQ().at(-1).sync_background, '0', '缺省必须是 0（= 前台）');
@@ -220,8 +228,46 @@ await okAsync('sync_background 落库：缺省 0，传 true 为 1（前台/后�
   assert.equal(readQ().at(-1).sync_background, '1');
 });
 
+await okAsync('M17 原生壳：后台补齐让位给原生（JS 不再报 caughtUp）', async () => {
+  await reset();
+  globalThis.window.Capacitor = { Plugins: { BackgroundSync: {} } };
+  try {
+    const sent = reportSyncSuccess({ pushed: 0, caughtUp: true, background: true });
+    assert.equal(sent, false, '原生在场时后台补齐不该由 JS 报');
+    assert.equal(posted.length, 0);
+    const sent2 = reportSyncSuccess({ pushed: 2, caughtUp: true, background: true });
+    assert.equal(sent2, true, '推条回执不受压制');
+    assert.equal(posted[0].body.sync_caught_up, '0', '压制只针对 caughtUp 字段');
+    assert.equal(posted[0].body.sync_pushed, '2');
+  } finally { delete globalThis.window.Capacitor; }
+});
+
+await okAsync('M17 原生壳：前台补齐仍由 JS 报（原生在页面可见时不跑）', async () => {
+  await reset();
+  fakeNow += 61_000;   // 跨出第 1 段成功回报的 60 秒冷却(夹具假时钟,见文件头)
+  globalThis.window.Capacitor = { Plugins: { BackgroundSync: {} } };
+  try {
+    const sent = reportSyncSuccess({ pushed: 0, caughtUp: true, background: false });
+    assert.equal(sent, true);
+    assert.equal(posted[0].body.sync_caught_up, '1');
+  } finally { delete globalThis.window.Capacitor; }
+});
+
+await okAsync('M17 flush 并发共用同一次：同一轮只发一遍', async () => {
+  await reset();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  globalThis.__setApi(() => gate.then(() => ({ ok: true, status: 201 })));
+  const pA = reportOutcomes({ ok: true, caughtUp: true });  // 内部触发的 flush 挂在闸门上
+  const pB = flushReports();                                 // 与 A 并发:有守卫时复用 A
+  release();
+  await Promise.all([pA, pB]);
+  const posts = posted.filter((x) => x.url.includes('/api/messages'));
+  assert.equal(posts.length, 1, `并发 flush 不得重复发送,实际 ${posts.length}`);
+});
+
 await okAsync('本地存储被写坏：当作空队列，不炸', async () => {
-  reset();
+  await reset();
   store.set(PENDING_KEY, '{ 这不是 JSON');
   assert.equal(pendingReportCount(), 0);
   const r = await flushReports();
@@ -229,7 +275,7 @@ await okAsync('本地存储被写坏：当作空队列，不炸', async () => {
 });
 
 await okAsync('队列不是数组：同样当空', async () => {
-  reset();
+  await reset();
   store.set(PENDING_KEY, '"字符串"');
   assert.equal(pendingReportCount(), 0);
 });
@@ -237,7 +283,7 @@ await okAsync('队列不是数组：同样当空', async () => {
 console.log('成功回报的唯一入口（回归：以前只有 push 那条路会报）');
 
 await okAsync('pushed>0：无论从哪条路进来都会回报电脑端', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: true }));
   const r = reportSyncSuccess({ pushed: 3 });
   assert.equal(r, true, '真的推了东西上去就必须回报');
@@ -247,14 +293,14 @@ await okAsync('pushed>0：无论从哪条路进来都会回报电脑端', async 
 });
 
 await okAsync('空跑一轮（pushed=0、无补齐）：不回报', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: true }));
   assert.equal(reportSyncSuccess({ pushed: 0, caughtUp: false }), false);
   assert.equal(posted.length, 0);
 });
 
 await okAsync('caughtUp：电脑端推来的变更被拉下来时报一次', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: true }));
   // 判定只看 caughtUp（服务端版本上升 = 真的落后过），不看 fromEvent
   assert.equal(shouldReportSuccess({ caughtUp: true, now: 10_000_000, lastAt: 0 }), true);
@@ -278,7 +324,7 @@ await okAsync('不传 now 时用真实时间，而不是恒定判成「冷却中
 
 await okAsync('60 秒内的连续成功合并成一条（连记三条随记不该响三回）', async () => {
   // 上一条已经报过一次，冷却期内再报必须被吞掉
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: true }));
   assert.equal(reportSyncSuccess({ pushed: 1 }), false, '冷却期内应被吞掉');
   assert.equal(posted.length, 0);
@@ -309,7 +355,7 @@ await okAsync('「推来了」之后 60 秒内的「已补齐」仍被吞（防�
 });
 
 await okAsync('字段清洗：sync_pushed 夹到 0~999，缺省为 0', async () => {
-  reset();
+  await reset();
   globalThis.__setApi(() => ({ ok: false, status: 500 }));  // 发不出去才留在队列里供检查
   await reportOutcomes({ ok: true, pushed: -8 });
   assert.equal(readQ().at(-1).sync_pushed, '0');

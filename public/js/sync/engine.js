@@ -50,6 +50,15 @@ function writeStoredVersion(v, bootId) {
   } catch { /* 隐私模式忽略 */ }
 }
 
+/** M17:告诉原生「JS 已经拉到这个版本」——原生据此不把手机自己的推送误报成
+ * 「电脑端更新」。fire-and-forget,浏览器里是 no-op。 */
+function noteNativeSynced(version, bootId) {
+  try {
+    const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
+    if (p && p.noteSynced) Promise.resolve(p.noteSynced({ version, bootId })).catch(() => {});
+  } catch { /* 桥不可用忽略 */ }
+}
+
 let syncing = false;
 let started = false;
 let intervalTimer = null;
@@ -480,8 +489,24 @@ async function syncNow(opts = {}) {
   syncing = true;
   setStatus('syncing');
   // 同步开始前先记住上次的版本号与进程标识，pull 回来一比就知道这轮有没有落后
-  const prevVersion = readStoredVersion();
-  const prevBoot = readStoredBootId();
+  let prevVersion = readStoredVersion();
+  let prevBoot = readStoredBootId();
+  // M17:原生后台同步可能已经拉过更新的版本(账本在原生 SharedPreferences 里)。
+  // 先对账:否则「打开 App」时 JS 会把原生刚补齐过的改动当成新落后,
+  // 又报一次「前台补齐」,电脑端一条改动收到两条通知。
+  try {
+    const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
+    if (p && p.getSyncedVersion) {
+      const nv = await p.getSyncedVersion();
+      const nvV = Number(nv && nv.version) || 0;
+      const nvB = String((nv && nv.bootId) || '');
+      if (nvV > prevVersion) {
+        writeStoredVersion(nvV, nvB);
+        prevVersion = nvV;
+        prevBoot = nvB;
+      }
+    }
+  } catch { /* 桥不可用(浏览器)按本地账本走 */ }
   // 顺便记下这轮开始时是否在后台:补齐文案要区分「前台补齐」/「后台补齐」(M16)
   const wasHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
   try {
@@ -534,6 +559,7 @@ async function syncNow(opts = {}) {
 
     // 只有真的成功了才记版本：失败时数据没拿到，记了就等于假装自己是最新的
     if (serverVersion) writeStoredVersion(serverVersion, serverBoot);
+    if (serverVersion) noteNativeSynced(serverVersion, serverBoot);
 
     // 同步成功 → 回报电脑端。**这是成功回报的唯一出口**：
     // 以前它挂在 push.js 的 drain() 上，而 syncNow() 十三处调用全都绕开它。

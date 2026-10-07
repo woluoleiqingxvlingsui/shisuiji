@@ -11,6 +11,7 @@
  */
 
 import { isNativePlatform } from '../pwa.js';
+import { getToken, getServerBase } from '../api.js';
 import { isPaired } from '../pair.js';
 import { shouldRunBackgroundService } from './net.js';
 import { startPushListener, stopPushListener, ensurePushConnected, requestSync } from './push.js';
@@ -85,7 +86,8 @@ async function refreshBackgroundService() {
       paired: isPaired(),
     });
     try {
-      if (want) await plugin.start({});
+      // M17:把配对凭据交给原生——之后原生 SSE/同步轮不再依赖 WebView 是否活着
+      if (want) await plugin.start({ token: getToken() || '', baseUrl: getServerBase() || '' });
       else await plugin.stop();
     } catch (e) {
       console.warn('[shisuiji] 后台同步服务开关失败', e);

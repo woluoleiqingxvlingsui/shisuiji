@@ -5,6 +5,9 @@
 ## [Unreleased]
 
 ### Added
+- **原生 SSE 推送 + 原生补齐回报(后台同步换轨)**:前台服务内置原生 SSE 线程(HttpURLConnection,零依赖)直连 /api/events,电脑端一广播 sync 就在原生侧拉全量并回报「后台补齐」——后台同步不再依赖后台 WebView JS(实测后台定时器/SSE 全部停摆,只有闹钟踢的一脚能活)。页面可见时原生让位给 JS(前台补齐),两端凭 noteSynced/getSyncedVersion 对账,一条改动只响一次。兜底闹钟 15→5 分钟
+- **斩断回报自激励循环**:消息落盘(回报/已读/清空)不再推 dataVersion——此前每条回报都让版本 +1,手机下一轮 pull 误判「又落后」再回报,电脑端被「手机已补齐」刷屏(2026-10-06 服务端日志实锤)。回报条目带 sync_rid,同一条重发只落一条消息;手机端 flush 并发共用同一次,消灭成对回报
+- 聚合窗口 5 分钟 → 60 秒:原生秒级通道之下,防抖成了延迟大头;60 秒仍能把连改多条聚合成一次同步
 - **WebView 渲染进程后台保活(缺陷 A 最后一块)**:MainActivity 对 WebView 调 `setRendererPriorityPolicy(RENDERER_PRIORITY_IMPORTANCE, false)`。默认策略是「页面不可见即降级」,渲染进程随后被系统冻结:2026-10-06 17:43 实测 15 分钟精确闹钟已能准时响(原生链路通),但 `evaluateJavascript` 踢不到冻结的渲染进程,后台 JS(SSE 处理 / 3 分钟兜底轮询 / 闹钟踢同步)全部停摆。渲染进程常驻后,后台同步整条链路真正可用
 - 补齐通知区分场景:手机上报 `sync_background`,标题分为「手机在前台补齐了电脑端的更新 ✅」/「手机在后台补齐了电脑端的更新 ✅」(老客户端不带该字段,缺省按前台,兼容不变)
 - **精确闹钟兜底(缺陷 A 第一步)**:声明 `SCHEDULE_EXACT_ALARM`(Android 12/12L,声明即授予)与 `USE_EXACT_ALARM`(Android 13+,声明即自动授予),15 分钟兜底闹钟改用 `setExactAndAllowWhileIdle`——非精确闹钟在这台手机上实测 20 分钟都不响。万一仍不可用,自动降级并在常驻通知折叠行标注「精确闹钟未授权」

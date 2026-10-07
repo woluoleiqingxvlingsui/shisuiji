@@ -140,10 +140,10 @@ ok('attempts 为 0 / 非法值：静默继续等', () => {
   assert.equal(nextSyncRetry(undefined).notify, false);
 });
 
-console.log('debounceElapsed（最后一次改动后 5 分钟才推）');
+console.log('debounceElapsed（最后一次改动后 60 秒才推）');
 
-ok('窗口就是 5 分钟', () => {
-  assert.equal(SYNC_DEBOUNCE_MS, 5 * 60 * 1000);
+ok('窗口就是 60 秒', () => {
+  assert.equal(SYNC_DEBOUNCE_MS, 60 * 1000);
 });
 
 ok('没有待推送的改动：不推', () => {
@@ -151,30 +151,30 @@ ok('没有待推送的改动：不推', () => {
   assert.equal(debounceElapsed(undefined, 1e12), false);
 });
 
-ok('刚改完 1 秒：还没到 5 分钟，不推', () => {
+ok('刚改完 1 秒：还没满窗口，不推', () => {
   const t0 = 1_000_000;
   assert.equal(debounceElapsed(t0, t0 + 1000), false);
 });
 
-ok('改完 4 分 59 秒：还差 1 秒，不推', () => {
+ok('改完 59 秒：还差 1 秒，不推', () => {
   const t0 = 1_000_000;
   assert.equal(debounceElapsed(t0, t0 + SYNC_DEBOUNCE_MS - 1), false);
 });
 
-ok('改完正好 5 分钟：推', () => {
+ok('改完正好 60 秒：推', () => {
   const t0 = 1_000_000;
   assert.equal(debounceElapsed(t0, t0 + SYNC_DEBOUNCE_MS), true);
 });
 
-ok('连改 10 条（每次都顺延窗口）：只有最后一条安静满 5 分钟才推', () => {
+ok('连改 10 条（每次都顺延窗口）：只有最后一条安静满 60 秒才推', () => {
   const t0 = 1_000_000;
   let pendingAt = 0;
-  // 模拟每 30 秒改一次，持续 5 分钟
+  // 模拟每 30 秒改一次,连续 11 次,窗口每次顺延
   for (let i = 0; i <= 10; i++) {
     pendingAt = t0 + i * 30 * 1000;          // markDataChanged：每次刷新窗口
     assert.equal(debounceElapsed(pendingAt, pendingAt), false, `第 ${i} 次改动当下不该推`);
   }
-  // 最后一次改动后 5 分钟：推
+  // 最后一次改动后满窗口:推
   assert.equal(debounceElapsed(pendingAt, pendingAt + SYNC_DEBOUNCE_MS), true);
   // 推完之后 pendingSince 归零，不会连着推
   assert.equal(debounceElapsed(0, pendingAt + SYNC_DEBOUNCE_MS + 1), false);

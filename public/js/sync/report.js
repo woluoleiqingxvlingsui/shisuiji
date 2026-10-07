@@ -28,6 +28,24 @@ const RECONNECT_DELAY_MS = 5 * 1000;
 const HEARTBEAT_TIMEOUT_MS = 3 * 60 * 1000;
 const WATCHDOG_TICK_MS = 60 * 1000;
 
+/** 当前是否跑在带 BackgroundSync 插件的原生壳里(新 APK)。浏览器/旧 APK 为 false */
+function nativePluginPresent() {
+  try {
+    return !!(typeof window !== 'undefined' && window.Capacitor
+      && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync);
+  } catch {
+    return false;
+  }
+}
+
+/** 回报条目的去重 id:服务端按它还旧账,本机队列按它精确出队 */
+function newRid() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  } catch { /* fallthrough */ }
+  return 'rid-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
+
 /* ---------------- 手机端：排队 + 补报 ---------------- */
 
 function readPending() {
@@ -59,6 +77,7 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
     sync_caught_up: caughtUp ? '1' : '0',
     sync_background: background ? '1' : '0',
     kind: 'bg-sync',
+    rid: newRid(),
     queued_at: new Date().toISOString(),
   });
   writePending(list);
@@ -73,13 +92,32 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
  *  - 401(口令)/ 429(限流)/ 5xx(服务端临时故障)/ 网络错误、超时 → 保留,下次再试。
  * @returns {Promise<{ sent: number, dropped: number, left: number }>}
  */
+/** 正在进行的 flush;并发调用共用同一次,防止「同一条回报发两遍」
+ *  (2026-10-06 实测成对回报:reportOutcomes 内部与 syncNow 末尾各触发一次 flush) */
+let flushing = null;
+
 async function flushReports() {
-  let list = readPending();
-  if (!list.length) return { sent: 0, dropped: 0, left: 0 };
+  if (flushing) return flushing;
+  flushing = doFlushReports();
+  try {
+    return await flushing;
+  } finally {
+    flushing = null;
+  }
+}
+
+async function doFlushReports() {
   let sent = 0;
   let dropped = 0;
-  while (list.length) {
+  for (;;) {
+    const list = readPending();
+    if (!list.length) return { sent, dropped, left: 0 };
     const one = list[0];
+    if (!one.rid) {
+      // 升级前留下的老条目没有 rid:补一个再发,后续按 rid 精确出队
+      one.rid = newRid();
+      writePending(list);
+    }
     try {
       const res = await api('/api/messages', {
         method: 'POST',
@@ -87,20 +125,21 @@ async function flushReports() {
         body: JSON.stringify(one),
       });
       if (res.ok) {
-        list = list.slice(1);
+        // 重新读一遍再按 rid 删:期间 reportOutcomes 可能刚插了新条目,不能整队列覆盖
+        writePending(readPending().filter((x) => x.rid !== one.rid));
         sent += 1;
-        writePending(list);
         continue;
       }
-      if (res.status === 401 || res.status === 429 || res.status >= 500) break; // 值得等下次
-      list = list.slice(1);   // 其余 4xx:服务端永远不会收这条,留着只会堵死后面的
+      if (res.status === 401 || res.status === 429 || res.status >= 500) {
+        return { sent, dropped, left: list.length }; // 值得等下次
+      }
+      // 其余 4xx:服务端永远不会收这条,按毒丸丢弃
+      writePending(readPending().filter((x) => x.rid !== one.rid));
       dropped += 1;
-      writePending(list);
     } catch {
-      break; // 网络错误 / 超时:留着下次再试
+      return { sent, dropped, left: list.length }; // 网络错误 / 超时:留着下次再试
     }
   }
-  return { sent, dropped, left: list.length };
 }
 
 function pendingReportCount() {
@@ -138,6 +177,10 @@ function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), l
  * @returns {boolean} 该不该发(真正的发送交给 reportOutcomes → flushReports 异步去做)
  */
 function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } = {}) {
+  // M17:原生壳里「后台补齐」由 SyncForegroundService 自己拉取+回报(见 docs/m17),
+  // JS 的后台轮次不再报 caughtUp——否则两端各报一次,电脑端一条改动收到两条通知。
+  // 只压 caughtUp 字段:pushed>0 的「推来了 N 条」回执照发(原生无从得知手机推了什么)。
+  if (caughtUp && background && nativePluginPresent()) caughtUp = false;
   const now = Date.now();
   if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt, lastPushedAt })) return false;
   lastSuccessAt = now;

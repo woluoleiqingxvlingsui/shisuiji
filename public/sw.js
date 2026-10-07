@@ -10,7 +10,7 @@
  *
  * 改了缓存策略或预缓存清单就把 VERSION +1，activate 会清掉所有旧缓存。
  */
-const VERSION = 'p12-v6';
+const VERSION = 'p12-v7';
 const STATIC_CACHE = `danji-static-${VERSION}`;
 const NAV_CACHE = `danji-nav-${VERSION}`;
 const OFFLINE_URL = '/index.html';

@@ -18,4 +18,8 @@
     <string name="bg_sync_notif_tick_done">上次踢同步 %1$s，已执行 %2$s%3$s</string>
     <!-- 精确闹钟不可用时的降级提示(折叠行),让用户一眼看出兜底可能被推迟 -->
     <string name="bg_sync_notif_no_exact_suffix">(精确闹钟未授权,兜底可能被系统推迟)</string>
+    <!-- M17:原生 SSE 推送通道连上时的折叠行提示 -->
+    <string name="bg_sync_notif_sse">推送已连接 %1$s</string>
+    <!-- M17:原生同步轮真正拉取+回报成功后的折叠行提示 -->
+    <string name="bg_sync_notif_synced">上次同步 %1$s ✅</string>
 </resources>
