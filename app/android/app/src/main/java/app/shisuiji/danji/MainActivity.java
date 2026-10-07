@@ -24,7 +24,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         // M17:前台/后台是「回报归属权」的开关——前台归 JS(前台补齐),
         // 后台归原生(后台补齐)。onResume 在 plugin.start 之前就会跑到,顺序天然正确。
@@ -32,7 +32,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onPause() {
+    public void onPause() {
         super.onPause();
         SyncForegroundService.pageVisible = false;
     }

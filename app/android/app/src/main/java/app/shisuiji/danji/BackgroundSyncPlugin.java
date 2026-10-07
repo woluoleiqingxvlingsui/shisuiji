@@ -1,6 +1,7 @@
 package app.shisuiji.danji;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -149,10 +150,15 @@ public class BackgroundSyncPlugin extends Plugin {
         call.resolve();
     }
 
-    /** PluginCall 里的数字可能是 Integer/Long/Double,统一走 Number 取 long,别硬转型 */
+    /** PluginCall 里的数字可能是 Integer/Long/Double,统一走 Number 取 long,别硬转型;
+     *  JSONObject.get 抛受检异常 JSONException,必须就地捕获 */
     private static long longArg(PluginCall call, String name) {
-        Object raw = call.getData().get(name);
-        return raw instanceof Number ? ((Number) raw).longValue() : 0L;
+        try {
+            Object raw = call.getData().get(name);
+            return raw instanceof Number ? ((Number) raw).longValue() : 0L;
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     /** POST_NOTIFICATIONS 只影响常驻通知可见性;fire-and-forget,不阻塞 */
