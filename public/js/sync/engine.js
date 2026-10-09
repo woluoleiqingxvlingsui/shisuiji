@@ -10,7 +10,8 @@ import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
 import { shouldAttemptSync, pickIntervalMs, isCaughtUp, isClientOutdated } from './net.js';
-import { reportSyncSuccess, flushReports } from './report.js';
+import { reportSyncSuccess, flushReports, purgeFailedReports } from './report.js';
+import { shouldApplySnapshot } from './snapshot.js';
 import { idbAvailable } from './idb.js';
 import {
   readCollection,
@@ -48,6 +49,36 @@ function writeStoredVersion(v, bootId) {
     localStorage.setItem(VERSION_KEY, String(v));
     localStorage.setItem(BOOT_KEY, String(bootId || ''));
   } catch { /* 隐私模式忽略 */ }
+}
+
+/** M18:读原生后台同步落盘的离线快照,判定后灌进镜像。
+ *  场景:电脑端改了内容 → 手机在后台被原生 SSE 秒级补齐(数据只落在原生快照文件,
+ *  WebView 镜像没动) → 用户此刻断网打开 App:不灌快照看到的就是旧镜像。
+ *  灌完同时把版本记进 JS 账本并 noteSynced 给原生,三本账(原生/JS/镜像)对齐,
+ *  之后联网同步不会把这次补齐误判成又一次「落后」而重复回报。
+ *  @returns {Promise<boolean>} true 表示镜像被更新过(调用方应刷新显示) */
+async function importNativeSnapshot() {
+  try {
+    const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
+    if (!p || !p.readSnapshot) return false;
+    const snap = await p.readSnapshot();
+    const raw = String((snap && snap.data) || '');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    const snapVersion = Number(parsed.data_version) || 0;
+    const snapBoot = String(parsed.boot_id || '');
+    if (!shouldApplySnapshot({
+      storedVersion: readStoredVersion(),
+      storedBootId: readStoredBootId(),
+      snapVersion,
+      snapBootId: snapBoot,
+    })) return false;
+    await writeMirror(parsed);
+    writeStoredVersion(snapVersion, snapBoot);
+    noteNativeSynced(snapVersion, snapBoot);
+    return true;
+  } catch { /* 桥不可用/快照损坏:按本地镜像走,绝不向上抛 */ }
+  return false;
 }
 
 /** M17:告诉原生「JS 已经拉到这个版本」——原生据此不把手机自己的推送误报成
@@ -195,6 +226,9 @@ async function initSync() {
     startInterval();
     tryPersistStorage();
     await refreshPendingCount();
+    // M18:离线启动的关键一步——原生后台同步可能已把新数据拉进快照文件,
+    // 先灌进镜像再刷显示;断网打开 App 也能看到电脑端的最新改动
+    await importNativeSnapshot();
     await reloadIdeasDisplay();
     // 后台探测可达性，成功则立刻同步并通知根应用补拉板块
     detectRole().then(async ({ needToken, reachable, minClient }) => {
@@ -321,7 +355,12 @@ function onVisibility() {
   // 否则推送连着时 interval 已被关成 0,退后台后兜底轮询永远不会启动。
   rearmInterval();
   if (document.visibilityState === 'visible') {
-    syncNow({ reason: 'visibility' });
+    // M18:先灌原生快照(后台期间原生可能已补齐,断网时 syncNow 会跳过,
+    // 但快照已让镜像保持新鲜),再跑在线同步
+    importNativeSnapshot()
+      .then((applied) => (applied ? reloadIdeasDisplay() : null))
+      .catch(() => {})
+      .finally(() => syncNow({ reason: 'visibility' }));
   } else if ((state.sync.pendingCount || 0) > 0) {
     // 退到后台的瞬间尽力把待发队列推出去:进程随时可能被冻结
     syncNow({ reason: 'hidden-flush' });
@@ -571,8 +610,9 @@ async function syncNow(opts = {}) {
       background: wasHidden,
     });
 
-    // 每轮同步成功都顺手把回报队列里的积压补发掉:此前只有「产生新回报」才会触发
-    // 补发,卡在队列里的旧回报可能永远等不到重发机会。
+    // M18:先清掉积压的失败回报——同步都成功了,那些「连不上」的旧闻发出去只会
+    // 制造「明明恢复了却收到失败」的矛盾(2026-10-08 实测),然后把其余回报补发掉。
+    purgeFailedReports();
     flushReports();
 
     return { ok: true, push, pull, reason: opts.reason };

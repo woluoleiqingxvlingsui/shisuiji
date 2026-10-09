@@ -10,7 +10,7 @@
  *
  * 改了缓存策略或预缓存清单就把 VERSION +1，activate 会清掉所有旧缓存。
  */
-const VERSION = 'p12-v7';
+const VERSION = 'p12-v8';
 const STATIC_CACHE = `danji-static-${VERSION}`;
 const NAV_CACHE = `danji-nav-${VERSION}`;
 const OFFLINE_URL = '/index.html';
@@ -22,13 +22,13 @@ self.addEventListener('install', (event) => {
     const cache = await caches.open(NAV_CACHE);
     await cache.add(new Request(OFFLINE_URL, { cache: 'reload' }));
     // 常用静态一并预缓存，冷启动更快。
-    // notify.js 与 sync/report.js 必须在内：它们分别是 messages.js 和 push.js 的顶层依赖，
-    // 离线冷启动时没进缓存会直接 404 → 整个 App 起不来（不只是通知功能坏掉）。
+    // sync/report.js 必须在内：它是 push.js 的顶层依赖，
+    // 离线冷启动时没进缓存会直接 404 → 整个 App 起不来（不只是同步功能坏掉）。
+    // （M18 前 notify.js 也在内——它是 messages.js 的顶层依赖；该文件已删除。）
     const sw = await caches.open(STATIC_CACHE);
     await Promise.allSettled([
       sw.add(new Request('/style.css', { cache: 'reload' })),
       sw.add(new Request('/js/app.js', { cache: 'reload' })),
-      sw.add(new Request('/js/notify.js', { cache: 'reload' })),
       sw.add(new Request('/js/sync/report.js', { cache: 'reload' })),
       sw.add(new Request('/manifest.webmanifest', { cache: 'reload' })),
     ]);

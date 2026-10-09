@@ -19,6 +19,10 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.lang.ref.WeakReference;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 暴露给 JS 的后台同步开关(window.Capacitor.Plugins.BackgroundSync)。
@@ -134,6 +138,32 @@ public class BackgroundSyncPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("version", sp.getLong("lastVersion", 0));
         ret.put("bootId", sp.getString("lastBoot", ""));
+        call.resolve(ret);
+    }
+
+    /** M18:读原生后台同步落盘的离线快照(整个 /api/sync/pull 响应体,JSON 字符串)。
+     *  没有快照 / 读取失败 → data 为空串,JS 侧按「无快照」处理,绝不 reject。 */
+    @PluginMethod
+    public void readSnapshot(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("data", "");
+        try {
+            File f = new File(getContext().getFilesDir(), SyncForegroundService.SNAPSHOT_FILE);
+            if (f.exists()) {
+                FileInputStream fis = new FileInputStream(f);
+                try {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = fis.read(buf)) != -1) bos.write(buf, 0, n);
+                    ret.put("data", new String(bos.toByteArray(), StandardCharsets.UTF_8));
+                } finally {
+                    fis.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(SyncForegroundService.TAG, "readSnapshot failed", e);
+        }
         call.resolve(ret);
     }
 

@@ -188,41 +188,12 @@ function gotoActivity(id) {
   if (!state.activities.some((a) => a.id === id)) return toast('这条消息对应的蛋已经删掉了', 'warn');
   jumpTo(id);
 }
-function setNotify(on) {
-  state.notifyOn = on;
-  localStorage.setItem('danji.notifyOn', on ? '1' : '0');
-}
-async function toggleNotify() {
-  if (typeof Notification === 'undefined') return toast('此浏览器不支持桌面通知', 'warn');
-  if (state.notifPermission === 'denied') {
-    return toast('通知被浏览器拒绝了，可在地址栏权限里重新允许', 'warn');
-  }
-  if (state.notifPermission !== 'granted') {
-    const perm = await Notification.requestPermission();
-    state.notifPermission = perm;
-    if (perm !== 'granted') {
-      return toast(perm === 'denied' ? '通知被浏览器拒绝了，可在地址栏权限里重新允许' : '没有授权，随时点铃铛再试', 'warn');
-    }
-    setNotify(true);
-    toast(`桌面通知已开启 🔔（${CONFIG.remind.hours} 小时内到期的蛋会提醒你）`);
-    checkReminders();
-    return;
-  }
-  // 已授权：铃铛就是真开关
-  if (state.notifyOn) {
-    setNotify(false);
-    toast('已关闭桌面通知 🔕，到期不再弹提醒，点铃铛可重新打开');
-  } else {
-    setNotify(true);
-    toast(`已开启桌面通知 🔔（${CONFIG.remind.hours} 小时内到期的蛋会提醒你）`);
-    checkReminders();
-  }
-}
 function checkReminders() {
   // 仅电脑端跑到期提醒：手机时钟/权限不同，且会干扰服务端状态机
   if (state.role !== 'desktop') return;
-  if (!state.notifyOn) return; // 用户关掉了提醒开关
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  // M18:Windows 系统通知已拆除,到期提醒改弹应用内醒目 toast(report 样式 + 8 秒)。
+  // 「已提醒过」去重(notifiedKeys,localStorage 持久化)原样保留;
+  // 过期/截止的确定性记录由 pushExpiredMessage / pushClosedMessage 负责进消息中心。
   const now = Date.now();
   for (const a of state.activities) {
     const urg = computeUrgency(a, now);
@@ -231,11 +202,13 @@ function checkReminders() {
     if (notifiedKeys.has(key)) continue;
     rememberNotified(key);
     const isClaim = a.status === 'pending';
-    const n = new Notification(`${isClaim ? '🥚 蛋快不能领了' : '⏳ 领到的蛋快过期了'} · ${a.platform}`, {
-      body: `${a.title}\n${urg.label} ${formatDate(a.claim_deadline || a.valid_until)}，${formatRemaining(urg.remainingMs)}`,
-      tag: a.id,
-    });
-    n.onclick = () => { window.focus(); jumpTo(a.id); n.close(); };
+    // 8 秒时长 + report 强调样式:这是到期前的提醒,必须显眼
+    toast(
+      `${isClaim ? '🥚 蛋快不能领了' : '⏳ 领到的蛋快过期了'} · ${a.platform}「${a.title}」`
+      + ` ${formatDate(a.claim_deadline || a.valid_until)}，${formatRemaining(urg.remainingMs)}`,
+      'report',
+      { duration: 8000 }
+    );
   }
 }
 let settleRunning = false;
@@ -280,35 +253,11 @@ async function settleOverdue() {
     }
     if (!parts.length) return;
     toast(parts.join('；'), 'warn');
-    for (const a of closed) { notifyClosed(a); pushClosedMessage(a); }
-    for (const a of expired) { notifyExpired(a); pushExpiredMessage(a); }
+    for (const a of closed) { pushClosedMessage(a); }
+    for (const a of expired) { pushExpiredMessage(a); }
   } finally {
     settleRunning = false;
   }
-}
-function notifyExpired(activity) {
-  if (!state.notifyOn) return;
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  const key = `expired|${activity.id}|${activity.valid_until}`;
-  if (notifiedKeys.has(key)) return;
-  rememberNotified(key);
-  const n = new Notification(`💤 蛋过期了 · ${activity.platform}`, {
-    body: `${activity.title}\n使用截止 ${formatDate(activity.valid_until)} 已过，已移入「已过期」`,
-    tag: activity.id,
-  });
-  n.onclick = () => { window.focus(); jumpTo(activity.id); n.close(); };
-}
-function notifyClosed(activity) {
-  if (!state.notifyOn) return;
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-  const key = `closed|${activity.id}|${activity.claim_deadline}`;
-  if (notifiedKeys.has(key)) return;
-  rememberNotified(key);
-  const n = new Notification(`⏳ 蛋已截止 · ${activity.platform}`, {
-    body: `${activity.title}\n领取截止 ${formatDate(activity.claim_deadline)} 已过，已移入「已截止」`,
-    tag: activity.id,
-  });
-  n.onclick = () => { window.focus(); jumpTo(activity.id); n.close(); };
 }
 async function loadSamples() {
   if (state.role !== 'desktop') return toast('手机端不能写入示例数据', 'warn');
@@ -355,4 +304,4 @@ async function loadSamples() {
   toast('已填入 4 条示例数据，可随意编辑或删除 🧪');
 }
 
-export { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, setNotify, toggleNotify, checkReminders, settleRunning, settleOverdue, notifyExpired, notifyClosed, loadSamples };
+export { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, checkReminders, settleRunning, settleOverdue, loadSamples };

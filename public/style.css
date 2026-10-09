@@ -968,6 +968,14 @@ input, select, textarea { font: inherit; color: inherit; }
   max-width: min(92vw, 680px); text-align: center; line-height: 1.5;
 }
 .toast.warn { background: var(--red); color: #fff; }
+/* M18:重要提醒(同步回报 / 蛋到期)——比普通 toast 更大更醒目,调用方配更长时长 */
+.toast.report {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  font-size: 14px;
+  padding: 12px 22px;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
+}
 .toast-enter-active, .toast-leave-active { transition: all .2s ease; }
 .toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 

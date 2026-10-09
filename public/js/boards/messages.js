@@ -1,4 +1,4 @@
-/* 拾穗集 —— 消息中心：蛋到期自动记一条 + 全局系统通知（手机本地），可已读 / 清空
+/* 拾穗集 —— 消息中心：蛋到期自动记一条 + 本地消息（手机本地），可已读 / 清空
  * 从 app.js 原样搬过来的，逻辑一字未改。
  */
 
@@ -9,7 +9,6 @@ import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
 import { formatDate } from '../util/date.js';
-import { notifySystem } from '../notify.js';
 
 /* ---- 本地消息：只存本机 localStorage 的全局通知 ----
  * 断连告警这类「服务端都连不上」的通知发不进服务端，只能存手机本地；
@@ -39,11 +38,11 @@ function localId() {
 }
 
 /**
- * 全局播报入口：任何板块都能发一条「消息 + 系统通知」。
- * 消息存本机（服务端都连不上的时候通知也发不进去），通知走 notify.js 的全局通道。
- * App 在前台时两条都发得着；在后台时用户先看见通知，回头打开 App 还能翻到消息记录。
+ * 全局播报入口：任何板块都能发一条「消息 + 应用内提醒」。
+ * 消息存本机（服务端都连不上的时候消息也发不进去），提醒走 toast（M18 起 Windows
+ * 系统通知已拆除）。App 在前台时弹醒目 toast；在后台时先落消息，回头打开 App 还能翻到。
  * @param {{ platform?: string, title: string, body?: string, notify?: boolean, tag?: string }} opts
- * @param {{ quiet?: boolean }} [flags] quiet=true 时静默：不发系统通知（也跳过 toast）
+ * @param {{ quiet?: boolean }} [flags] quiet=true 时静默：不弹提醒（也跳过 toast）
  */
 async function pushLocalMessage({ platform = '系统', title, body, notify = false, tag }, flags = {}) {
   const msg = {
@@ -59,8 +58,10 @@ async function pushLocalMessage({ platform = '系统', title, body, notify = fal
   list.unshift(msg);
   writeLocalMessages(list);
   state.messages = [msg, ...state.messages];
+  // M18:Windows 系统通知已拆除。notify=true 的调用方(后台同步的恢复/失败播报)
+  // 改弹应用内醒目 toast;标题带 ❌ 视为告警,用红色 warn 样式
   if (notify && !flags.quiet) {
-    notifySystem({ title: msg.title, body: msg.body, tag: tag || 'danji-sync' });
+    toast(msg.title, msg.title.includes('❌') ? 'warn' : 'report', { duration: 5000 });
   }
   return msg;
 }

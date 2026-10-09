@@ -38,15 +38,10 @@ const vstub = {
 };
 globalThis.window = { Vue: vstub, focus() {}, dispatchEvent() {}, addEventListener() {} };
 
-/* 通知桩：记录每一条真的发出去的通知，播报有没有被调用一眼可查 */
-let notified = [];
-class FakeNotification {
-  constructor(title, opts) { this.title = title; this.opts = opts; notified.push({ title, opts }); }
-  close() {}
-}
-FakeNotification.last = null;
-globalThis.Notification = FakeNotification;
-Object.defineProperty(globalThis.Notification, 'permission', { get: () => 'granted', configurable: true });
+/* M18:Windows 系统通知已拆除,播报走应用内 toast。这里用 defineProperty 把
+ * state.toast 变成记录桩:每次 toast() 赋值都留下一条日志,可断言次数与内容 */
+let toastLog = [];
+let toastVal = { show: false, msg: '', type: 'ok' };
 globalThis.CustomEvent = class CustomEvent { constructor(type) { this.type = type; } };
 
 /* ---- 桩 fetch：/api/events 给一条真的可读流（report.js 会 getReader 逐帧读），
@@ -57,7 +52,6 @@ let lastStream = null;         // 最近一条流的句柄，用来推帧
 let serverMessages = [];       // 桩服务端 /api/messages 返回的内容
 let messagesThrow = false;     // 让 /api/messages 分支抛异常（模拟服务不可用）
 globalThis.__reset = () => {
-  notified = [];
   sseCount = 0;
   lastStream = null;
   serverMessages = [];
@@ -66,8 +60,8 @@ globalThis.__reset = () => {
 globalThis.__setMessages = (list) => { serverMessages = list; };
 globalThis.__setMessagesThrow = (on) => { messagesThrow = !!on; };
 globalThis.__sseCount = () => sseCount;
-globalThis.__notified = () => notified.slice();
-globalThis.__clearNotified = () => { notified = []; };
+globalThis.__toasts = () => toastLog.slice();
+globalThis.__clearToasts = () => { toastLog = []; };
 globalThis.__pushFrame = (text) => lastStream.push(text);
 
 globalThis.fetch = async (url, init = {}) => {
@@ -89,6 +83,12 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 const { state } = await import('../public/js/state.js');
+/* state 是 reactive(identity 桩)的普通对象,重定义 toast 属性为记录桩 */
+Object.defineProperty(state, 'toast', {
+  configurable: true,
+  get: () => toastVal,
+  set: (v) => { toastVal = v; toastLog.push(v); },
+});
 const {
   startReportInbox, ensureReportInbox, stopReportInbox,
   startReportSweep, stopReportSweep, sweepReports,
@@ -109,8 +109,8 @@ async function okAsync(name, fn) {
 }
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 const frame = (payload) => `event: report\ndata: ${JSON.stringify(payload)}\n\n`;
-const msg = (id, title) => ({
-  id, kind: 'bg-sync', title, body: '', read: false, created_at: '2026-10-05T00:00:00.000Z',
+const msg = (id, title, syncOk = '1') => ({
+  id, kind: 'bg-sync', title, body: '', read: false, created_at: '2026-10-05T00:00:00.000Z', sync_ok: syncOk,
 });
 
 /* 开跑前先把角色摆成「手机端」：isDesktop() 判 false 的确定姿势 */
@@ -144,43 +144,47 @@ await okAsync('已经在跑时反复 ensureReportInbox()：不重复建连接', 
 
 console.log('收到回报帧：播报 + 登记（兜底轮询不重复弹）');
 
-await okAsync('收到 event: report 帧：播报被调用且 id 被登记，随后 sweepReports 不再播第二条', async () => {
-  globalThis.__pushFrame(frame({ id: 'r-1', title: '手机同步成功', body: '已与电脑端同步' }));
+await okAsync('收到 event: report 帧：应用内醒目 toast 弹出且 id 被登记，随后 sweepReports 不再弹第二条', async () => {
+  globalThis.__clearToasts();
+  globalThis.__pushFrame(frame({ id: 'r-1', title: '手机同步成功', body: '已与电脑端同步', ok: true }));
   await tick();
-  const sent = globalThis.__notified();
-  assert.equal(sent.length, 1, '收到一帧就该播一条');
-  assert.equal(sent[0].title, '手机同步成功');
+  const sent = globalThis.__toasts();
+  assert.equal(sent.length, 1, '收到一帧就该弹一条应用内 toast');
+  assert.ok(sent[0].msg.includes('手机同步成功'), `toast 内容应含标题，实际 ${sent[0].msg}`);
+  assert.equal(sent[0].type, 'report', '同步成功回报要用 report 醒目样式');
   // 下面只看兜底轮询自己播了什么，先把 SSE 这一条从计数里划掉
-  globalThis.__clearNotified();
+  globalThis.__clearToasts();
 
   // 第一次 sweep：只建档不播报（刷新页面不该把历史回报再弹一遍）
   globalThis.__setMessages([msg('r-1', '手机同步成功')]);
   await sweepReports();
-  assert.equal(globalThis.__notified().length, 0, '首次 sweep 只建档，不能弹');
+  assert.equal(globalThis.__toasts().length, 0, '首次 sweep 只建档，不能弹');
 
   // 第二次 sweep：id 已在登记本里，兜底轮询不能再弹一遍
   globalThis.__setMessages([msg('r-1', '手机同步成功')]);
   await sweepReports();
-  assert.equal(globalThis.__notified().length, 0, 'SSE 已播报过的回报，兜底轮询不能重复播报');
+  assert.equal(globalThis.__toasts().length, 0, 'SSE 已弹过的回报，兜底轮询不能重复弹');
 });
 
 console.log('兜底补拉（SSE 死了也必须收得到）');
 
 await okAsync('sweepReports：首次只建档不播报，第二次遇到新回报才播报', async () => {
   // 承接上一条：sweepSeeded 已经是 true，这里验证「新回报才播」
+  globalThis.__clearToasts();
   globalThis.__setMessages([]);
   await sweepReports();
-  assert.equal(globalThis.__notified().length, 0, '没有新回报就不该播');
+  assert.equal(globalThis.__toasts().length, 0, '没有新回报就不该播');
 
-  globalThis.__setMessages([msg('r-1', '手机同步成功'), msg('r-2', '手机同步失败：连不上电脑')]);
+  globalThis.__setMessages([msg('r-1', '手机同步成功'), msg('r-2', '手机同步失败：连不上电脑', '0')]);
   await sweepReports();
-  const sent = globalThis.__notified();
+  const sent = globalThis.__toasts();
   assert.equal(sent.length, 1, '只有漏掉的那条新回报该播');
-  assert.equal(sent[0].title, '手机同步失败：连不上电脑');
+  assert.ok(sent[0].msg.includes('手机同步失败：连不上电脑'));
+  assert.equal(sent[0].type, 'warn', '失败回报要用红色 warn 样式');
 
   // 再扫一次：不许重复弹
   await sweepReports();
-  assert.equal(globalThis.__notified().length, 1, '同一条回报不能反复弹');
+  assert.equal(globalThis.__toasts().length, 1, '同一条回报不能反复弹');
 });
 
 console.log('兜底补拉失败时不许刷 toast（45 秒一次，弹了就是骚扰）');

@@ -58,9 +58,9 @@ globalThis.fetch = async (url, init = {}) => {
 Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, configurable: true });
 
 const {
-  PENDING_KEY, PENDING_MAX, SUCCESS_COOLDOWN_MS,
+  PENDING_KEY, PENDING_MAX, SUCCESS_COOLDOWN_MS, REPORT_TTL_MS,
   reportOutcomes, reportSyncSuccess, shouldReportSuccess,
-  flushReports, pendingReportCount,
+  flushReports, pendingReportCount, purgeFailedReports,
 } = await import('../public/js/sync/report.js');
 
 let passed = 0;
@@ -127,11 +127,13 @@ await okAsync('网络异常：同样留在队列里', async () => {
   assert.equal(pendingReportCount(), 1);
 });
 
-await okAsync('补报：网络恢复后把欠的都送出去', async () => {
+await okAsync('补报：网络恢复后把欠的都送出去（M18：积压改用成功条目构造，失败已只留最新一条）', async () => {
   await reset();
   globalThis.__setApi(() => ({ throw: 'down' }));
-  await reportOutcomes({ ok: false, attempts: 1, reason: 'a' });
-  await reportOutcomes({ ok: false, attempts: 2, reason: 'b' });
+  // M18 起失败回报入队即去重,积压改用成功条目构造——现实对应
+  // 「同步成功但回报 POST 失败(401/5xx/网络断)」的窗口,成功条目不去重
+  await reportOutcomes({ ok: true, pushed: 1 });
+  await reportOutcomes({ ok: true, pushed: 2 });
   assert.equal(pendingReportCount(), 2);
 
   globalThis.__setApi(() => ({ ok: true }));
@@ -193,11 +195,12 @@ await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
 
 console.log('队列上限与字段清洗');
 
-await okAsync('队列封顶，长期连不上也不会无限膨胀', async () => {
+await okAsync('队列封顶，长期连不上也不会无限膨胀（M18：成功条目压队列，失败已只留一条）', async () => {
   await reset();
   globalThis.__setApi(() => ({ ok: false, status: 500 }));
+  // M18 起失败只留最新一条,封顶回归改用成功条目压队列(回报 POST 持续 5xx 的现实窗口)
   for (let i = 0; i < PENDING_MAX + 8; i++) {
-    await reportOutcomes({ ok: false, attempts: i, reason: 'x' });
+    await reportOutcomes({ ok: true, pushed: i });
   }
   assert.equal(pendingReportCount(), PENDING_MAX, `应封顶在 ${PENDING_MAX}`);
 });
@@ -251,6 +254,47 @@ await okAsync('M17 原生壳：前台补齐仍由 JS 报（原生在页面可见
     assert.equal(sent, true);
     assert.equal(posted[0].body.sync_caught_up, '1');
   } finally { delete globalThis.window.Capacitor; }
+});
+
+await okAsync('M18 失败回报只留最新一条(断网期间不逐条积攒)', async () => {
+  await reset();
+  globalThis.__setApi(() => ({ ok: false, status: 500 }));
+  await reportOutcomes({ ok: false, attempts: 1, reason: 'a' });
+  await reportOutcomes({ ok: false, attempts: 2, reason: 'b' });
+  await reportOutcomes({ ok: false, attempts: 3, reason: 'c' });
+  const fails = readQ().filter((x) => x.sync_ok === '0');
+  assert.equal(fails.length, 1, '三次失败只该留最新一条');
+  assert.equal(fails[0].sync_reason, 'c');
+  // 成功条目不受失败去重影响
+  await reportOutcomes({ ok: true, pushed: 1 });
+  assert.equal(readQ().filter((x) => x.sync_ok === '1').length, 1);
+});
+
+await okAsync('M18 过期回报丢弃:排队超过 10 分钟的旧闻不再发送', async () => {
+  await reset();
+  const staleAt = new Date(fakeNow - (REPORT_TTL_MS + 60_000)).toISOString();
+  const freshAt = new Date(fakeNow - 1_000).toISOString();
+  store.set(PENDING_KEY, JSON.stringify([
+    { kind: 'bg-sync', sync_ok: '0', sync_reason: '旧闻', rid: 'rid-stale', queued_at: staleAt },
+    { kind: 'bg-sync', sync_ok: '1', sync_reason: '', rid: 'rid-fresh', queued_at: freshAt },
+  ]));
+  posted = [];
+  globalThis.__setApi(() => ({ ok: true, status: 201 }));
+  const r = await flushReports();
+  assert.equal(r.sent, 1, '只有新鲜那条送达');
+  assert.equal(r.dropped, 1, '过期那条按旧闻丢弃');
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.rid, 'rid-fresh');
+});
+
+await okAsync('M18 同步成功后清空积压的失败回报(恢复后不再补发旧闻)', async () => {
+  await reset();
+  globalThis.__setApi(() => ({ ok: false, status: 500 }));
+  await reportOutcomes({ ok: false, attempts: 2, reason: 'timeout' });
+  assert.equal(readQ().filter((x) => x.sync_ok === '0').length, 1);
+  assert.equal(purgeFailedReports(), true, '有失败可清时应返回 true');
+  assert.equal(pendingReportCount(), 0, '失败积压应被清空');
+  assert.equal(purgeFailedReports(), false, '没有失败可清时返回 false');
 });
 
 await okAsync('M17 flush 并发共用同一次：同一轮只发一遍', async () => {

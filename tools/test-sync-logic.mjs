@@ -9,6 +9,7 @@ import {
   mergeDisplayItems,
   toPushPayload,
 } from '../public/js/sync/outbox.js';
+import { shouldApplySnapshot } from '../public/js/sync/snapshot.js';
 
 let passed = 0;
 function ok(name, fn) {
@@ -181,6 +182,26 @@ ok('toPushPayload 形状正确', () => {
   assert.equal(p.title, 'T');
   assert.equal(p.content, 'C');
   assert.equal(p.base_updated_at, '2026-02-26T08:00:00.000Z');
+});
+
+console.log('M18 原生离线快照的 apply 判定(shouldApplySnapshot)');
+ok('快照缺版本号：不应用', () => {
+  assert.equal(shouldApplySnapshot({ storedVersion: 10, storedBootId: 'b', snapVersion: 0, snapBootId: 'b' }), false);
+});
+ok('本地从没同步过：快照好过空镜像，应用', () => {
+  assert.equal(shouldApplySnapshot({ storedVersion: 0, storedBootId: '', snapVersion: 3, snapBootId: 'b' }), true);
+});
+ok('同 boot 且快照版本更新：应用', () => {
+  assert.equal(shouldApplySnapshot({ storedVersion: 38, storedBootId: 'b', snapVersion: 45, snapBootId: 'b' }), true);
+});
+ok('同 boot 但版本相同/更旧：不应用(重复快照防倒灌)', () => {
+  assert.equal(shouldApplySnapshot({ storedVersion: 45, storedBootId: 'b', snapVersion: 45, snapBootId: 'b' }), false);
+  assert.equal(shouldApplySnapshot({ storedVersion: 45, storedBootId: 'b', snapVersion: 40, snapBootId: 'b' }), false);
+});
+ok('boot 不同(服务端重启过)：不应用——版本号跨进程不可比,旧快照可能把新镜像盖回旧数据', () => {
+  assert.equal(shouldApplySnapshot({ storedVersion: 1, storedBootId: 'new', snapVersion: 999, snapBootId: 'old' }), false);
+  assert.equal(shouldApplySnapshot({ storedVersion: 10, storedBootId: '', snapVersion: 20, snapBootId: 'b' }), false);
+  assert.equal(shouldApplySnapshot({ storedVersion: 10, storedBootId: 'b', snapVersion: 20, snapBootId: '' }), false);
 });
 
 console.log(passed ? `\n✓ ${passed} 项同步逻辑断言通过` : '\n✗ 没有通过的断言');

@@ -27,6 +27,8 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -235,6 +237,9 @@ public class SyncForegroundService extends Service {
             String boot = data.optString("boot_id", "");
             if (v <= 0) return;
 
+            // M18:数据到手先落快照(无论后面是否回报)——App 离线打开时灌进镜像全靠它
+            saveSnapshot(pull.body);
+
             long lastV = sp.getLong("lastVersion", 0);
             String lastBoot = sp.getString("lastBoot", "");
             boolean bootChanged = !lastBoot.isEmpty() && !boot.isEmpty() && !lastBoot.equals(boot);
@@ -266,6 +271,35 @@ public class SyncForegroundService extends Service {
             }
         } catch (Exception e) {
             Log.w(TAG, "syncCycle failed", e);
+        }
+    }
+
+    // ---------- M18:离线快照(原生拉到的全量数据落盘,App 离线启动时由 JS 灌进镜像) ----------
+
+    /** 快照文件名。BackgroundSyncPlugin.readSnapshot 读同一个文件,两处必须一致 */
+    static final String SNAPSHOT_FILE = "bg_snapshot.json";
+
+    /**
+     * 把 /api/sync/pull 的完整响应体原子落盘(先写 .tmp 再 rename)。
+     * 每次 pull 成功都写:快照永远是「原生最后一次拉到的全量数据」。
+     * 写失败只打日志,不影响同步轮其余逻辑——快照是增强,不是依赖。
+     */
+    private void saveSnapshot(String body) {
+        try {
+            File dir = getFilesDir();
+            File tmp = new File(dir, SNAPSHOT_FILE + ".tmp");
+            File dst = new File(dir, SNAPSHOT_FILE);
+            FileOutputStream fos = new FileOutputStream(tmp);
+            try {
+                fos.write(body.getBytes(StandardCharsets.UTF_8));
+            } finally {
+                fos.close();
+            }
+            if (!tmp.renameTo(dst)) {
+                tmp.delete();   // rename 失败:保留旧快照(旧好过没有),别留半个临时文件
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "saveSnapshot failed", e);
         }
     }
 

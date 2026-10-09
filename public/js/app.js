@@ -6,7 +6,7 @@ import { toast } from './toast.js';
 import { applyTheme, cycleTheme, themeIcon, themeTitle, systemDark, onSystemThemeChange, onStorageTheme } from './theme.js';
 import { switchBoard, syncTopbarHeight, observeTopbar, stopObserveTopbar } from './ui.js';
 import { loadMessages, pushExpiredMessage, pushClosedMessage, markMessageRead, removeMessage, markAllRead, clearReadMessages, unreadCount } from './boards/messages.js';
-import { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, setNotify, toggleNotify, checkReminders, settleRunning, settleOverdue, notifyExpired, notifyClosed, loadSamples } from './boards/eggs.js';
+import { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, checkReminders, settleRunning, settleOverdue, loadSamples } from './boards/eggs.js';
 import { loadPapers, openPaperEditor, savePaper, setPaperStatus, logPaper, openPaperLog, startPaperRead, newPaperLog, editPaperLog, backToLogList, draftTimer, saveLogDraft, discardLogDraft, closePaperLog, savePaperLog, removePaperLog, openPaper, openPaperReveal, removePaper, paperCounts, logHaystack, filteredPapers } from './boards/papers.js';
 import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, siteUsageOptions, siteUrls, siteHaystack, filteredSites } from './boards/sites.js';
 import { expensePeriodInit, loadExpenses, openExpenseEditor, saveExpense, removeExpense, setExpenseMode, pickExpenseCategory, clearExpenseCategory, setExpenseYear, setExpenseMonth, stepExpensePeriod, expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories, expensePeriodLabel, expenseYearOptions } from './boards/expenses.js';
@@ -17,7 +17,6 @@ import { loadKb, filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, remo
 import { SyncStatus } from './components/sync-status.js';
 import { installSync, disposeSync } from './sync/engine.js';
 // 全局系统通知：与赛博鸡蛋的铃铛共用 Web Notification 通道，开关分开存
-import { globalNotifyOn, setGlobalNotifyOn, requestNotifPermission, notifBlockReason, notifPillState, refreshNotifPermission, notifySystem, WHY } from './notify.js';
 // 电脑端订阅手机的后台同步回报（手机改 push.js，这边 startReportInbox）
 import { startReportInbox, ensureReportInbox, stopReportInbox, startReportSweep, ensureReportSweep, stopReportSweep, sweepReports } from './sync/report.js';
 // 导入即挂上 window.__danjiBackgroundSync（原生服务靠它踢同步），必须早于第一次踢
@@ -291,7 +290,6 @@ const app = createApp({
       ensureReportInbox();      // 通道可能早就被掐了
       ensureReportSweep();      // 角色判定有延迟时，兜底轮询可能压根没起来
       sweepReports();           // 期间漏掉的回报立刻补上
-      refreshNotifPermission(); // 权限可能已在浏览器设置里改过
     }
     // M2：原生配对成功后补拉各板块（需在 setup 作用域，onUnmounted 才能解绑）
     function onPaired() {
@@ -392,7 +390,6 @@ const app = createApp({
       inboxTimer = setInterval(() => {
         ensureReportInbox();
         ensureReportSweep();
-        refreshNotifPermission();
       }, 60 * 1000);
       document.addEventListener('visibilitychange', onVisibility);
     });
@@ -415,7 +412,7 @@ const app = createApp({
     return {
       state, statusTabs, filteredActivities, urgentItems, platformOptions, toast,
       openEditor, saveActivity, setStatus, reopenActivity, removeActivity, jumpTo,
-      loadSamples, toggleNotify, load,
+      loadSamples, load,
       paperCounts, filteredPapers, switchBoard,
       paperCategories: computed(() => state.paperCategories),
       openPaperEditor, savePaper, setPaperStatus, openPaper, openPaperReveal, removePaper,
@@ -448,65 +445,11 @@ const app = createApp({
       isDesktopApp: computed(() => isDesktop()),
       mobileHint: computed(() => mobileReadOnlyHint()),
       cycleTheme, themeIcon, themeTitle,
-      notifActive: computed(() => state.notifPermission === 'granted' && state.notifyOn),
-      notifTitle: computed(() => {
-        const h = CONFIG.remind.hours;
-        if (state.notifPermission === 'denied') return '桌面通知被浏览器拒绝，可在浏览器设置里重新允许';
-        if (state.notifPermission !== 'granted') return `开启桌面通知：到期前 ${h} 小时提醒`;
-        return state.notifyOn
-          ? `桌面通知已开启：到期前 ${h} 小时提醒，点击关闭`
-          : '桌面通知已关闭，点击重新开启';
-      }),
-      // 全局通知（后台同步成败等）：开关与蛋到期的铃铛分开，权限却是同一个。
-      // 三态胶囊的 class / 图标由 notify.js 的 notifPillState() 统一判定
-      notifPill: computed(() => {
-        // Notification.permission 不是响应式的，靠这一行挂上依赖：
-        // refreshNotifPermission() 改到 state.notifPermission 时，computed 会跟着重算
-        void state.notifPermission;
-        return notifPillState();
-      }),
-      globalNotifyTitle: computed(() => {
-        const why = notifBlockReason();
-        if (why === WHY.UNSUPPORTED) return '当前环境不支持系统通知（需用 http://localhost 或 https 打开）';
-        if (why === WHY.DENIED) return '系统通知被浏览器拦截，请到地址栏左侧的站点设置里重新允许；消息仍会记进消息中心';
-        if (why === WHY.DEFAULT) return '开启系统通知：后台同步成功 / 失败时会提醒你（消息中心始终有记录）';
-        if (why === WHY.OFF) return '系统通知已关闭，点击重新开启';
-        return '系统通知已开启：后台同步成功 / 失败都会提醒你，点击关闭';
-      }),
-      /** 消息中心里的「测试通知」：点一下就知道这台机器到底能不能弹通知 */
-      async testNotify() {
-        const why = notifBlockReason();
-        if (why === WHY.UNSUPPORTED) return toast('当前环境不支持系统通知（需用 http://localhost 或 https 打开）', 'warn');
-        if (why === WHY.DENIED) return toast('系统通知被浏览器拦截，请到地址栏左侧的站点设置里重新允许', 'warn');
-        if (why === WHY.DEFAULT) return toast('还没授权，点一下顶栏的「通知」按钮即可开启', 'warn');
-        if (why === WHY.OFF) return toast('系统通知已关闭，点一下顶栏的「通知」按钮即可开启', 'warn');
-        const sent = notifySystem({ title: '拾穗集 · 测试通知', body: '能收到这条，说明后台同步的提醒也会正常送达 🎉', tag: 'danji-test' });
-        toast(sent ? '已发送，请看右上角系统通知 🔔' : '发送失败：系统没有接受这条通知', sent ? 'ok' : 'warn');
-      },
       reportInboxState: computed(() => state.reportInbox),
       reportInboxText: computed(() => ({
         idle: '回报通道未启动', connecting: '回报通道连接中…',
         live: '回报通道已连接', down: '回报通道已断开（正在重连，消息中心仍会兜底补拉）',
       })[state.reportInbox] || ''),
-      async toggleGlobalNotify() {
-        // 申请权限必须发生在用户手势里，静默调用会被系统直接拒绝
-        if (state.notifPermission !== 'granted') {
-          const perm = await requestNotifPermission();
-          refreshNotifPermission();
-          if (perm === 'granted') {
-            setGlobalNotifyOn(true);
-            toast('已开启系统通知 🔔');
-          } else if (perm === 'denied') {
-            toast('通知被拒绝了，可在系统设置里重新允许；消息仍会记进消息中心', 'warn');
-          } else {
-            toast('没有授权，随时点铃铛再试', 'warn');
-          }
-          return;
-        }
-        const next = !globalNotifyOn();
-        setGlobalNotifyOn(next);
-        toast(next ? '已开启系统通知 🔔' : '已关闭系统通知 🔕（消息仍会记进消息中心）');
-      },
     };
   },
 });

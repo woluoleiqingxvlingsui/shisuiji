@@ -7,8 +7,9 @@
  * 闭环拆成两半：
  *  - 手机（reportOutcomes）：把结论排队 POST /api/messages（kind=bg-sync）。
  *    失败不丢，留在本机队列里，等下一次能连上时补报——所以「同步失败」也能最终送达电脑。
- *  - 电脑（startReportInbox）：监听 /api/events 的 report 帧，立刻弹系统通知并刷新消息中心。
- *    服务端对这类回报是「立即广播」的，不走那条 5 分钟防抖：防抖是为数据改动设计的，
+ *  - 电脑（startReportInbox）：监听 /api/events 的 report 帧，立刻弹应用内醒目 toast
+ *    并刷新消息中心（M18 起 Windows 系统通知已整体拆除）。服务端对这类回报是
+ *    「立即广播」的，不走那条 5 分钟防抖：防抖是为数据改动设计的，
  *    而同步结论低频且用户在等，延迟 5 分钟等于没做。
  *
  * 文案由服务端统一生成（addSyncReport），手机只传 ok/attempts/reason，
@@ -19,11 +20,15 @@ import { api, getToken, resolveApiUrl } from '../api.js';
 import { isDesktop } from '../perm.js';
 import { state } from '../state.js';
 import { loadMessages } from '../boards/messages.js';
-import { notifySystem } from '../notify.js';
+import { toast } from '../toast.js';
 import { createSseParser } from './sse-parse.js';
 
 const PENDING_KEY = 'danji.pendingReports';
 const PENDING_MAX = 10;          // 最多留 10 条待报，再多说明一直连不上，不值得无限堆
+/** M18:回报条目的保质期。失败回报是「此刻连不上」的即时新闻,排队超过 10 分钟就成了
+ *  旧闻——发到电脑端只会制造「明明已经恢复了却收到失败」的困惑
+ *  (2026-10-08 用户实测:断网期间攒的失败回报在重连后被补发,被过时消息误导)。 */
+const REPORT_TTL_MS = 10 * 60 * 1000;
 const RECONNECT_DELAY_MS = 5 * 1000;
 const HEARTBEAT_TIMEOUT_MS = 3 * 60 * 1000;
 const WATCHDOG_TICK_MS = 60 * 1000;
@@ -69,6 +74,13 @@ function writePending(list) {
  */
 function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false, background = false }) {
   const list = readPending();
+  // M18:失败回报只留最新一条(旧的整组丢弃)。断网期间每个兜底轮次都会失败一次,
+  // 逐条排队的话重连后电脑端会被 N 条「同步失败」刷屏,而它们说的是同一件事。
+  if (!ok) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].sync_ok === '0') list.splice(i, 1);
+    }
+  }
   list.push({
     sync_ok: ok ? '1' : '0',
     sync_attempts: Math.max(0, Math.min(99, attempts | 0)),
@@ -118,6 +130,15 @@ async function doFlushReports() {
       one.rid = newRid();
       writePending(list);
     }
+    // M18:过期回报(排队超过 REPORT_TTL_MS)直接丢弃。此刻既然能连上电脑,
+    // 这条「连不上」的旧闻只会误导——成功早已发生,或失败原因早已过时。
+    // 没有 queued_at 的老条目(升级前遗留/测试夹具)不受影响,照常发送。
+    const queuedAt = Date.parse(one.queued_at || '') || 0;
+    if (queuedAt && Date.now() - queuedAt > REPORT_TTL_MS) {
+      writePending(readPending().filter((x) => x.rid !== one.rid));
+      dropped += 1;
+      continue;
+    }
     try {
       const res = await api('/api/messages', {
         method: 'POST',
@@ -140,6 +161,18 @@ async function doFlushReports() {
       return { sent, dropped, left: list.length }; // 网络错误 / 超时:留着下次再试
     }
   }
+}
+
+/** M18:同步成功后清掉积压的失败回报。失败的意义是「电脑端,我够不着你了」;
+ *  此刻同步既然已经成功,那些失败就全是被恢复的历史,发过去只会制造
+ *  「明明成功了却收到失败通知」的矛盾(2026-10-08 用户实测吐槽)。
+ *  @returns {boolean} 是否真的清掉了条目 */
+function purgeFailedReports() {
+  const list = readPending();
+  const kept = list.filter((x) => x.sync_ok !== '0');
+  if (kept.length === list.length) return false;
+  writePending(kept);
+  return true;
 }
 
 function pendingReportCount() {
@@ -292,7 +325,7 @@ function onReport(evt) {
   let data = {};
   try { data = JSON.parse(evt.data || '{}'); } catch { /* ignore */ }
   markAnnounced(data.id);                    // 登记：兜底轮询别再弹一遍
-  announceReport({ title: data.title, body: data.body });
+  announceReport({ title: data.title, body: data.body, ok: data.ok !== false });
   try { window.dispatchEvent(new CustomEvent('danji:remote-change')); } catch { /* ignore */ }
   loadMessages().catch(() => {});
 }
@@ -319,9 +352,12 @@ function markAnnounced(id) {
   return true;
 }
 
-/** 播报一条回报（弹系统通知）。通知发不出去也不抛，消息一定在。 */
-function announceReport({ title, body }) {
-  notifySystem({ title: title || '手机同步回报', body: body || '', tag: 'danji-bgsync' });
+/** 播报一条回报。M18:Windows 系统通知已整体拆除,改弹应用内醒目 toast——
+ *  成功用 report 强调样式(渐变强调色),失败用 warn 红色样式,时长 6 秒。
+ *  toast 永不抛异常,弹不弹得出来页面都在,消息中心一定有记录。 */
+function announceReport({ title, body = '', ok = true } = {}) {
+  const text = body ? `${title || '手机同步回报'} · ${body}` : (title || '手机同步回报');
+  toast(text, ok ? 'report' : 'warn', { duration: 6000 });
 }
 
 /**
@@ -335,7 +371,7 @@ async function sweepReports() {
   await loadMessages({ silent: true });
   const fresh = state.messages.filter((m) => m.kind === 'bg-sync' && markAnnounced(m.id));
   if (!sweepSeeded) { sweepSeeded = true; return; }
-  for (const m of fresh) announceReport({ title: m.title, body: m.body });
+  for (const m of fresh) announceReport({ title: m.title, body: m.body, ok: m.sync_ok !== '0' });
 }
 
 /** 启动兜底轮询（幂等）。和 SSE 并存，互为保险。 */
@@ -356,8 +392,9 @@ function stopReportSweep() {
 }
 
 export {
-  PENDING_KEY, PENDING_MAX, POLL_MS, SUCCESS_COOLDOWN_MS,
+  PENDING_KEY, PENDING_MAX, POLL_MS, SUCCESS_COOLDOWN_MS, REPORT_TTL_MS,
   reportOutcomes, reportSyncSuccess, shouldReportSuccess, flushReports, pendingReportCount,
+  purgeFailedReports,
   startReportInbox, ensureReportInbox, stopReportInbox,
   startReportSweep, ensureReportSweep, stopReportSweep, sweepReports,
 };
