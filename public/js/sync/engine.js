@@ -10,7 +10,7 @@ import { apiJson, getToken, setToken, HEALTH_TIMEOUT_MS } from '../api.js';
 import { isNativePlatform } from '../pwa.js';
 import { isPaired } from '../pair.js';
 import { shouldAttemptSync, pickIntervalMs, isCaughtUp, isClientOutdated } from './net.js';
-import { reportSyncSuccess, flushReports, purgeFailedReports } from './report.js';
+import { reportSyncSuccess, shouldJsReportCatchUp, flushReports, purgeFailedReports } from './report.js';
 import { shouldApplySnapshot } from './snapshot.js';
 import { idbAvailable } from './idb.js';
 import {
@@ -530,9 +530,16 @@ async function syncNow(opts = {}) {
   // 同步开始前先记住上次的版本号与进程标识，pull 回来一比就知道这轮有没有落后
   let prevVersion = readStoredVersion();
   let prevBoot = readStoredBootId();
-  // M17:原生后台同步可能已经拉过更新的版本(账本在原生 SharedPreferences 里)。
-  // 先对账:否则「打开 App」时 JS 会把原生刚补齐过的改动当成新落后,
-  // 又报一次「前台补齐」,电脑端一条改动收到两条通知。
+  // M19 对账去污染:原生账本只用来「本轮别把它当成落后」,**绝不落 localStorage**。
+  // 账本语义律(不变量一):localStorage 里的 JS 版本号只表示「镜像里实际装着哪个版本的数据」,
+  // 唯二合法写入点是本文件 pullOnce 成功落镜像之后与 importNativeSnapshot 灌完快照之后。
+  // 原生说它见过某版本,只代表数据躺在它的快照文件里,镜像里一个字都还没有。
+  // 以前这里照抄 writeStoredVersion(nvV, nvB),于是 2026-10-11 实锤出 bug 1:
+  // 断网开 App 时对账先把账本抬到 28,紧接着 M18 的 importNativeSnapshot 判定
+  // 「快照 v28 ≤ 账本 v28」而拒绝灌入,冷启动热启动都永远看旧数据(账本被污染成谎言)。
+  // 仍要保留 prevVersion/prevBoot 的内存更新:原生在前台/后台抢先补齐过,
+  // 不把这轮的开局基线抬上去,isCaughtUp 会把同一条改动再判一次「落后」,
+  // 电脑端一条改动就会收到两条通知(M17 的来由,场景 5/7 的防双响靠的就是它)。
   try {
     const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
     if (p && p.getSyncedVersion) {
@@ -540,7 +547,6 @@ async function syncNow(opts = {}) {
       const nvV = Number(nv && nv.version) || 0;
       const nvB = String((nv && nv.bootId) || '');
       if (nvV > prevVersion) {
-        writeStoredVersion(nvV, nvB);
         prevVersion = nvV;
         prevBoot = nvB;
       }
@@ -596,6 +602,25 @@ async function syncNow(opts = {}) {
       setStatus('synced');
     }
 
+    // M19:后台补齐归属裁决——必须在写账本(noteNativeSynced)之前读原生账本,
+    // 否则读到的是本轮自己刚写的值,裁决恒为「让位」,bug 2 白修。
+    // 用现读的 getSyncedVersion(),不用 syncNow 开头对账那个旧值(那时还没拉到本轮数据)。
+    let reportCaughtUp = caughtUp;
+    if (caughtUp && wasHidden) {
+      try {
+        const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
+        if (p && p.getSyncedVersion) {
+          const nv = await p.getSyncedVersion();
+          reportCaughtUp = shouldJsReportCatchUp({
+            background: true,
+            nativePresent: true,
+            nativeVersion: Number(nv && nv.version) || 0,
+            serverVersion,
+          });
+        }
+      } catch { /* 桥异常按可报处理,不许因桥吞掉通知 */ }
+    }
+
     // 只有真的成功了才记版本：失败时数据没拿到，记了就等于假装自己是最新的
     if (serverVersion) writeStoredVersion(serverVersion, serverBoot);
     if (serverVersion) noteNativeSynced(serverVersion, serverBoot);
@@ -604,9 +629,11 @@ async function syncNow(opts = {}) {
     // 以前它挂在 push.js 的 drain() 上，而 syncNow() 十三处调用全都绕开它。
     // fromEvent 不作触发条件（手机自己那次写入引发的广播也会置位它），
     // 判定收敛在 shouldReportSuccess 里：只有 pushed / caughtUp 值得打扰电脑端。
+    // caughtUp 用裁决结果:前台不裁决照报(M17 前台行为不变);
+    // 后台由「原生账本 vs 服务端版本」决定谁报,谁把数据弄进镜像谁汇报(不变量二)。
     reportSyncSuccess({
       pushed: (push && push.pushed) || 0,
-      caughtUp,
+      caughtUp: reportCaughtUp,
       background: wasHidden,
     });
 

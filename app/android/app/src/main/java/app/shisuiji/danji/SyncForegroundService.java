@@ -94,7 +94,10 @@ public class SyncForegroundService extends Service {
     private static final int NOTIF_ID = 0x5151;
     private static final int TICK_REQUEST_CODE = 1;
 
-    private static final long SSE_READ_TIMEOUT_MS = 3 * 60 * 1000L;
+    /** M19:SSE 读超时(半开连接加固)。服务端心跳 25 秒一次,连续 3 个心跳没到即判死线:
+     *  NAT/代理把长连接悄悄卡成「半开」时不发 FIN/RST,原来 3 分钟的读超时让最长哑火窗口
+     *  拖到 3 分钟(期间广播收不到,原生也不会重连);压到 75 秒后同样断法下最多哑火 75 秒。 */
+    private static final long SSE_READ_TIMEOUT_MS = 75 * 1000L;
     private static final long[] RECONNECT_DELAYS_MS = {5000, 15000, 30000, 60000};
     private static final long RECONNECT_STEADY_MS = 60 * 1000L;
 

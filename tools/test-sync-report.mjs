@@ -59,7 +59,7 @@ Object.defineProperty(globalThis, 'navigator', { value: { onLine: true }, config
 
 const {
   PENDING_KEY, PENDING_MAX, SUCCESS_COOLDOWN_MS, REPORT_TTL_MS,
-  reportOutcomes, reportSyncSuccess, shouldReportSuccess,
+  reportOutcomes, reportSyncSuccess, shouldReportSuccess, shouldJsReportCatchUp,
   flushReports, pendingReportCount, purgeFailedReports,
 } = await import('../public/js/sync/report.js');
 
@@ -231,18 +231,56 @@ await okAsync('sync_background 落库：缺省 0，传 true 为 1（前台/后�
   assert.equal(readQ().at(-1).sync_background, '1');
 });
 
-await okAsync('M17 原生壳：后台补齐让位给原生（JS 不再报 caughtUp）', async () => {
+await okAsync('M19 原生壳：后台补齐不再被无条件压制（是否让位交给归属裁决）', async () => {
   await reset();
   globalThis.window.Capacitor = { Plugins: { BackgroundSync: {} } };
   try {
+    // M17 曾在这一层把后台 caughtUp 一律抹掉，结果灰色窗口(退后台后 WebView 尚未冻结)
+    // 里 JS 抢先拉到的补齐没人汇报——原生账本已被 noteSynced 对齐，它随后也沉默，
+    // 这条改动的通知就永久丢了(2026-10-11 实测两次广播秒拉零回报)。
+    // 现在本层只做冷却判定,「谁报」由 engine.js 的 shouldJsReportCatchUp 裁决后再传进来。
     const sent = reportSyncSuccess({ pushed: 0, caughtUp: true, background: true });
-    assert.equal(sent, false, '原生在场时后台补齐不该由 JS 报');
-    assert.equal(posted.length, 0);
-    const sent2 = reportSyncSuccess({ pushed: 2, caughtUp: true, background: true });
-    assert.equal(sent2, true, '推条回执不受压制');
-    assert.equal(posted[0].body.sync_caught_up, '0', '压制只针对 caughtUp 字段');
-    assert.equal(posted[0].body.sync_pushed, '2');
+    assert.equal(sent, true, '原生在场不等于不许报：裁决说该报就得报');
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].body.sync_caught_up, '1', 'caughtUp 不许在本层被抹掉');
+    assert.equal(posted[0].body.sync_background, '1', '后台属性照传,文案靠它');
   } finally { delete globalThis.window.Capacitor; }
+});
+
+console.log('M19 归属裁决（纯函数：这条补齐该由 JS 报，还是原生已经报过了）');
+
+await okAsync('裁决·前台：一律 JS 汇报（原生在前台从不跑同步轮）', () => {
+  // 原生账本故意给得很大:只要不裁决,返回值就必须仍然是 true
+  assert.equal(shouldJsReportCatchUp({
+    background: false, nativePresent: true, nativeVersion: 999, serverVersion: 3,
+  }), true);
+});
+
+await okAsync('裁决·无原生壳（浏览器 / 旧 APK）：一律 JS 汇报', () => {
+  assert.equal(shouldJsReportCatchUp({
+    background: true, nativePresent: false, nativeVersion: 0, serverVersion: 3,
+  }), true);
+});
+
+await okAsync('裁决·后台+原生落后：JS 抢先拉到，由 JS 汇报（bug 2 的正路）', () => {
+  assert.equal(shouldJsReportCatchUp({
+    background: true, nativePresent: true, nativeVersion: 27, serverVersion: 28,
+  }), true, '原生账本低于服务端版本 = 原生没到过这条改动');
+  // 版本号缺失/非数字一律按 0 处理,不让 undefined 把裁决翻成「让位」而吞掉通知
+  assert.equal(shouldJsReportCatchUp({
+    background: true, nativePresent: true, nativeVersion: undefined, serverVersion: 28,
+  }), true);
+});
+
+await okAsync('裁决·后台+原生已到（或超前）：原生报过了，JS 让位（单响律）', () => {
+  assert.equal(shouldJsReportCatchUp({
+    background: true, nativePresent: true, nativeVersion: 28, serverVersion: 28,
+  }), false, '原生只在回报 POST 成功后才落账本,账本到位 = 通知已发出');
+  assert.equal(shouldJsReportCatchUp({
+    background: true, nativePresent: true, nativeVersion: 29, serverVersion: 28,
+  }), false, '超前同样让位');
+  // 缺省调用不炸,退化成「可报」
+  assert.equal(shouldJsReportCatchUp(), true);
 });
 
 await okAsync('M17 原生壳：前台补齐仍由 JS 报（原生在页面可见时不跑）', async () => {

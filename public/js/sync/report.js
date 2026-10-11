@@ -206,14 +206,18 @@ function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), l
 
 /**
  * 同步成功后回报电脑端 —— **成功回报的唯一入口**。
+ *
+ * M19:本函数只负责「该不该报(冷却判定)+ 入队」,不再关心原生在不在场。
+ * 原先这里有一段 M17 的「后台时无条件压制 caughtUp」,已整体删除——它把
+ * 「退后台后 WebView 还没冻结的灰色窗口」里 JS 抢先拉到的那次补齐整个吃掉:
+ * JS 拉完顺手 noteSynced 把原生账本也对齐,原生随后比对「版本没涨」也沉默,
+ * 两边都不报,这条改动的通知就永久丢了(2026-10-11 10:00:07 / 10:04:47 两次秒拉零回报)。
+ * 现在改为**归属裁决**:该由谁报,由 engine.js 调 shouldJsReportCatchUp 问过原生账本后决定。
+ *
  * @param {{ pushed?: number, caughtUp?: boolean }} info
  * @returns {boolean} 该不该发(真正的发送交给 reportOutcomes → flushReports 异步去做)
  */
 function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } = {}) {
-  // M17:原生壳里「后台补齐」由 SyncForegroundService 自己拉取+回报(见 docs/m17),
-  // JS 的后台轮次不再报 caughtUp——否则两端各报一次,电脑端一条改动收到两条通知。
-  // 只压 caughtUp 字段:pushed>0 的「推来了 N 条」回执照发(原生无从得知手机推了什么)。
-  if (caughtUp && background && nativePluginPresent()) caughtUp = false;
   const now = Date.now();
   if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt, lastPushedAt })) return false;
   lastSuccessAt = now;
@@ -222,6 +226,17 @@ function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } 
   // 所以不等它 —— 同步流程是主线程路径,不该被一次网络往返挂住。
   reportOutcomes({ ok: true, pushed, caughtUp, background });
   return true;
+}
+
+/** M19:后台补齐的归属裁决(纯函数)。JS pull 到数据(镜像已更新)后问:
+ *  这条「补齐」该由 JS 汇报,还是原生已经报过了?
+ *  - 前台 / 无原生壳 → JS 汇报(原生在前台从不跑同步轮);
+ *  - 后台且原生在场:原生账本 < 服务端版本 = 原生没到过 → JS 汇报
+ *    (灰色窗口 JS 抢先的场景,M17 无条件压制曾把这类通知整个吃掉);
+ *    原生账本 >= 服务端版本 = 原生已报过(它只在回报 POST 成功后才落账本)→ JS 让位。 */
+function shouldJsReportCatchUp({ background = false, nativePresent = false, nativeVersion = 0, serverVersion = 0 } = {}) {
+  if (!background || !nativePresent) return true;
+  return (Number(serverVersion) || 0) > (Number(nativeVersion) || 0);
 }
 
 /* ---------------- 电脑端：监听回报并提醒 ---------------- */
@@ -393,7 +408,8 @@ function stopReportSweep() {
 
 export {
   PENDING_KEY, PENDING_MAX, POLL_MS, SUCCESS_COOLDOWN_MS, REPORT_TTL_MS,
-  reportOutcomes, reportSyncSuccess, shouldReportSuccess, flushReports, pendingReportCount,
+  reportOutcomes, reportSyncSuccess, shouldReportSuccess, shouldJsReportCatchUp,
+  flushReports, pendingReportCount,
   purgeFailedReports,
   startReportInbox, ensureReportInbox, stopReportInbox,
   startReportSweep, ensureReportSweep, stopReportSweep, sweepReports,
