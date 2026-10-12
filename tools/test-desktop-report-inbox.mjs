@@ -152,6 +152,9 @@ await okAsync('收到 event: report 帧：应用内醒目 toast 弹出且 id 被
   assert.equal(sent.length, 1, '收到一帧就该弹一条应用内 toast');
   assert.ok(sent[0].msg.includes('手机同步成功'), `toast 内容应含标题，实际 ${sent[0].msg}`);
   assert.equal(sent[0].type, 'report', '同步成功回报要用 report 醒目样式');
+  globalThis.__pushFrame(frame({ id: 'r-1', title: '手机同步成功', body: '已与电脑端同步', ok: true }));
+  await tick();
+  assert.equal(globalThis.__toasts().length, 1, '重复 SSE 帧不能重复播报');
   // 下面只看兜底轮询自己播了什么，先把 SSE 这一条从计数里划掉
   globalThis.__clearToasts();
 

@@ -131,7 +131,7 @@ const SyncStatus = {
     </button>
 
     <div class="overlay sync-token-overlay" v-if="state.sync.status === 'need_token'">
-      <aside class="drawer sync-token-drawer">
+      <aside v-dialog class="drawer sync-token-drawer">
         <header class="drawer-head">
           <h2>🔑 填写访问口令</h2>
         </header>
@@ -148,7 +148,7 @@ const SyncStatus = {
     </div>
 
     <div class="overlay sync-conflict-overlay" v-if="resolving && conflictItem">
-      <aside class="drawer sync-conflict-drawer">
+      <aside v-dialog class="drawer sync-conflict-drawer">
         <header class="drawer-head">
           <h2>⚠️ 想法冲突</h2>
           <button class="btn ghost small" @click="closeConflict">✕</button>

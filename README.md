@@ -14,6 +14,14 @@
 |---|---|---|
 | ![赛博鸡蛋](assets/screenshots/eggs.png) | ![记蛋](assets/screenshots/editor.png) | ![花销](assets/screenshots/expenses.png) |
 
+## 工作台界面
+
+电脑端使用分组侧栏，在「卡片 / 列表」之间切换，布局选择会自动记住。手机端使用底部导航，赛博鸡蛋、花销和成果从「更多」进入。各板块提供搜索与数量概览，电脑和手机统一使用浅色主题。
+
+快捷键：`Ctrl / ⌘ + K` 聚焦搜索，`Alt + N` 新建当前板块的记录，在编辑表单中按 `Ctrl / ⌘ + Enter` 保存。手机端可以记随记，其余板块保留浏览权限。
+
+界面回归：Node.js 22+ 与本机 Edge 下运行 `node tools/test-workspace-ui.mjs`，会自动复制服务与前端到临时目录，并显式隔离文献库和数据。设置 `DANJI_UI_SCREENSHOTS=1` 可在 `output/ui-preview/` 留下演示截图。
+
 ## 环境要求
 
 - **Node.js ≥ 18**——没有的话去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版即可。服务端与网页本体只用 Node 标准库，`node server.js` **无需 npm install**；仅「🔗 配对码」二维码出图额外依赖 `qrcode`（见「手动启动」说明）
@@ -294,6 +302,19 @@ papers\
 `Win + R` 输入 `shell:startup`，把**桌面「拾穗集」快捷方式**复制进去即可（或对 `launch.vbs` 右键 → 发送到 → 桌面快捷方式，把生成的快捷方式放进去）。开机后服务静默启动，**不会弹出任何窗口**。
 
 ## 技术栈
+
+### 同步回归验证
+
+- `npm test`：同步判定、回报队列、电脑收件箱、服务启动及报告去重。
+- `npm run test:sync:flow`：用 Edge 和真实 IndexedDB 验证在线同步、离线热启动/冷启动、旧账本恢复、上传冲突与服务重启。原生桥由持久化测试桩模拟。
+- `npm run test:sync:native`：用本机 JDK 验证 APK 快照写入器，覆盖 UTF-8 内容、写入失败、替换失败及旧快照保留。可用 `JAVA_HOME` 指定 JDK。
+- `npm run test:ui`：验证电脑与手机布局、表单键盘操作及离线随记保存。
+
+所有服务测试使用临时副本、独立 `data/` 和显式临时 `DANJI_PAPERS_DIR`。浏览器测试需要本机 Edge，可用 `EDGE_PATH` 指定。
+
+手机诊断可运行 `adb logcat -v time -s DanjiSync chromium`，对照原生 `cycle=… stage=snapshot-saved`、JS `[danji-snap] applied` 和 `[danji-sync]` 阶段记录；相同数据用 `boot` 与版本号对应。消息保留 `sync_source`、`sync_cycle`、`sync_stage` 等诊断字段。日志不记录内容正文和配对口令。
+
+失败回报只尝试即时发送，网络恢复后不补发旧失败；成功回报保留重试。断网告警仍保存在手机本地消息中。升级旧 APK 后先联网同步一次，可修复旧版本留下的空 `boot_id` 账本。服务端重启导致进程标识变化时，暂不跨进程导入快照，需联网同步建立新基线，避免旧快照覆盖新数据。
 
 Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端约 3300 行、后端约 1300 行，全部代码人类可读，适合随手改。
 

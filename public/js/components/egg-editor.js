@@ -241,10 +241,10 @@ const EggEditor = {
   },
   template: `
   <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
-    <aside class="drawer">
+    <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑蛋' : (mode === 'claim' ? '🥚 记待领取的蛋' : '🧺 记待使用的蛋') }}</h2>
-        <button class="btn ghost small" @click="close">✕</button>
+        <button class="btn ghost small" @click="close" aria-label="关闭编辑窗口">✕</button>
       </header>
       <form class="drawer-form" @submit.prevent="save">
         <div class="seg">

@@ -64,6 +64,7 @@ const state = reactive({
   ideasLoaded: false,
   ideaSearch: '',
   ideaEditorOpen: false,
+  ideaSaving: false,
   editingIdea: null,
   // 成果板块：桌面端管理，手机端在线只读
   achievements: [],

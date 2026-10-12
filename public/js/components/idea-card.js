@@ -91,7 +91,7 @@ const IdeaCard = {
   template: `
   <article class="card idea-card" :class="{ pinned: idea.pinned }">
     <div class="card-head">
-      <span class="st-pin" v-if="idea.pinned" title="已置顶">📌</span>
+      <span class="st-pin" v-if="idea.pinned" title="已置顶"><app-icon name="pin"></app-icon></span>
       <h3 class="title">{{ idea.title || '（没写题目）' }}</h3>
       <span class="idea-origin" v-if="idea.origin === 'mobile'" title="这条是在手机上记的">📱</span>
       <span class="idea-time">{{ timeText }}</span>
@@ -111,11 +111,11 @@ const IdeaCard = {
     <div class="card-actions" @click.stop v-if="writable">
       <span class="spacer"></span>
       <button class="btn small ghost" @click="emitPin" :title="idea.pinned ? '取消置顶' : '置顶，紧急内容不遗漏'">
-        {{ idea.pinned ? '📌 取消置顶' : '📌 置顶' }}
+        <app-icon name="pin"></app-icon>{{ idea.pinned ? '取消置顶' : '置顶' }}
       </button>
-      <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small ghost" @click="emitDeposit" title="沉淀到知识库">📚</button>
-      <button class="btn small danger" @click="emitRemove">🗑</button>
+      <button class="btn small ghost" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
+      <button class="btn small ghost" @click="emitDeposit" title="沉淀到知识库" aria-label="沉淀到知识库"><app-icon name="kb"></app-icon>沉淀</button>
+      <button class="btn small danger" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
 
     <!-- 全屏看图层：teleport 到 body——卡片带 transform（hover 上浮），

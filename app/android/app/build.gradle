@@ -15,8 +15,14 @@ android {
         applicationId "app.shisuiji.danji"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // 版本号：1.2.0 定版后一直没动过（自 Capacitor 壳骨架起就是 1 / "1.0"），
+        // 期间却出了原生后台同步(1.3.0)、离线快照(1.3.1)、账本去污染(1.3.2)，
+        // 手机上显示的却一直是 1.0。现按里程碑补齐：1.3.0 原生同步底座 → 1.3.1 离线快照 → 1.3.2 账本去污染。
+        // versionCode 用「主*10000+次*100+修」编成整数，单调递增、看得懂，且不受 1.10.0 之类进位影响。
+        // 注意：它与 net.js 的 CLIENT_VERSION(=2) / server.js 的 MIN_CLIENT(=2) 是两条独立的轴，
+        // 后者是「壳与 /api 协议是否兼容」的判据，不跟显示版本联动，别在这里一起动。
+        versionCode 10302
+        versionName "1.3.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

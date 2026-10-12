@@ -83,10 +83,10 @@ const ExpenseEditor = {
   },
   template: `
   <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
-    <aside class="drawer">
+    <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑花销' : '💰 记一笔花销' }}</h2>
-        <button class="btn ghost small" @click="close">✕</button>
+        <button class="btn ghost small" @click="close" aria-label="关闭编辑窗口">✕</button>
       </header>
       <form class="drawer-form" @submit.prevent="save">
         <label>花销内容 *
@@ -116,7 +116,7 @@ const ExpenseEditor = {
         </label>
         <footer class="drawer-foot">
           <button type="button" class="btn ghost" @click="close">取消</button>
-          <button type="submit" class="btn primary">💾 保存</button>
+          <button type="submit" class="btn primary"><app-icon name="save"></app-icon> 保存</button>
         </footer>
       </form>
     </aside>

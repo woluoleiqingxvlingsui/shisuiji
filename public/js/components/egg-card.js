@@ -81,6 +81,7 @@ const EggCard = {
       <div class="deadline" v-if="validText" :class="{ soon: activity.status === 'claimed' && urgency.level && urgency.level !== 'unknown' }">{{ validText }}</div>
     </div>
 
+    <button class="card-details-toggle" @click.stop="expanded = !expanded" :aria-expanded="expanded">{{ expanded ? '收起详情 ⌃' : '查看领取方法与备注 ⌄' }}</button>
     <div class="expand-body" v-if="expanded">
       <p v-if="activity.claim_steps"><b>🧭 领取方法：</b><span class="pre-wrap">{{ activity.claim_steps || '—' }}</span></p>
       <p v-if="activity.notes"><b>📝 备注：</b><span class="pre-wrap">{{ activity.notes }}</span></p>
@@ -109,8 +110,8 @@ const EggCard = {
         <button class="btn small ghost" v-if="activity.status === 'claimed'" @click="emitStatus('expired')">💤 标为过期</button>
       </template>
       <span class="spacer" v-if="writable"></span>
-      <button class="btn small ghost" v-if="writable" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small danger" v-if="writable" @click="emitRemove">🗑</button>
+      <button class="btn small ghost" v-if="writable" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
+      <button class="btn small danger" v-if="writable" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
   </article>
   `,

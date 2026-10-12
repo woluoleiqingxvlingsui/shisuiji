@@ -60,6 +60,16 @@ function openIdeaEditor(idea) {
 }
 
 async function saveIdea(payload) {
+  if (state.ideaSaving) return;
+  state.ideaSaving = true;
+  try {
+    await persistIdea(payload);
+  } finally {
+    state.ideaSaving = false;
+  }
+}
+
+async function persistIdea(payload) {
   const isEdit = !!state.editingIdea;
 
   if (mobileSyncOn()) {

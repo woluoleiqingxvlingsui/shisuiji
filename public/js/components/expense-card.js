@@ -31,8 +31,8 @@ const ExpenseCard = {
     <p class="expense-notes" v-if="expense.notes">{{ expense.notes }}</p>
     <div class="card-actions" @click.stop v-if="writable">
       <span class="spacer"></span>
-      <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small danger" @click="emitRemove">🗑</button>
+      <button class="btn small ghost" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
+      <button class="btn small danger" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
   </article>
   `,

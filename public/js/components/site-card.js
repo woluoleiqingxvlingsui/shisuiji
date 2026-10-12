@@ -73,8 +73,8 @@ const SiteCard = {
         <button class="btn small ghost" v-else @click="emitStatus('to_read')">↩️ 移回待读</button>
         <button class="btn small ghost" v-if="isRead" @click="emitNote">{{ logCount ? '📝 笔记 ' + logCount : '📝 记一条' }}</button>
         <span class="spacer"></span>
-        <button class="btn small ghost" @click="emitEdit">✏️ 编辑</button>
-        <button class="btn small danger" @click="emitRemove">🗑</button>
+        <button class="btn small ghost" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
+        <button class="btn small danger" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
       </template>
     </div>
   </article>

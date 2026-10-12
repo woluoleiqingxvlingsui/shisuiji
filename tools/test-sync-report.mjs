@@ -146,8 +146,8 @@ await okAsync('补报：网络恢复后把欠的都送出去（M18：积压改�
 await okAsync('队首失败就停下：避免电脑一恢复就被陈旧结论刷屏', async () => {
   await reset();
   store.set(PENDING_KEY, JSON.stringify([
-    { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'x' },
-    { kind: 'bg-sync', sync_ok: '0', sync_attempts: '2', sync_reason: 'y' },
+    { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: 'x' },
+    { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: 'y' },
   ]));
   posted = [];
   let call = 0;
@@ -160,7 +160,7 @@ await okAsync('队首失败就停下：避免电脑一恢复就被陈旧结论�
 await okAsync('毒丸：服务端明确拒收（4xx）的条目丢弃，后面的继续发（不再队首堵死）', async () => {
   await reset();
   store.set(PENDING_KEY, JSON.stringify([
-    { kind: 'bg-sync', sync_ok: '0', sync_attempts: '1', sync_reason: 'bad' },
+    { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: 'bad' },
     { kind: 'bg-sync', sync_ok: '1', sync_attempts: '0', sync_reason: '' },
   ]));
   posted = [];
@@ -191,6 +191,51 @@ await okAsync('401 / 网络错：仍然保留等待，不丢弃', async () => {
   r = await flushReports();
   assert.equal(r.left, 1, '网络错:保留');
   assert.equal(r.dropped, 0);
+});
+
+await okAsync('恢复时立即回报成功，旧失败不得先发出', async () => {
+  await reset();
+  store.set(PENDING_KEY, JSON.stringify([{ kind: 'bg-sync', sync_ok: '0', rid: 'old-failure' }]));
+  await reportOutcomes({ ok: true, caughtUp: true, bootId: 'B', version: 28 });
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.sync_ok, '1');
+  assert.equal(posted[0].body.sync_rid, 'catchup:B:28');
+});
+
+await okAsync('默认补发只补成功，旧失败不再当作当前故障', async () => {
+  await reset();
+  store.set(PENDING_KEY, JSON.stringify([{ kind: 'bg-sync', sync_ok: '0', rid: 'old-failure' }]));
+  const result = await flushReports();
+  assert.equal(posted.length, 0);
+  assert.equal(result.dropped, 1);
+});
+
+await okAsync('当前失败仍尝试即时发送', async () => {
+  await reset();
+  await reportOutcomes({ ok: false, reason: 'current failure', stage: 'pull' });
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.sync_ok, '0');
+  assert.equal(posted[0].body.sync_stage, 'pull');
+  assert.equal(posted[0].body.sync_rid, posted[0].body.rid);
+});
+
+await okAsync('失败入队后、在途成功报告完成前已恢复：旧失败不得续发', async () => {
+  await reset();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  globalThis.__setApi(() => gate.then(() => ({ ok: true, status: 201 })));
+  const sending = reportOutcomes({ ok: true, pushed: 1 });
+  const failed = reportOutcomes({ ok: false, reason: 'brief outage' });
+  purgeFailedReports();
+  release();
+  await Promise.all([sending, failed]);
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].body.sync_ok, '1');
+});
+
+await okAsync('跨服务进程的原生大版本不能压制 JS 补齐报告', () => {
+  assert.equal(shouldJsReportCatchUp({ background: true, nativePresent: true,
+    nativeVersion: 999, nativeBoot: 'old', serverVersion: 3, serverBoot: 'new' }), true);
 });
 
 console.log('队列上限与字段清洗');
@@ -274,10 +319,10 @@ await okAsync('裁决·后台+原生落后：JS 抢先拉到，由 JS 汇报（b
 
 await okAsync('裁决·后台+原生已到（或超前）：原生报过了，JS 让位（单响律）', () => {
   assert.equal(shouldJsReportCatchUp({
-    background: true, nativePresent: true, nativeVersion: 28, serverVersion: 28,
+    background: true, nativePresent: true, nativeVersion: 28, serverVersion: 28, nativeBoot: 'B', serverBoot: 'B',
   }), false, '原生只在回报 POST 成功后才落账本,账本到位 = 通知已发出');
   assert.equal(shouldJsReportCatchUp({
-    background: true, nativePresent: true, nativeVersion: 29, serverVersion: 28,
+    background: true, nativePresent: true, nativeVersion: 29, serverVersion: 28, nativeBoot: 'B', serverBoot: 'B',
   }), false, '超前同样让位');
   // 缺省调用不炸,退化成「可报」
   assert.equal(shouldJsReportCatchUp(), true);

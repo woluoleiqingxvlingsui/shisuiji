@@ -1,91 +1,81 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🧺 拾穗集 · 赛博鸡蛋与文献</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>拾穗集 · 你的个人收藏空间</title>
   <link rel="icon" href="/icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="#34745c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="拾穗集">
-  <script>
-    // 首屏渲染前定好明暗，避免闪白/闪黑：auto 时看系统偏好，其余用上次的选择
-    // ?theme=light|dark 可临时强制某个明暗（只为调试/截图方便，不写入偏好）
-    try {
-      var q = new URLSearchParams(location.search).get('theme');
-      var m = (q === 'light' || q === 'dark') ? q : (localStorage.getItem('danji.theme') || 'auto');
-      var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-    } catch (e) {}
-  </script>
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/js/pwa.js"></script>
 </head>
 <body>
 <div id="app" v-cloak>
 
-  <!-- 顶栏 -->
-  <header class="topbar">
-    <span class="logo"><span class="logo-mark">🧺</span><span class="logo-text">拾穗集</span></span>
-    <nav class="board-tabs">
-      <button :class="{ active: state.board === 'ideas' }" @click="switchBoard('ideas')">📝 随记</button>
-      <button :class="{ active: state.board === 'eggs' }" @click="switchBoard('eggs')">🥚 赛博鸡蛋</button>
-      <button :class="{ active: state.board === 'papers' }" @click="switchBoard('papers')">📄 文献</button>
-      <button :class="{ active: state.board === 'sites' }" @click="switchBoard('sites')">🌐 网页</button>
-      <button :class="{ active: state.board === 'expenses' }" @click="switchBoard('expenses')">💰 花销</button>
-      <button :class="{ active: state.board === 'achievements' }" @click="switchBoard('achievements')">🏅 成果</button>
-      <button :class="{ active: state.board === 'kb' }" @click="switchBoard('kb')">📚 知识库</button>
-    </nav>
-    <button class="btn ghost theme-btn" @click="cycleTheme" :title="themeTitle">{{ themeIcon }}</button>
-    <sync-status></sync-status>
-    <!-- 消息 / 通知：电脑端专属。手机在手上改东西走前台同步，本来就即时可见；
-         真正需要后台同步时手机又不在视线内，提示栏没人看。提醒只留在电脑端。
-         手机上看同步状态靠上面的同步胶囊（已同步 / 离线 / 冲突 + 最后同步时间）。 -->
-    <template v-if="isDesktopApp">
-      <button class="btn ghost msg-btn" @click="switchBoard('messages')"
-              title="消息中心：后台同步成功 / 失败 / 恢复、蛋到期等记录都在这里">
-        💬 消息<span class="badge" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+  <a class="skip-link" href="#board-content">跳到内容</a>
+  <aside class="sidebar" aria-label="工作台侧栏">
+    <button class="brand" @click="navigate('ideas')" aria-label="拾穗集，回到随记">
+      <span class="brand-mark"><app-icon name="sprout"></app-icon></span>
+      <span><strong>拾穗集</strong><small>捡到什么，就记什么</small></span>
+    </button>
+    <p class="nav-caption">收集与思考</p>
+    <nav class="sidebar-nav" aria-label="收集与思考">
+      <button v-for="b in primaryBoards" :key="b.id" :class="{ active: state.board === b.id }"
+              :aria-current="state.board === b.id ? 'page' : undefined" @click="navigate(b.id)">
+        <app-icon :name="b.id"></app-icon><span>{{ b.label }}</span><small>{{ boardCount(b.id) }}</small>
       </button>
-    </template>
-    <template v-if="state.board === 'eggs'">
-      <input class="search" type="search" v-model.trim="state.search" placeholder="搜索活动 / 平台 / 备注…">
-      <button class="btn primary" v-if="canWriteEggs" @click="openEditor(null)">＋ 记蛋</button>
-    </template>
-    <template v-else-if="state.board === 'papers'">
-      <input class="search" type="search" v-model.trim="state.paperSearch" placeholder="搜索论文 / 类别 / 备注…">
-      <button class="btn primary" v-if="canWritePapers" @click="openPaperEditor(null)">＋ 记论文</button>
-    </template>
-    <template v-else-if="state.board === 'sites'">
-      <input class="search" type="search" v-model.trim="state.siteSearch" placeholder="搜索网页 / 域名 / 笔记…">
-      <button class="btn primary" v-if="canWriteSites" @click="openSiteEditor(null)">＋ 记网页</button>
-    </template>
-    <template v-else-if="state.board === 'expenses'">
-      <input class="search" type="search" v-model.trim="state.expenseSearch" placeholder="搜索花销内容 / 备注…">
-      <button class="btn primary" v-if="canWriteExpenses" @click="openExpenseEditor(null)">＋ 记一笔</button>
-    </template>
-    <template v-else-if="state.board === 'ideas'">
-      <input class="search" type="search" v-model.trim="state.ideaSearch" placeholder="搜索随记…">
-      <button class="btn primary" @click="openIdeaEditor(null)">＋ 记随记</button>
-    </template>
-    <template v-else-if="state.board === 'achievements'">
-      <input class="search" type="search" v-model.trim="state.achievementSearch" placeholder="搜索成果 / 标签 / 链接…">
-      <button class="btn primary" v-if="canWriteAchievements" @click="openAchievementEditor(null)">＋ 记成果</button>
-    </template>
-    <template v-else-if="state.board === 'kb'">
-      <input class="search" type="search" v-model.trim="state.kbSearch" placeholder="搜索知识 / 标签 / 来源…">
-      <button class="btn primary" v-if="canWriteKb" @click="openKbEditor(null)">＋ 记知识</button>
-    </template>
-    <template v-else-if="state.board === 'messages'">
-      <span class="board-hint">后台同步的成功 / 失败 / 恢复，和蛋到期都会自动记一条到这里</span>
-    </template>
-    <template v-else>
-      <span class="board-hint">蛋过了使用截止，会自动记一条到消息中心</span>
-    </template>
+    </nav>
+    <p class="nav-caption">生活与成长</p>
+    <nav class="sidebar-nav" aria-label="生活与成长">
+      <button v-for="b in secondaryBoards" :key="b.id" :class="{ active: state.board === b.id }"
+              :aria-current="state.board === b.id ? 'page' : undefined" @click="navigate(b.id)">
+        <app-icon :name="b.id"></app-icon><span>{{ b.label }}</span><small>{{ boardCount(b.id) }}</small>
+      </button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="collection-note"><app-icon name="sprout"></app-icon><p>一点一滴，皆有收获。<small>已收集 {{ collectionCount }} 份灵感与日常</small></p></div>
+      <button v-if="isDesktopApp" class="sidebar-message" :class="{ active: state.board === 'messages' }" @click="navigate('messages')">
+        <app-icon name="messages"></app-icon><span>消息中心</span><span class="nav-unread" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+      </button>
+      <span class="sidebar-signature">拾穗集 · 你的个人收藏空间</span>
+    </div>
+  </aside>
+
+  <div class="workspace" :class="'layout-' + layout" :data-board="state.board">
+  <header class="topbar">
+    <span class="breadcrumb"><span class="desktop-crumb">我的工作台<span class="crumb-divider">/</span></span><app-icon :name="state.board"></app-icon>{{ currentBoard.label }}</span>
+    <span class="topbar-date">{{ todayLabel }}</span>
+    <sync-status></sync-status>
+    <button v-if="isDesktopApp" class="btn ghost msg-btn" @click="navigate('messages')" title="打开消息中心" aria-label="打开消息中心">
+      <app-icon name="messages"></app-icon><span class="badge" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+    </button>
   </header>
 
+  <section class="workspace-heading" aria-labelledby="board-title">
+    <div class="heading-copy"><p class="eyebrow">{{ currentBoard.eyebrow }}</p><h1 id="board-title">{{ currentBoard.label }}<span class="heading-dot">.</span></h1><p class="heading-description">{{ currentBoard.description }}</p></div>
+    <div class="heading-art" aria-hidden="true">
+      <svg viewBox="0 0 190 140" fill="none"><circle cx="107" cy="66" r="58" class="art-circle"/><rect x="44" y="30" width="80" height="98" rx="9" transform="rotate(-12 44 30)" class="art-paper-back"/><rect x="73" y="18" width="80" height="106" rx="9" transform="rotate(9 73 18)" class="art-paper"/><path d="m89 45 43 7m-45 8 32 5m-34 9 40 6" class="art-lines"/><path d="M113 108V86m0 12c-13 0-18-8-18-18 12 0 18 7 18 16m0-9c0-11 7-16 18-16 0 10-7 16-18 16" class="art-sprout"/><circle cx="42" cy="88" r="4" class="art-dot"/><path d="M160 43v12m-6-6h12M50 14v8m-4-4h8" class="art-lines"/></svg>
+    </div>
+  </section>
+
+  <section class="workspace-overview" v-if="summaries.length" aria-label="当前板块概览">
+    <div class="overview-item" v-for="(s, index) in summaries" :key="s.label"><span class="overview-marker" :class="'marker-' + index"></span><span>{{ s.label }}</span><strong>{{ s.value }}</strong></div>
+    <span class="overview-note">慢慢积累，随时回看</span>
+  </section>
+
+  <section class="workspace-toolbar" aria-label="搜索与新增">
+    <label class="workspace-search" v-if="currentBoard.search"><app-icon name="search"></app-icon><input class="search" type="search" v-model="searchTerm" :placeholder="currentBoard.placeholder" :aria-label="'搜索' + currentBoard.label"><kbd>Ctrl K</kbd></label>
+    <span class="toolbar-message" v-else>关注每一次同步与提醒</span>
+    <button class="btn primary create-button" v-if="canCreate" @click="createEntry" title="新增记录（Alt + N）"><app-icon name="plus"></app-icon>{{ currentBoard.action }}</button>
+    <span v-else-if="state.board !== 'messages'" class="read-only-label">手机端浏览</span>
+  </section>
+  <div class="collection-toolbar"><span>{{ searchTerm ? '搜索结果' : '我的收藏' }}<span class="result-count">{{ visibleCount }} {{ state.board === 'expenses' && state.expenseView === 'insight' ? '项评价' : '条记录' }}</span><button v-if="searchTerm" class="clear-search" @click="searchTerm = ''">清除搜索</button></span><div class="layout-switch" v-if="state.board !== 'messages'" role="group" aria-label="内容布局"><button :class="{ active: layout === 'grid' }" :aria-pressed="layout === 'grid'" @click="setLayout('grid')" title="卡片布局" aria-label="卡片布局"><app-icon name="grid"></app-icon></button><button :class="{ active: layout === 'list' }" :aria-pressed="layout === 'list'" @click="setLayout('list')" title="列表布局" aria-label="列表布局"><app-icon name="list"></app-icon></button></div></div>
+  <div id="board-content" tabindex="-1">
   <!-- 紧急横幅：即将到期的蛋（仅赛博鸡蛋板块） -->
   <div class="urgent-bar" v-if="state.board === 'eggs' && urgentItems.length">
     <span class="urgent-label">⏰ 快过期了</span>
@@ -477,6 +467,21 @@
     </transition-group>
   </main>
 
+  </div><!-- board-content -->
+  </div><!-- workspace -->
+
+  <nav class="mobile-nav" aria-label="手机板块导航">
+    <button v-for="b in primaryBoards" :key="b.id" :class="{ active: state.board === b.id }" :aria-current="state.board === b.id ? 'page' : undefined" @click="navigate(b.id)"><app-icon :name="b.id"></app-icon><span>{{ b.label }}</span></button>
+    <button :class="{ active: moreActive || moreOpen }" @click="moreOpen = true" :aria-expanded="moreOpen" aria-controls="more-navigation"><app-icon name="more"></app-icon><span>更多</span></button>
+  </nav>
+  <div class="overlay more-overlay" v-if="moreOpen" @click.self="moreOpen = false">
+    <aside class="drawer more-panel" id="more-navigation" v-dialog>
+      <header class="drawer-head"><h2>生活与成长</h2><button class="btn ghost small" @click="moreOpen = false" aria-label="关闭更多板块"><app-icon name="close"></app-icon></button></header>
+      <div class="more-grid"><button v-for="b in moreBoards" :key="b.id" :class="{ active: state.board === b.id }" @click="navigate(b.id)"><app-icon :name="b.id"></app-icon><strong>{{ b.label }}</strong><small>{{ boardCount(b.id) }} 条记录</small></button></div>
+      <p class="more-note">每一份收集，都有自己的位置。</p>
+    </aside>
+  </div>
+
   <!-- 新增 / 编辑抽屉 -->
   <egg-editor v-if="state.board === 'eggs' && state.editorOpen" :initial="state.editing" :known-platforms="platformOptions" :saving="state.saving" @save="saveActivity" @close="state.editorOpen = false"></egg-editor>
   <paper-editor v-if="state.board === 'papers' && state.paperEditorOpen" :initial="state.editingPaper" @save="savePaper" @close="state.paperEditorOpen = false"></paper-editor>
@@ -517,7 +522,7 @@
 
   <!-- 轻提示 -->
   <transition name="toast">
-    <div v-if="state.toast.show" class="toast" :class="state.toast.type">{{ state.toast.msg }}</div>
+    <div v-if="state.toast.show" class="toast" role="status" aria-live="polite" :class="state.toast.type">{{ state.toast.msg }}</div>
   </transition>
 </div>
 

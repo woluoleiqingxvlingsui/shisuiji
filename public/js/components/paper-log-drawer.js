@@ -94,10 +94,10 @@ const PaperLogDrawer = {
   },
   template: `
   <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
-    <aside class="drawer">
+    <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ editing ? (editing.id ? '✏️ 编辑阅读记录' : '📝 记一条阅读记录') : '📝 阅读记录' }}</h2>
-        <button class="btn ghost small" @click="close">✕</button>
+        <button class="btn ghost small" @click="close" aria-label="关闭编辑窗口">✕</button>
       </header>
 
       <!-- 列表模式：按读完日期倒序，一条一张小卡片 -->

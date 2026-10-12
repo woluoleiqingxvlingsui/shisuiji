@@ -28,7 +28,6 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -39,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -229,6 +229,9 @@ public class SyncForegroundService extends Service {
             Log.d(TAG, "syncCycle skipped: no baseUrl (未配对或 JS 还没传过参数)");
             return;
         }
+        String cycleId = UUID.randomUUID().toString();
+        String stage = "pull";
+        Log.i(TAG, "cycle=" + cycleId + " source=native stage=start");
         try {
             HttpResult pull = http(base + "/api/sync/pull", "GET", token, null);
             if (pull.status != 200) {
@@ -238,10 +241,18 @@ public class SyncForegroundService extends Service {
             JSONObject data = new JSONObject(pull.body);
             long v = data.optLong("data_version", -1);
             String boot = data.optString("boot_id", "");
-            if (v <= 0) return;
+            if (v <= 0 || boot.isEmpty() || data.optJSONArray("ideas") == null) {
+                Log.w(TAG, "cycle=" + cycleId + " stage=pull invalid snapshot metadata");
+                return;
+            }
 
             // M18:数据到手先落快照(无论后面是否回报)——App 离线打开时灌进镜像全靠它
-            saveSnapshot(pull.body);
+            stage = "snapshot-save";
+            if (!saveSnapshot(pull.body)) {
+                Log.w(TAG, "cycle=" + cycleId + " stage=snapshot-save failed; success report withheld");
+                return;
+            }
+            Log.i(TAG, "cycle=" + cycleId + " stage=snapshot-saved boot=" + boot + " version=" + v);
 
             long lastV = sp.getLong("lastVersion", 0);
             String lastBoot = sp.getString("lastBoot", "");
@@ -263,17 +274,25 @@ public class SyncForegroundService extends Service {
             report.put("sync_pushed", "0");
             report.put("sync_caught_up", "1");
             report.put("sync_background", pageVisible ? "0" : "1");
+            report.put("sync_rid", "catchup:" + boot + ":" + v);
+            report.put("sync_source", "native");
+            report.put("sync_cycle", cycleId);
+            report.put("sync_stage", "snapshot-saved");
+            report.put("sync_boot_id", boot);
+            report.put("sync_data_version", String.valueOf(v));
+            report.put("sync_observed_at", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US).format(new Date()));
+            stage = "report";
             HttpResult ack = http(base + "/api/messages", "POST", token, report.toString());
             if (ack.status >= 200 && ack.status < 300) {
                 sp.edit().putLong("lastVersion", v).putString("lastBoot", boot).apply();
                 refreshNotification(getString(R.string.bg_sync_notif_synced, hhmm()));
-                Log.i(TAG, "native catch-up reported v=" + v);
+                Log.i(TAG, "cycle=" + cycleId + " stage=reported native catch-up reported v=" + v);
             } else {
                 // 回报失败就不落版本:下轮重新拉取+重报,宁可多报一次也不丢通知
                 Log.w(TAG, "report POST HTTP " + ack.status + " — 版本不落盘,下轮重报");
             }
         } catch (Exception e) {
-            Log.w(TAG, "syncCycle failed", e);
+            Log.w(TAG, "cycle=" + cycleId + " stage=" + stage + " syncCycle failed", e);
         }
     }
 
@@ -285,24 +304,16 @@ public class SyncForegroundService extends Service {
     /**
      * 把 /api/sync/pull 的完整响应体原子落盘(先写 .tmp 再 rename)。
      * 每次 pull 成功都写:快照永远是「原生最后一次拉到的全量数据」。
-     * 写失败只打日志,不影响同步轮其余逻辑——快照是增强,不是依赖。
+     * 写失败保留旧快照，阻止成功回报和版本推进。
      */
-    private void saveSnapshot(String body) {
+    private boolean saveSnapshot(String body) {
         try {
-            File dir = getFilesDir();
-            File tmp = new File(dir, SNAPSHOT_FILE + ".tmp");
-            File dst = new File(dir, SNAPSHOT_FILE);
-            FileOutputStream fos = new FileOutputStream(tmp);
-            try {
-                fos.write(body.getBytes(StandardCharsets.UTF_8));
-            } finally {
-                fos.close();
-            }
-            if (!tmp.renameTo(dst)) {
-                tmp.delete();   // rename 失败:保留旧快照(旧好过没有),别留半个临时文件
-            }
+            SnapshotStore.save(new File(getFilesDir(), SNAPSHOT_FILE), body);
+            Log.i(TAG, "snapshot saved: chars=" + body.length());
+            return true;
         } catch (Exception e) {
             Log.w(TAG, "saveSnapshot failed", e);
+            return false;
         }
     }
 

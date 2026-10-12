@@ -1352,12 +1352,15 @@ function addSyncReport(ctx) {
   const at = new Date().toISOString();
   // M17:同一条回报(sync_rid 相同)重发只算一条——手机端 flush 去重 + 网络层重试
   // 都可能把同一份报文送来两次,消息中心不该出现一对双胞胎
-  const rid = String((ctx.body && ctx.body.sync_rid) || '').slice(0, 64);
+  const rid = String((ctx.body && (ctx.body.sync_rid || ctx.body.rid)) || '').slice(0, 64);
   if (rid) {
     const dup = messageDb.messages.find((m) => m.kind === 'bg-sync' && m.sync_rid === rid);
     if (dup) return ctx.json(dup, 200);
   }
-  dbg(`[report] 收到回报:pushed=${pushed},caught_up=${caughtUp ? 1 : 0},ok=${ok ? 1 : 0}`);
+  dbg(`[report] ${JSON.stringify({ rid, source: String(ctx.body.sync_source || '').slice(0, 16),
+    cycle: String(ctx.body.sync_cycle || '').slice(0, 64), stage: String(ctx.body.sync_stage || '').slice(0, 32),
+    boot: String(ctx.body.sync_boot_id || '').slice(0, 64), version: String(ctx.body.sync_data_version || '').slice(0, 20),
+    pushed, caught_up: caughtUp, ok })}`);
   // 文案由服务端生成，不采信手机传来的 title/body
   // 「补齐」绝大多数发生在用户把 App 切回前台的那一刻,说「后台」名不副实
   // (2026-10-06 用户实测吐槽),改成不带场景的诚实文案。
@@ -1367,10 +1370,13 @@ function addSyncReport(ctx) {
       : (caughtUp
         ? (background ? '手机在后台补齐了电脑端的更新 ✅' : '手机在前台补齐了电脑端的更新 ✅')
         : '手机已同步 ✅'))
-    : '手机同步失败 ❌';
+    : (ctx.body.sync_stage === 'push' ? '手机上传改动失败 ❌'
+      : ctx.body.sync_stage === 'pull' ? '手机接收更新失败 ❌' : '手机同步失败 ❌');
   // 时间给人看:北京时间,不再显示 UTC(用户曾因 UTC 时间困惑过一轮排查)
   const body = ok
-    ? `手机在 ${beijingHHMM(at)} 把电脑端的更新拉下来了`
+    ? (pushed > 0
+      ? `手机在 ${beijingHHMM(at)} 把 ${pushed} 条改动同步到了电脑端`
+      : `手机在 ${beijingHHMM(at)} 把电脑端的更新拉下来了`)
     : `重试 ${attempts} 次仍未成功${reason ? `：${reason}` : ''}`;
   const msg = {
     id: crypto.randomUUID(),
@@ -1388,6 +1394,12 @@ function addSyncReport(ctx) {
     sync_caught_up: caughtUp ? '1' : '0',
     sync_background: background ? '1' : '0',
     sync_rid: rid,
+    sync_source: String(ctx.body.sync_source || '').slice(0, 16),
+    sync_cycle: String(ctx.body.sync_cycle || '').slice(0, 64),
+    sync_stage: String(ctx.body.sync_stage || '').slice(0, 32),
+    sync_boot_id: String(ctx.body.sync_boot_id || '').slice(0, 64),
+    sync_data_version: String(ctx.body.sync_data_version || '').slice(0, 20),
+    sync_observed_at: String(ctx.body.sync_observed_at || '').slice(0, 40),
     read: false,
     created_at: at,
   };

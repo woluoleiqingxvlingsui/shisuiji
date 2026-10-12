@@ -147,6 +147,8 @@ public class BackgroundSyncPlugin extends Plugin {
     public void readSnapshot(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("data", "");
+        // M19.1 诊断:入口打点——「JS 压根没调到桥」与「调到了但没文件」靠这一行区分
+        Log.i(SyncForegroundService.TAG, "readSnapshot called");
         try {
             File f = new File(getContext().getFilesDir(), SyncForegroundService.SNAPSHOT_FILE);
             if (f.exists()) {
@@ -156,10 +158,17 @@ public class BackgroundSyncPlugin extends Plugin {
                     byte[] buf = new byte[8192];
                     int n;
                     while ((n = fis.read(buf)) != -1) bos.write(buf, 0, n);
-                    ret.put("data", new String(bos.toByteArray(), StandardCharsets.UTF_8));
+                    String snapshot = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+                    ret.put("data", snapshot);
+                    // M19.1 诊断:实际读到的长度(chars=0 即文件空/写坏,对应断点 ④)
+                    Log.i(SyncForegroundService.TAG, "readSnapshot: chars=" + snapshot.length());
                 } finally {
                     fis.close();
                 }
+            } else {
+                // M19.1 诊断:原本「文件不存在」与「文件存在但读出空串」都表现为 data="",
+                // 这里把前者单独留痕(断点 ④)
+                Log.i(SyncForegroundService.TAG, "readSnapshot: file missing");
             }
         } catch (Exception e) {
             Log.w(SyncForegroundService.TAG, "readSnapshot failed", e);

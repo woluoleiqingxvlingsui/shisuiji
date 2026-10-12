@@ -35,7 +35,7 @@ const MessageCard = {
     <div class="card-actions" @click.stop v-if="markable">
       <button class="btn small ghost" v-if="message.activity_id" @click="emitGoto">→ 查看原蛋</button>
       <span class="spacer" v-if="message.activity_id"></span>
-      <button class="btn small danger" @click="emitRemove">🗑</button>
+      <button class="btn small danger" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
   </article>
   `,

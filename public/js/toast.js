@@ -8,18 +8,22 @@
 import { state } from './state.js';
 
 let toastTimer = null;
+let importantActive = false;
 
 /**
  * @param {string} msg 提示文本
  * @param {'ok'|'warn'|'report'} type 样式:ok 深色常规 / warn 红色告警 /
  *   report 强调色醒目(同步回报、蛋到期等重要提醒专用)
- * @param {{ duration?: number }} [opts] duration 停留毫秒数,缺省 2200,下限 800
+ * @param {{ duration?: number, important?: boolean }} [opts] 重要提醒不被普通提示覆盖
  */
 function toast(msg, type = 'ok', opts = {}) {
+  const important = type === 'report' || opts.important === true;
+  if (state.toast.show && importantActive && !important) return;
+  importantActive = important;
   state.toast = { show: true, msg, type };
   clearTimeout(toastTimer);
   const ms = Math.max(800, Number(opts && opts.duration) || 2200);
-  toastTimer = setTimeout(() => { state.toast.show = false; }, ms);
+  toastTimer = setTimeout(() => { state.toast.show = false; importantActive = false; }, ms);
 }
 
 export { toast };

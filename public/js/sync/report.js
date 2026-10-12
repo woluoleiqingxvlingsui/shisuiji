@@ -6,7 +6,7 @@
  *
  * 闭环拆成两半：
  *  - 手机（reportOutcomes）：把结论排队 POST /api/messages（kind=bg-sync）。
- *    失败不丢，留在本机队列里，等下一次能连上时补报——所以「同步失败」也能最终送达电脑。
+ *    成功报告保留补发；失败只即时尝试，手机本地告警仍由 push.js 保存。
  *  - 电脑（startReportInbox）：监听 /api/events 的 report 帧，立刻弹应用内醒目 toast
  *    并刷新消息中心（M18 起 Windows 系统通知已整体拆除）。服务端对这类回报是
  *    「立即广播」的，不走那条 5 分钟防抖：防抖是为数据改动设计的，
@@ -68,11 +68,13 @@ function writePending(list) {
 }
 
 /**
- * 记一条待回报的同步结论。**不直接发**——发不出去正是常态（连不上电脑），
- * 直接发等于白丢。真正的发送交给 flushReports，由同步流程每轮捎带。
+ * 同步结论先入队再尝试发送。成功可补发，失败只在当前调用尝试发送。
  * @param {{ ok: boolean, reason?: string, attempts?: number, pushed?: number, caughtUp?: boolean }} o
  */
-function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false, background = false }) {
+function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = false, background = false,
+  bootId = '', version = 0, cycleId = '', stage = '' }) {
+  // 成功证据先淘汰旧失败，再启动发送，不能让旧失败抢先出门。
+  if (ok) purgeFailedReports();
   const list = readPending();
   // M18:失败回报只留最新一条(旧的整组丢弃)。断网期间每个兜底轮次都会失败一次,
   // 逐条排队的话重连后电脑端会被 N 条「同步失败」刷屏,而它们说的是同一件事。
@@ -89,11 +91,19 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
     sync_caught_up: caughtUp ? '1' : '0',
     sync_background: background ? '1' : '0',
     kind: 'bg-sync',
-    rid: newRid(),
+    rid: ok && caughtUp && !pushed && bootId && version > 0
+      ? `catchup:${bootId}:${version}` : newRid(),
+    sync_source: 'js',
+    sync_cycle: cycleId,
+    sync_stage: stage,
+    sync_boot_id: bootId,
+    sync_data_version: String(version),
+    sync_observed_at: new Date().toISOString(),
     queued_at: new Date().toISOString(),
   });
   writePending(list);
-  return flushReports();
+  // 失败只允许在发生当轮尝试发送；以后补发会把旧状态当成当前故障。
+  return flushReports({ failureRid: ok ? '' : list[list.length - 1].rid });
 }
 
 /**
@@ -108,9 +118,9 @@ function reportOutcomes({ ok, reason = '', attempts = 0, pushed = 0, caughtUp = 
  *  (2026-10-06 实测成对回报:reportOutcomes 内部与 syncNow 末尾各触发一次 flush) */
 let flushing = null;
 
-async function flushReports() {
+async function flushReports({ failureRid = '' } = {}) {
   if (flushing) return flushing;
-  flushing = doFlushReports();
+  flushing = doFlushReports(failureRid);
   try {
     return await flushing;
   } finally {
@@ -118,7 +128,7 @@ async function flushReports() {
   }
 }
 
-async function doFlushReports() {
+async function doFlushReports(failureRid) {
   let sent = 0;
   let dropped = 0;
   for (;;) {
@@ -129,6 +139,11 @@ async function doFlushReports() {
       // 升级前留下的老条目没有 rid:补一个再发,后续按 rid 精确出队
       one.rid = newRid();
       writePending(list);
+    }
+    if (one.sync_ok === '0' && one.rid !== failureRid) {
+      writePending(readPending().filter((x) => x.rid !== one.rid));
+      dropped += 1;
+      continue;
     }
     // M18:过期回报(排队超过 REPORT_TTL_MS)直接丢弃。此刻既然能连上电脑,
     // 这条「连不上」的旧闻只会误导——成功早已发生,或失败原因早已过时。
@@ -143,7 +158,7 @@ async function doFlushReports() {
       const res = await api('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(one),
+        body: JSON.stringify({ ...one, sync_rid: one.rid }),
       });
       if (res.ok) {
         // 重新读一遍再按 rid 删:期间 reportOutcomes 可能刚插了新条目,不能整队列覆盖
@@ -217,14 +232,15 @@ function shouldReportSuccess({ pushed = 0, caughtUp = false, now = Date.now(), l
  * @param {{ pushed?: number, caughtUp?: boolean }} info
  * @returns {boolean} 该不该发(真正的发送交给 reportOutcomes → flushReports 异步去做)
  */
-function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } = {}) {
+function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false, ...diagnostic } = {}) {
+  purgeFailedReports();
   const now = Date.now();
   if (!shouldReportSuccess({ pushed, caughtUp, now, lastAt: lastSuccessAt, lastPushedAt })) return false;
   lastSuccessAt = now;
   if ((pushed | 0) > 0) lastPushedAt = now;
   // 发报本身是异步的(flushReports 自己吞异常),这里只回答「该不该报」,
   // 所以不等它 —— 同步流程是主线程路径,不该被一次网络往返挂住。
-  reportOutcomes({ ok: true, pushed, caughtUp, background });
+  reportOutcomes({ ok: true, pushed, caughtUp, background, ...diagnostic });
   return true;
 }
 
@@ -234,8 +250,10 @@ function reportSyncSuccess({ pushed = 0, caughtUp = false, background = false } 
  *  - 后台且原生在场:原生账本 < 服务端版本 = 原生没到过 → JS 汇报
  *    (灰色窗口 JS 抢先的场景,M17 无条件压制曾把这类通知整个吃掉);
  *    原生账本 >= 服务端版本 = 原生已报过(它只在回报 POST 成功后才落账本)→ JS 让位。 */
-function shouldJsReportCatchUp({ background = false, nativePresent = false, nativeVersion = 0, serverVersion = 0 } = {}) {
+function shouldJsReportCatchUp({ background = false, nativePresent = false, nativeVersion = 0, serverVersion = 0,
+  nativeBoot = '', serverBoot = '' } = {}) {
   if (!background || !nativePresent) return true;
+  if (!nativeBoot || !serverBoot || nativeBoot !== serverBoot) return true;
   return (Number(serverVersion) || 0) > (Number(nativeVersion) || 0);
 }
 
@@ -339,8 +357,9 @@ function stopReportInbox() {
 function onReport(evt) {
   let data = {};
   try { data = JSON.parse(evt.data || '{}'); } catch { /* ignore */ }
-  markAnnounced(data.id);                    // 登记：兜底轮询别再弹一遍
-  announceReport({ title: data.title, body: data.body, ok: data.ok !== false });
+  if (markAnnounced(data.id)) {
+    announceReport({ title: data.title, body: data.body, ok: data.ok !== false });
+  }
   try { window.dispatchEvent(new CustomEvent('danji:remote-change')); } catch { /* ignore */ }
   loadMessages().catch(() => {});
 }
@@ -372,7 +391,7 @@ function markAnnounced(id) {
  *  toast 永不抛异常,弹不弹得出来页面都在,消息中心一定有记录。 */
 function announceReport({ title, body = '', ok = true } = {}) {
   const text = body ? `${title || '手机同步回报'} · ${body}` : (title || '手机同步回报');
-  toast(text, ok ? 'report' : 'warn', { duration: 6000 });
+  toast(text, ok ? 'report' : 'warn', { duration: 6000, important: true });
 }
 
 /**

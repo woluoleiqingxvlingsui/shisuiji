@@ -29,7 +29,7 @@ const KbMerge = {
   },
   template: `
   <div class="overlay sync-conflict-overlay" v-if="visible">
-    <aside class="drawer sync-conflict-drawer">
+    <aside v-dialog class="drawer sync-conflict-drawer">
       <header class="drawer-head">
         <h2>📚 知识库合并</h2>
         <button class="btn ghost small" @click="pick('manual')">✕</button>

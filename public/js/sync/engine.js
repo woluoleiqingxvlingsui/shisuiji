@@ -51,34 +51,73 @@ function writeStoredVersion(v, bootId) {
   } catch { /* 隐私模式忽略 */ }
 }
 
+// 快照导入与联网 pull 共用门闩，判定、镜像写入、版本记账必须串行完成。
+let mirrorWork = Promise.resolve();
+function withMirrorLock(work) {
+  const pending = mirrorWork.then(work, work);
+  mirrorWork = pending.catch(() => {});
+  return pending;
+}
+function syncLog(cycle, stage, detail = {}) {
+  console.info('[danji-sync]', JSON.stringify({ source: 'js', cycle, stage, ...detail }));
+}
+function validPull(data) {
+  return !!data && Array.isArray(data.ideas) && Number.isSafeInteger(data.data_version)
+    && data.data_version > 0 && typeof data.boot_id === 'string' && !!data.boot_id;
+}
+
 /** M18:读原生后台同步落盘的离线快照,判定后灌进镜像。
  *  场景:电脑端改了内容 → 手机在后台被原生 SSE 秒级补齐(数据只落在原生快照文件,
  *  WebView 镜像没动) → 用户此刻断网打开 App:不灌快照看到的就是旧镜像。
  *  灌完同时把版本记进 JS 账本并 noteSynced 给原生,三本账(原生/JS/镜像)对齐,
  *  之后联网同步不会把这次补齐误判成又一次「落后」而重复回报。
+ *  保留关键导入诊断，不记录随记正文或配对口令。
  *  @returns {Promise<boolean>} true 表示镜像被更新过(调用方应刷新显示) */
 async function importNativeSnapshot() {
-  try {
-    const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
-    if (!p || !p.readSnapshot) return false;
-    const snap = await p.readSnapshot();
-    const raw = String((snap && snap.data) || '');
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    const snapVersion = Number(parsed.data_version) || 0;
-    const snapBoot = String(parsed.boot_id || '');
-    if (!shouldApplySnapshot({
-      storedVersion: readStoredVersion(),
-      storedBootId: readStoredBootId(),
-      snapVersion,
-      snapBootId: snapBoot,
-    })) return false;
-    await writeMirror(parsed);
-    writeStoredVersion(snapVersion, snapBoot);
-    noteNativeSynced(snapVersion, snapBoot);
-    return true;
-  } catch { /* 桥不可用/快照损坏:按本地镜像走,绝不向上抛 */ }
-  return false;
+  return withMirrorLock(async () => {
+    try {
+      const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
+      if (!p || !p.readSnapshot) {
+        console.log('[danji-snap] skip: bridge unavailable');
+        return false;
+      }
+      const snap = await p.readSnapshot();
+      const raw = String((snap && snap.data) || '');
+      if (!raw) {
+        console.log(`[danji-snap] skip: empty snapshot (raw.length=${raw.length})`);
+        return false;
+      }
+      const parsed = JSON.parse(raw);
+      if (!validPull(parsed)) {
+        console.log('[danji-snap] skip: invalid snapshot metadata');
+        return false;
+      }
+      const snapVersion = Number(parsed.data_version) || 0;
+      const snapBoot = String(parsed.boot_id || '');
+      // M19.1:stored 两值先落局部变量——判定不过时要把 snap/stored 四个值一起打进日志
+      const storedVersion = readStoredVersion();
+      const storedBootId = readStoredBootId();
+      if (!shouldApplySnapshot({
+        storedVersion,
+        storedBootId,
+        snapVersion,
+        snapBootId: snapBoot,
+      })) {
+        console.log(`[danji-snap] skip: version check (snap v=${snapVersion} boot=${snapBoot}`
+          + ` vs stored v=${storedVersion} boot=${storedBootId})`);
+        return false;
+      }
+      await writeMirror(parsed);
+      writeStoredVersion(snapVersion, snapBoot);
+      noteNativeSynced(snapVersion, snapBoot);
+      console.log(`[danji-snap] applied v=${snapVersion} boot=${snapBoot}`);
+      return true;
+    } catch (e) {
+      console.log(`[danji-snap] error: ${e && e.message}`);
+      /* 桥不可用/快照损坏:按本地镜像走,绝不向上抛 */
+    }
+    return false;
+  });
 }
 
 /** M17:告诉原生「JS 已经拉到这个版本」——原生据此不把手机自己的推送误报成
@@ -497,7 +536,7 @@ async function pushOnce() {
     const result = byId.get(entry.id) || { id: entry.id, status: 'error', error: '服务端未返回该条结果' };
     await applyPushResult(entry, result);
   }
-  return { pushed: ops.length, results };
+  return { pushed: results.filter((r) => r.status === 'ok').length, results };
 }
 
 async function pullOnce() {
@@ -509,8 +548,19 @@ async function pullOnce() {
   if (!ok || !data) {
     throw new Error((data && data.error) || `pull 失败 HTTP ${status}`);
   }
-  await writeMirror(data);
-  return { pulled: true, server_time: data.server_time, data_version: data.data_version };
+  if (!validPull(data)) {
+    throw new Error('同步返回异常（数据或版本标识缺失），本地镜像保留');
+  }
+  return withMirrorLock(async () => {
+    const storedVersion = readStoredVersion();
+    const storedBoot = readStoredBootId();
+    if (storedBoot === data.boot_id && storedVersion > data.data_version) {
+      return { pulled: true, data_version: storedVersion, boot_id: storedBoot };
+    }
+    await writeMirror(data);
+    writeStoredVersion(data.data_version, data.boot_id);
+    return { pulled: true, server_time: data.server_time, data_version: data.data_version, boot_id: data.boot_id };
+  });
 }
 
 /** 主同步循环 */
@@ -526,6 +576,9 @@ async function syncNow(opts = {}) {
     return { skipped: true, reason: 'offline' };
   }
   syncing = true;
+  const cycleId = uuid();
+  let stage = 'start';
+  syncLog(cycleId, stage);
   setStatus('syncing');
   // 同步开始前先记住上次的版本号与进程标识，pull 回来一比就知道这轮有没有落后
   let prevVersion = readStoredVersion();
@@ -537,19 +590,17 @@ async function syncNow(opts = {}) {
   // 以前这里照抄 writeStoredVersion(nvV, nvB),于是 2026-10-11 实锤出 bug 1:
   // 断网开 App 时对账先把账本抬到 28,紧接着 M18 的 importNativeSnapshot 判定
   // 「快照 v28 ≤ 账本 v28」而拒绝灌入,冷启动热启动都永远看旧数据(账本被污染成谎言)。
-  // 仍要保留 prevVersion/prevBoot 的内存更新:原生在前台/后台抢先补齐过,
+  // 原生版本先暂存，pull 返回 boot 后才比较。原生在前台/后台抢先补齐过,
   // 不把这轮的开局基线抬上去,isCaughtUp 会把同一条改动再判一次「落后」,
   // 电脑端一条改动就会收到两条通知(M17 的来由,场景 5/7 的防双响靠的就是它)。
+  let nativeBaseline = null;
   try {
     const p = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundSync;
     if (p && p.getSyncedVersion) {
       const nv = await p.getSyncedVersion();
       const nvV = Number(nv && nv.version) || 0;
       const nvB = String((nv && nv.bootId) || '');
-      if (nvV > prevVersion) {
-        prevVersion = nvV;
-        prevBoot = nvB;
-      }
+      nativeBaseline = { version: nvV, boot: nvB };
     }
   } catch { /* 桥不可用(浏览器)按本地账本走 */ }
   // 顺便记下这轮开始时是否在后台:补齐文案要区分「前台补齐」/「后台补齐」(M16)
@@ -560,7 +611,9 @@ async function syncNow(opts = {}) {
       return { skipped: true, reason: 'need_token' };
     }
 
+    stage = 'push';
     const push = await pushOnce();
+    syncLog(cycleId, 'push-complete', { pushed: push.pushed || 0 });
     if (push.needToken) {
       await reloadIdeasDisplay();
       return { skipped: true, reason: 'need_token' };
@@ -570,8 +623,10 @@ async function syncNow(opts = {}) {
     // 2026-10-06 12:51 实测,推送成功后轮次在中途死掉(切后台冻结/响应超时),
     // 挂在轮次末尾的回报整个丢失,电脑端永远收不到「手机推来了 N 条」。
     // reportOutcomes 本身就是先入队、异步补发;轮次末尾那次回报会被 60 秒冷却合并。
-    if ((push.pushed || 0) > 0) reportSyncSuccess({ pushed: push.pushed, background: wasHidden });
+    if ((push.pushed || 0) > 0) reportSyncSuccess({ pushed: push.pushed, background: wasHidden,
+      cycleId, stage: 'push-applied' });
 
+    stage = 'pull';
     const pull = await pullOnce();
     if (pull && pull.needToken) {
       await reloadIdeasDisplay();
@@ -583,7 +638,13 @@ async function syncNow(opts = {}) {
     // 改坏了能被 test-bg-sync 的五条分支断言立刻抓住。
     const serverVersion = Number(pull && pull.data_version) || 0;
     const serverBoot = String((pull && pull.boot_id) || '');
-    const caughtUp = isCaughtUp({
+    if (nativeBaseline && nativeBaseline.boot === serverBoot && nativeBaseline.version > 0
+        && (prevBoot !== serverBoot || nativeBaseline.version > prevVersion)) {
+      prevVersion = nativeBaseline.version;
+      prevBoot = nativeBaseline.boot;
+    }
+    syncLog(cycleId, 'mirror-applied', { version: serverVersion, boot: serverBoot });
+    const caughtUp = !!prevBoot && isCaughtUp({
       prevVersion, prevBoot,
       serverVersion, serverBoot,
     });
@@ -615,14 +676,15 @@ async function syncNow(opts = {}) {
             background: true,
             nativePresent: true,
             nativeVersion: Number(nv && nv.version) || 0,
+            nativeBoot: String((nv && nv.bootId) || ''),
             serverVersion,
+            serverBoot,
           });
         }
       } catch { /* 桥异常按可报处理,不许因桥吞掉通知 */ }
     }
 
-    // 只有真的成功了才记版本：失败时数据没拿到，记了就等于假装自己是最新的
-    if (serverVersion) writeStoredVersion(serverVersion, serverBoot);
+    // JS 版本已在 pullOnce 的镜像门闩内记好，此处只通知原生，避免晚记账覆盖新快照。
     if (serverVersion) noteNativeSynced(serverVersion, serverBoot);
 
     // 同步成功 → 回报电脑端。**这是成功回报的唯一出口**：
@@ -635,15 +697,18 @@ async function syncNow(opts = {}) {
       pushed: (push && push.pushed) || 0,
       caughtUp: reportCaughtUp,
       background: wasHidden,
+      cycleId, stage: 'mirror-applied', bootId: serverBoot, version: serverVersion,
     });
 
     // M18:先清掉积压的失败回报——同步都成功了,那些「连不上」的旧闻发出去只会
     // 制造「明明恢复了却收到失败」的矛盾(2026-10-08 实测),然后把其余回报补发掉。
     purgeFailedReports();
     flushReports();
+    syncLog(cycleId, 'complete', { version: serverVersion, boot: serverBoot, caughtUp: reportCaughtUp });
 
     return { ok: true, push, pull, reason: opts.reason };
   } catch (e) {
+    syncLog(cycleId, 'failed', { failedStage: stage, error: (e && e.message) || String(e) });
     state.sync.lastError = (e && e.message) || String(e);
     state.sync.offline = true;
     await refreshPendingCount();
@@ -651,7 +716,7 @@ async function syncNow(opts = {}) {
     if (opts.reason === 'manual') {
       toast('同步失败：' + state.sync.lastError, 'warn');
     }
-    return { ok: false, error: state.sync.lastError };
+    return { ok: false, error: state.sync.lastError, cycleId, stage };
   } finally {
     syncing = false;
   }

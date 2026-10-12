@@ -311,7 +311,7 @@ const PairDrawer = {
   },
   template: `
   <div class="overlay pair-overlay" v-if="open">
-    <aside class="drawer pair-drawer">
+    <aside v-dialog class="drawer pair-drawer">
       <header class="drawer-head">
         <h2>🔗 连接电脑上的拾穗集</h2>
       </header>

@@ -75,8 +75,8 @@ const PaperCard = {
       <button class="btn small ghost" v-else-if="writable && isRead" @click="emitStatus('to_read')">↩️ 移回待读</button>
       <button class="btn small ghost" v-if="writable && isRead" @click="emitLog">{{ logCount ? '📝 记录 ' + logCount : '📝 记一条' }}</button>
       <span class="spacer" v-if="showDesktopActions"></span>
-      <button class="btn small ghost" v-if="showDesktopActions" @click="emitEdit">✏️ 编辑</button>
-      <button class="btn small danger" v-if="showDesktopActions" @click="emitRemove">🗑</button>
+      <button class="btn small ghost" v-if="showDesktopActions" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
+      <button class="btn small danger" v-if="showDesktopActions" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
   </article>
   `,

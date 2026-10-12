@@ -2,8 +2,10 @@
    板块：🥚 赛博鸡蛋（原蛋记） / 📄 文献（论文待读已读管理） */
 import { createApp, reactive, computed, ref, onMounted, onUnmounted, nextTick, provide } from './vue-globals.js';
 import { state } from './state.js';
+import { useWorkspace, dialogDirective } from './workspace.js';
+import { AppIcon } from './components/app-icon.js';
 import { toast } from './toast.js';
-import { applyTheme, cycleTheme, themeIcon, themeTitle, systemDark, onSystemThemeChange, onStorageTheme } from './theme.js';
+import { applyTheme } from './theme.js';
 import { switchBoard, syncTopbarHeight, observeTopbar, stopObserveTopbar } from './ui.js';
 import { loadMessages, pushExpiredMessage, pushClosedMessage, markMessageRead, removeMessage, markAllRead, clearReadMessages, unreadCount } from './boards/messages.js';
 import { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, checkReminders, settleRunning, settleOverdue, loadSamples } from './boards/eggs.js';
@@ -153,7 +155,7 @@ const app = createApp({
     provide('toast', toast); // 子组件（卡片等）通过 inject 使用
     toastBridge = toast;     // 回填给全局兜底，服务异常时也能给出可见提示
 
-    /* ---- 主题：跟随系统 → 浅色 → 深色（首屏由 index.html 的内联脚本先定好，避免闪白） ---- */
+    /* ---- 界面固定使用浅色主题 ---- */
 
     // 顶栏换行后高度会变，实时同步 --topbar-h，保证紧急横幅吸顶位置正确
 
@@ -323,10 +325,7 @@ const app = createApp({
     }
 
     onMounted(async () => {
-      applyTheme(); // 内联脚本已经设过，这里兜一次（也覆盖脚本被禁用的情况）
-      if (systemDark.addEventListener) systemDark.addEventListener('change', onSystemThemeChange);
-      else if (systemDark.addListener) systemDark.addListener(onSystemThemeChange);
-      window.addEventListener('storage', onStorageTheme);
+      applyTheme();
       observeTopbar();
       syncTopbarHeight();
 
@@ -403,13 +402,17 @@ const app = createApp({
       window.removeEventListener('danji:paired', onPaired);
       window.removeEventListener('danji:online', onPaired);
       stopObserveTopbar();
-      if (systemDark.removeEventListener) systemDark.removeEventListener('change', onSystemThemeChange);
-      else if (systemDark.removeListener) systemDark.removeListener(onSystemThemeChange);
-      window.removeEventListener('storage', onStorageTheme);
       disposeSync();
     });
 
     return {
+      ...useWorkspace(computed(() => ({
+        ideas: filteredIdeas.value.length, eggs: filteredActivities.value.length,
+        papers: filteredPapers.value.length, sites: filteredSites.value.length,
+        expenses: state.expenseView === 'insight' ? expenseInsights.value.rows.length : expenseVisibleItems.value.length,
+        achievements: filteredAchievements.value.length, kb: filteredKb.value.length,
+        messages: state.messages.length,
+      })[state.board] || 0)),
       state, statusTabs, filteredActivities, urgentItems, platformOptions, toast,
       openEditor, saveActivity, setStatus, reopenActivity, removeActivity, jumpTo,
       loadSamples, load,
@@ -444,7 +447,6 @@ const app = createApp({
       // 消息 / 通知两个入口只给电脑端；手机端靠同步胶囊看状态
       isDesktopApp: computed(() => isDesktop()),
       mobileHint: computed(() => mobileReadOnlyHint()),
-      cycleTheme, themeIcon, themeTitle,
       reportInboxState: computed(() => state.reportInbox),
       reportInboxText: computed(() => ({
         idle: '回报通道未启动', connecting: '回报通道连接中…',
@@ -454,6 +456,8 @@ const app = createApp({
   },
 });
 
+app.directive('dialog', dialogDirective);
+app.component('app-icon', AppIcon);
 app.component('egg-card', EggCard);
 app.component('egg-editor', EggEditor);
 app.component('paper-card', PaperCard);

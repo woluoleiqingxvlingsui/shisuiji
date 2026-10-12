@@ -223,10 +223,9 @@ function onSyncFail(result) {
   owed = true; // 还欠着这次同步，重试时接着试
   const plan = nextSyncRetry(attempts);
   const why = (result && result.error) || '未知原因';
-  // 每次失败都回报，不等到播报那一刻：连不上电脑时这条会留在本机队列里，
-  // 等下次能连上时补报，于是「失败」最终也能出现在电脑的消息中心。
-  // 但连续失败会连着排多条，超过上限会自动丢弃最旧的，flushReports 也只在队首成功时才继续发。
-  reportOutcomes({ ok: false, attempts: attempts, reason: why });
+  // 当前失败尝试即时回报；电脑不可达时手机本地保留告警，恢复后不补发过时失败。
+  reportOutcomes({ ok: false, attempts: attempts, reason: why,
+    cycleId: result && result.cycleId, stage: result && result.stage });
   if (plan.notify && !incidentNotified) {
     incidentNotified = true;
     // 播报过就归零：后续失败不再重复打扰，但仍按 5 分钟继续重试

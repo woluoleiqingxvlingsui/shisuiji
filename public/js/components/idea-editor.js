@@ -27,6 +27,7 @@ const IdeaEditor = {
     const canSave = computed(() => !!(form.title.trim() || form.content.trim()));
     // 离线（手机断网）传不了图：上传要走电脑端
     const offline = computed(() => !!(state.sync && state.sync.enabled && state.sync.offline));
+    const saving = computed(() => state.ideaSaving);
 
     // 预览已上传的图：与卡片同一 fetch→blob 通道
     const { urls: imgUrls } = useImageUrls(computed(() => form.images));
@@ -96,17 +97,17 @@ const IdeaEditor = {
 
     return {
       form, titleInput, contentArea, fileInput, autoGrow, save, canSave, ideas: CONFIG.ideas,
-      uploading, offline, imgUrls, onPickFiles, removeImage, MAX_IMAGES,
+      uploading, offline, saving, imgUrls, onPickFiles, removeImage, MAX_IMAGES,
       close: () => emit('close'),
       onOverlayMousedown, onOverlayMouseup,
     };
   },
   template: `
   <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
-    <aside class="drawer">
+    <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑随记' : '📝 记条随记' }}</h2>
-        <button class="btn ghost small" @click="close">✕</button>
+        <button class="btn ghost small" @click="close" aria-label="关闭编辑窗口">✕</button>
       </header>
       <form class="drawer-form" @submit.prevent="save">
         <label>📝 这条是关于什么的
@@ -133,7 +134,7 @@ const IdeaEditor = {
         </label>
         <footer class="drawer-foot">
           <button type="button" class="btn ghost" @click="close">取消</button>
-          <button type="submit" class="btn primary" :disabled="uploading">💾 保存</button>
+          <button type="submit" class="btn primary" :disabled="uploading || saving || !canSave"><app-icon name="save"></app-icon>{{ saving ? '保存中…' : '保存' }}</button>
         </footer>
       </form>
     </aside>
