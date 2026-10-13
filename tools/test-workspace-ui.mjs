@@ -120,12 +120,20 @@ try {
   await viewport(1440, 1050);
   await navigate();
   assert.equal(await evaluate(`document.querySelectorAll('.idea-card').length`), 4);
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.egg-list')).gridTemplateColumns.split(' ').length`), 2);
+  // M20 任务 E：双列瀑布流（不再是等宽 CSS Grid）。断言列数与「两列高度不同」
+  // ——后者正是 masonry 相对 grid 的核心收益：矮卡下方不再留整行空白。
+  assert.equal(await evaluate(`document.querySelectorAll('.egg-list.masonry .masonry-col').length`), 2, 'desktop masonry renders 2 columns');
+  const colFill = await evaluate(`[...document.querySelectorAll('.egg-list.masonry .masonry-col')].map(c => c.children.length)`);
+  assert.ok(colFill.reduce((a, b) => a + b, 0) === 4, 'all 4 cards distributed: ' + JSON.stringify(colFill));
+  assert.notDeepEqual(colFill[0], colFill[1], 'masonry balances uneven cards across columns: ' + JSON.stringify(colFill));
+  console.log('✓ masonry distributes cards into two balanced columns');
   await checkLayout('desktop card layout');
   await screenshot('desktop-notes');
   await evaluate(`document.querySelector('.layout-switch button:last-child').click()`);
   await pause(100);
+  // 列表布局：单列纵向排布，且 4 张卡全在唯一一列里（分列不生效）
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('.egg-list')).display`), 'flex');
+  assert.equal(await evaluate(`document.querySelectorAll('.egg-list.masonry .masonry-col').length`), 1, 'list layout stays single column');
   await evaluate(`document.querySelector('.layout-switch button:first-child').click()`);
   await evaluate(`const search = document.querySelector('.search'); search.value = '研究灵感'; search.dispatchEvent(new Event('input', { bubbles: true }))`);
   await eventually(() => evaluate(`document.querySelectorAll('.idea-card').length === 1`), 'search results after leave animation');
@@ -188,13 +196,25 @@ try {
   await evaluate(`(async () => { const { state } = await import('/js/state.js'); state.role = 'mobile'; state.sync.role = 'mobile'; })()`);
   await pause(100);
   assert.ok(await evaluate(`!!document.querySelector('.create-button')`), 'mobile can write notes');
-  await evaluate(`document.querySelector('.mobile-nav button:nth-child(2)').click()`);
-  await eventually(() => evaluate(`document.querySelector('.workspace').dataset.board === 'papers'`), 'mobile read-only papers');
-  assert.equal(await evaluate(`!!document.querySelector('.create-button')`), false, 'mobile papers remain read-only');
-  await checkLayout('mobile role read-only papers');
-  await screenshot('phone-papers');
-  await evaluate(`document.querySelector('.mobile-nav button:first-child').click()`);
-  await eventually(() => evaluate(`document.querySelector('.workspace').dataset.board === 'ideas'`), 'return to mobile notes');
+  // M20 任务 B：手机端视角隐藏「文献」「网页」入口 —— 手机底部导航只剩 随记 / 知识库 / 更多
+  const phoneNav = await evaluate(`[...document.querySelectorAll('.mobile-nav button')].map(b => b.textContent.trim())`);
+  assert.ok(!phoneNav.some(t => t.includes('文献')), 'mobile nav hides 文献: ' + JSON.stringify(phoneNav));
+  assert.ok(!phoneNav.some(t => t.includes('网页')), 'mobile nav hides 网页: ' + JSON.stringify(phoneNav));
+  await evaluate(`document.querySelector('.mobile-nav button:last-child').click()`);
+  await eventually(() => evaluate(`!!document.querySelector('.more-panel')`), 'mobile more panel');
+  const moreLabels = await evaluate(`[...document.querySelectorAll('.more-grid button strong')].map(e => e.textContent.trim())`);
+  assert.ok(!moreLabels.includes('文献') && !moreLabels.includes('网页'), 'more panel hides papers/sites: ' + JSON.stringify(moreLabels));
+  await evaluate(`document.querySelector('.more-panel .btn.ghost').click()`);
+  await pause(100);
+  console.log('✓ mobile nav and more panel hide 文献/网页');
+  // 旧版本 localStorage 停在 papers 时，手机端冷启动兜底送回随记
+  await navigate('ideas', 'light', true);
+  await evaluate(`(async () => { const { state } = await import('/js/state.js'); state.role = 'mobile'; state.sync.role = 'mobile'; localStorage.setItem('danji.board', 'papers'); })()`);
+  await cdp('Page.navigate', { url: `${base}/?theme=light&danji-mobile=1` });
+  await eventually(() => evaluate(`!!document.querySelector('#app:not([v-cloak]) .container')`), 'mobile stale-board reload');
+  await pause(300);
+  assert.equal(await evaluate(`document.querySelector('.workspace').dataset.board`), 'ideas', 'mobile lands on ideas when stale board was papers');
+  console.log('✓ mobile stale board papers falls back to ideas');
   await cdp('Network.enable');
   await cdp('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
   await evaluate(`(async () => { const { state } = await import('/js/state.js'); state.sync.offline = true; state.sync.status = 'offline'; })()`);

@@ -126,6 +126,9 @@ async function main() {
   // （AGENTS.md 红线 1、2）；临时目录无 config.json，口令/监听也不会继承本机配置
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'danji-render-'));
   fs.copyFileSync(path.join(ROOT, 'server.js'), path.join(tmpRoot, 'server.js'));
+  // M18 起 server.js 要 require('./lib/sync-debounce')，只复制 server.js + public 会
+  // MODULE_NOT_FOUND 直接起不来（与 test-server-boot 的复制清单保持一致）
+  fs.cpSync(path.join(ROOT, 'lib'), path.join(tmpRoot, 'lib'), { recursive: true });
   fs.cpSync(path.join(ROOT, 'public'), path.join(tmpRoot, 'public'), { recursive: true });
   const server = spawn(process.execPath, [path.join(tmpRoot, 'server.js')], {
     env: {
