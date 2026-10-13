@@ -173,6 +173,13 @@ input, select, textarea { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .bg-sync-row input { margin-top: 3px; flex: 0 0 auto; }
+/* M20 任务 E 图1：常规态 .scan-ui 原本没有任何规则，按钮与「后台同步」卡片零间距贴合，
+   .btn.primary 的向下投影又叠印在卡片边框上。这里补上块内间距与下外边距；
+   扫码态（body.danji-scan-active .scan-ui）另有 fixed 定位规则，不受影响。 */
+.pair-drawer .scan-ui { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 16px; }
+.pair-drawer .scan-ui .btn { min-height: 43px; }
+.pair-drawer .scan-ui .sync-hint { margin: 0; }
+.pair-drawer .pair-error { margin: 0; }
 .bg-sync-sub { margin: 0 0 12px; font-size: 12px; opacity: 0.75; }
 .conflict-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .conflict-side h3 { margin: 0 0 8px; font-size: 14px; }
@@ -1141,6 +1148,9 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .container { max-width: none; padding: 0; margin: 0; }
 .urgent-bar { border: 1px solid color-mix(in srgb, var(--orange) 30%, var(--border)); background: color-mix(in srgb, var(--orange) 5%, var(--card)); border-radius: 10px; margin-bottom: 18px; padding: 10px 14px; }
 .urgent-label { color: var(--orange); }
+/* M20 任务 A：镜像回落提示条。细窄、低饱和，位置在内容最上方，不与顶栏胶囊抢注意力 */
+.offline-notice { display: flex; align-items: center; gap: 7px; margin-bottom: 16px; padding: 7px 12px; font-size: 12px; color: var(--muted); background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; }
+.offline-notice::before { content: '📴'; font-size: 12px; }
 .filters { gap: 12px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .tabs { gap: 3px; }
 .tab { padding: 7px 12px; font-size: 12px; border-radius: 7px; white-space: nowrap; }
@@ -1149,8 +1159,17 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .kb-tags { margin: 0 0 18px; gap: 8px; }
 .kb-tags .chip.tag, .chip.tag { border-style: solid; }
 .egg-list { gap: 16px; }
-.layout-grid .egg-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-.workspace[data-board="messages"] .egg-list, .layout-grid .timeline-items { display: flex; }
+/* M20 任务 E 图2/图3：双列瀑布流。分列在 JS 侧（components/masonry-list.js +
+   util/masonry.js），这里只负责把分好的列并排摆好 —— 不再是等宽 CSS Grid，
+   矮卡下方不再留整行空白。单列（masonry-1 / layout-list）与原纵向排布一致。 */
+.egg-list.masonry { display: flex; flex-direction: row; align-items: flex-start; gap: 16px; }
+.egg-list.masonry .masonry-col { display: flex; flex-direction: column; gap: 16px; flex: 1 1 0; min-width: 0; }
+/* 列内新卡片淡入（跨列 move 动画按施工图 6.2.5 放弃：换列即重建节点，做不出连续位移） */
+.egg-list.masonry .masonry-col > * { animation: masonry-in .25s ease both; }
+@keyframes masonry-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.workspace[data-board="messages"] .egg-list.masonry-2 .masonry-col { max-width: none; }
+/* 成果时间线按年份分组，每组内条目少、卡片高，仍保持单列，避免出现半空的第二列 */
+.layout-grid .timeline-items { display: flex; }
 .card { padding: 22px; border-left-width: 1px; border-radius: 14px; cursor: default; min-width: 0; }
 .card:hover { transform: translateY(-1px); }
 .card.lv-red, .card.lv-orange, .card.lv-yellow, .card.lv-over { border-left-width: 3px; }
@@ -1236,7 +1255,12 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 }
 @media (max-width: 1000px) {
   :root { --sidebar-w: 190px; --workspace-pad: 24px; }
-  .layout-grid .egg-list { grid-template-columns: minmax(0, 1fr); }
+  /* ≤1000px 单列（与 util/masonry.js 的 MASONRY_BREAKPOINT 同值）：
+   组件此时只分 1 列，这里兜住任何没拿到 masonry-1 类的场景。
+   注意 align-items 必须一起改回 stretch —— 双列时的 flex-start 会让单列
+   按内容最大宽度撑开（长 URL 的卡片直接把页面撑出横向滚动）。 */
+  .egg-list.masonry { display: flex; flex-direction: column; align-items: stretch; }
+  .egg-list.masonry .masonry-col { width: 100%; }
   .overview-item { gap: 6px; font-size: 11px; padding-right: 12px; margin-right: 12px; }
   .heading-art { width: 128px; }
   .workspace-overview { padding: 17px 16px; }

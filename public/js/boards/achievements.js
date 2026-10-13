@@ -7,6 +7,7 @@ import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
 import { CONFIG } from '../../config.js';
+import { loadBoardWithMirror } from '../offline.js';
 
 const achievementCategories = computed(() => CONFIG.achievements.categories);
 
@@ -18,12 +19,11 @@ const achievementCategoryCounts = computed(() => {
 });
 
 async function loadAchievements() {
-  try {
-    const res = await api('/api/achievements');
-    state.achievements = await res.json();
-  } catch {
-    toast('成果加载失败', 'warn');
-  }
+  // M20 任务 A：REST 优先，手机端离线/请求失败时静默回落镜像（并置离线提示）
+  const r = await loadBoardWithMirror('/api/achievements', 'achievements', (items) => {
+    state.achievements = items;
+  });
+  if (r.failed) toast('成果加载失败', 'warn');
   state.achievementsLoaded = true;
 }
 

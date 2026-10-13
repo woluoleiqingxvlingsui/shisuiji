@@ -76,6 +76,9 @@
   </section>
   <div class="collection-toolbar"><span>{{ searchTerm ? '搜索结果' : '我的收藏' }}<span class="result-count">{{ visibleCount }} {{ state.board === 'expenses' && state.expenseView === 'insight' ? '项评价' : '条记录' }}</span><button v-if="searchTerm" class="clear-search" @click="searchTerm = ''">清除搜索</button></span><div class="layout-switch" v-if="state.board !== 'messages'" role="group" aria-label="内容布局"><button :class="{ active: layout === 'grid' }" :aria-pressed="layout === 'grid'" @click="setLayout('grid')" title="卡片布局" aria-label="卡片布局"><app-icon name="grid"></app-icon></button><button :class="{ active: layout === 'list' }" :aria-pressed="layout === 'list'" @click="setLayout('list')" title="列表布局" aria-label="列表布局"><app-icon name="list"></app-icon></button></div></div>
   <div id="board-content" tabindex="-1">
+  <!-- 离线诚实提示（M20 任务 A）：板块数据来自本机镜像时，如实标注它有多旧 -->
+  <div class="offline-notice" v-if="offlineNotice" role="status">{{ offlineNotice }}</div>
+
   <!-- 紧急横幅：即将到期的蛋（仅赛博鸡蛋板块） -->
   <div class="urgent-bar" v-if="state.board === 'eggs' && urgentItems.length">
     <span class="urgent-label">⏰ 快过期了</span>
@@ -105,12 +108,12 @@
       <p class="empty-sub">换个搜索词试试</p>
     </div>
 
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <idea-card v-for="i in filteredIdeas" :key="i.id" :idea="i"
+    <masonry-list :items="filteredIdeas" :layout="layout" v-else v-slot="{ item: i }">
+      <idea-card :idea="i"
                  @edit="openIdeaEditor(i)" @remove="removeIdea(i)" @deposit="depositFromIdea(i)"
                  @pin="togglePin(i)">
       </idea-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   <!-- ===== 成果板块 ===== -->
@@ -145,15 +148,15 @@
       <p class="empty-sub">换个搜索词或类别试试</p>
     </div>
 
-    <!-- 时间线：按年份分组倒序 -->
+    <!-- 时间线：按年份分组倒序。组内条目少、卡片高，保持单列（见 style.css .timeline-items） -->
     <div class="timeline" v-else>
       <section class="timeline-year" v-for="g in achievementTimeline" :key="g.year">
         <h2 class="timeline-year-title"><span class="timeline-dot"></span>{{ g.year === '时间不明' ? g.year : g.year + ' 年' }}</h2>
-        <transition-group name="list" tag="div" class="egg-list timeline-items">
-          <achievement-card v-for="a in g.items" :key="a.id" :achievement="a"
+        <masonry-list :items="g.items" :layout="layout" v-slot="{ item: a }">
+          <achievement-card :achievement="a"
                             @edit="openAchievementEditor(a)" @remove="removeAchievement(a)">
           </achievement-card>
-        </transition-group>
+        </masonry-list>
       </section>
     </div>
   </main>
@@ -186,11 +189,11 @@
       <p class="empty-sub">换个搜索词或标签试试（也可以直接输入 #标签）</p>
     </div>
 
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <kb-card v-for="k in filteredKb" :key="k.id" :entry="k"
+    <masonry-list :items="filteredKb" :layout="layout" v-else v-slot="{ item: k }">
+      <kb-card :entry="k"
                @edit="openKbEditor(k)" @remove="removeKb(k)">
       </kb-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   <!-- ===== 赛博鸡蛋板块 ===== -->
@@ -238,13 +241,12 @@
     </div>
 
     <!-- 蛋卡片列表 -->
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <egg-card v-for="a in filteredActivities" :key="a.id" :id="'card-' + a.id"
-                :activity="a" :now="state.now" :flash="state.flashId === a.id"
+    <masonry-list :items="filteredActivities" :layout="layout" v-else v-slot="{ item: a }">
+      <egg-card :id="'card-' + a.id" :activity="a" :now="state.now" :flash="state.flashId === a.id"
                 @edit="openEditor(a)" @remove="removeActivity(a)" @status="setStatus(a, $event)"
                 @reopen="reopenActivity(a)">
       </egg-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   <!-- ===== 文献板块 ===== -->
@@ -294,13 +296,13 @@
     </div>
 
     <!-- 论文卡片列表 -->
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <paper-card v-for="p in filteredPapers" :key="p.id" :paper="p" :flash="state.flashId === p.id"
+    <masonry-list :items="filteredPapers" :layout="layout" v-else v-slot="{ item: p }">
+      <paper-card :paper="p" :flash="state.flashId === p.id"
                   @open="openPaper(p)" @reveal="openPaperReveal(p)" @status="setPaperStatus(p, $event)"
                   @read="startPaperRead(p)" @log="openPaperLog(p, $event)"
                   @edit="openPaperEditor(p)" @remove="removePaper(p)">
       </paper-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   <!-- ===== 网页板块 ===== -->
@@ -350,12 +352,12 @@
     </div>
 
     <!-- 网页卡片列表 -->
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <site-card v-for="s in filteredSites" :key="s.id" :site="s" :flash="state.flashId === s.id"
+    <masonry-list :items="filteredSites" :layout="layout" v-else v-slot="{ item: s }">
+      <site-card :site="s" :flash="state.flashId === s.id"
                  @open="openSite(s)" @status="setSiteStatus(s, $event)" @read="startSiteRead(s)"
                  @note="openSiteNote(s, $event)" @edit="openSiteEditor(s)" @remove="removeSite(s)">
       </site-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   <!-- ===== 花销板块 ===== -->
@@ -398,11 +400,11 @@
       </div>
 
       <!-- 花销卡片列表 -->
-      <transition-group name="list" tag="div" class="egg-list" v-else>
-        <expense-card v-for="e in expenseVisibleItems" :key="e.id" :expense="e"
+      <masonry-list :items="expenseVisibleItems" :layout="layout" v-else v-slot="{ item: e }">
+        <expense-card :expense="e"
                       @edit="openExpenseEditor(e)" @remove="removeExpense(e)">
         </expense-card>
-      </transition-group>
+      </masonry-list>
     </template>
 
     <template v-else>
@@ -420,12 +422,11 @@
         </div>
       </div>
       <template v-else>
-        <transition-group name="list" tag="div" class="egg-list">
-          <insight-card v-for="row in expenseInsights.rows" :key="row.subject.id"
-                        :insight="row.insight" :verdict="row.verdict"
+        <masonry-list :items="expenseInsights.rows" :layout="layout" key-field="subject.id" v-slot="{ item: row }">
+          <insight-card :insight="row.insight" :verdict="row.verdict"
                         @save="saveInsightVerdict" @clear="clearInsightVerdict(row)">
           </insight-card>
-        </transition-group>
+        </masonry-list>
         <p class="unmatched-hint" v-if="expenseInsights.unmatched.length">
           还有 {{ expenseInsights.unmatched.length }} 笔没认出主体：{{ expenseUnmatchedText }}。
           想收录就去 <code>config.js</code> 的 expenses.subjects 加关键词
@@ -460,11 +461,12 @@
       <p class="empty-sub">后台同步的成功 / 失败、蛋的到期与截止都会自动记到这里；页面开着时有新回报会弹醒目提示</p>
     </div>
 
-    <transition-group name="list" tag="div" class="egg-list" v-else>
-      <message-card v-for="m in state.messages" :key="m.id" :message="m"
+    <!-- M20 任务 E 图4：解除原先强制单列的 flex 特例，消息页纳入统一双列瀑布流 -->
+    <masonry-list :items="state.messages" :layout="layout" v-else v-slot="{ item: m }">
+      <message-card :message="m"
                     @read="markMessageRead(m)" @remove="removeMessage(m)" @goto="gotoActivity(m.activity_id)">
       </message-card>
-    </transition-group>
+    </masonry-list>
   </main>
 
   </div><!-- board-content -->

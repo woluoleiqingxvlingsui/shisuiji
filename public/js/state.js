@@ -104,6 +104,10 @@ const state = reactive({
     lastError: '',
   },
   now: Date.now(),
+  // 手机端离线回落（M20 任务 A）：当前正在显示镜像数据的集合 → 镜像 pulled_at。
+  // 空串 = 手机同步层在场但本机还没有任何镜像（提示条改说「暂无本地数据」）。
+  // REST 读成功即 delete 该键，提示条随之消失。
+  staleBoards: {},
   flashId: null,
   toast: { show: false, msg: '', type: 'ok' },
   // 电脑端回报通道（SSE /api/events）状态：idle 未启动 | connecting 连接中 | live 已连上 | down 断了

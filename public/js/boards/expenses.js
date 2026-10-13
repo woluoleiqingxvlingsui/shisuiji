@@ -13,14 +13,15 @@ import { CONFIG } from '../../config.js';
 import { pad2 } from '../util/date.js';
 import { buildCategorySlices, buildPieSlices, groupExpenseByTitle } from '../util/expense.js';
 import { formatMoney, monthOf, periodLabel } from '../util/money.js';
+import { loadBoardWithMirror } from '../offline.js';
 
 let expensePeriodInit = false; // 只做一次「自动跳到最近有记录的月份」
 async function loadExpenses() {
-  try {
-    state.expenses = await api('/api/expenses').then((r) => r.json());
-  } catch {
-    toast('花销数据加载失败', 'warn');
-  }
+  // M20 任务 A：REST 优先，手机端离线/请求失败时静默回落镜像（并置离线提示）
+  const r = await loadBoardWithMirror('/api/expenses', 'expenses', (items) => {
+    state.expenses = items;
+  });
+  if (r.failed) toast('花销数据加载失败', 'warn');
   state.expensesLoaded = true;
   // 当前期间一笔都没有、但历史里有记录 → 自动跳到最近有记录的月份，免得一进来看到空板
   if (!expensePeriodInit) {

@@ -18,6 +18,7 @@ import { CONFIG } from '../../config.js';
 import { FLASH_MS, HOUR } from '../util/const.js';
 import { computeUrgency, formatDate, formatRemaining, pad2, parseStoredDate } from '../util/date.js';
 import { statusMeta } from '../util/meta.js';
+import { loadBoardWithMirror } from '../offline.js';
 import { pushExpiredMessage } from './messages.js';
 import { pushClosedMessage } from './messages.js';
 
@@ -29,15 +30,14 @@ function rememberNotified(key) {
   localStorage.setItem(NOTIFIED_KEY, JSON.stringify(arr));
 }
 async function load() {
-  try {
-    const res = await api('/api/activities');
-    state.activities = await res.json();
+  // M20 任务 A：REST 优先，手机端离线/请求失败时静默回落镜像（并置离线提示）
+  const r = await loadBoardWithMirror('/api/activities', 'activities', (items) => {
+    state.activities = items;
     state.loaded = true;
     state.loadError = false;
-  } catch (e) {
-    // 服务连不上：标记错误态让页面显示重试按钮；不向上抛，避免中断 onMounted 后续初始化
-    state.loadError = true;
-  }
+  });
+  // 既没 REST 也没镜像：沿用原语义，让页面显示重试按钮
+  if (r.failed) state.loadError = true;
 }
 async function saveActivity(payload) {
   if (state.saving) return; // 请求进行中忽略重复提交（连点按钮 / 表单里按回车）

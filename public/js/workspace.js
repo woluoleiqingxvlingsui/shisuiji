@@ -13,8 +13,10 @@ import { openKbEditor } from './boards/kb.js';
 
 const boards = [
   { id: 'ideas', label: '随记', eyebrow: 'DAILY NOTES', description: '把一闪而过的灵感，变成随时能找回的记录。', collection: 'ideas', search: 'ideaSearch', placeholder: '搜索标题或随记内容…', action: '记随记', open: openIdeaEditor },
-  { id: 'papers', label: '文献', eyebrow: 'READING ROOM', description: '从待读到读懂，让每一篇文献都留下收获。', collection: 'papers', search: 'paperSearch', placeholder: '搜索论文、类别或阅读笔记…', action: '记论文', open: openPaperEditor },
-  { id: 'sites', label: '网页', eyebrow: 'BOOKMARKS', description: '收藏值得停留的网页，也留住当时的思考。', collection: 'sites', search: 'siteSearch', placeholder: '搜索网页、域名或笔记…', action: '记网页', open: openSiteEditor },
+  // M20 任务 B：desktopOnly = 手机端视角隐藏入口（沿用 messages 的先例）。
+  // 数据照旧同步、组件照旧保留，只是手机上看不到这两个板块（M20 任务 A 已不为其做离线回落）。
+  { id: 'papers', label: '文献', eyebrow: 'READING ROOM', description: '从待读到读懂，让每一篇文献都留下收获。', collection: 'papers', search: 'paperSearch', placeholder: '搜索论文、类别或阅读笔记…', action: '记论文', open: openPaperEditor, desktopOnly: true },
+  { id: 'sites', label: '网页', eyebrow: 'BOOKMARKS', description: '收藏值得停留的网页，也留住当时的思考。', collection: 'sites', search: 'siteSearch', placeholder: '搜索网页、域名或笔记…', action: '记网页', open: openSiteEditor, desktopOnly: true },
   { id: 'kb', label: '知识库', eyebrow: 'PERSONAL LIBRARY', description: '把零散的收获沉淀下来，成为可以复用的知识。', collection: 'kb', search: 'kbSearch', placeholder: '搜索知识、来源，或输入 #标签…', action: '记知识', open: openKbEditor },
   { id: 'eggs', label: '赛博鸡蛋', eyebrow: 'LITTLE FINDS', description: '收好每一个小惊喜，在到期之前从容用上。', collection: 'activities', search: 'search', placeholder: '搜索活动、平台或备注…', action: '记蛋', open: openEditor },
   { id: 'expenses', label: '花销', eyebrow: 'SPENDING JOURNAL', description: '清楚记下每一笔投入，让花销与体感都有迹可循。', collection: 'expenses', search: 'expenseSearch', placeholder: '搜索花销内容或备注…', action: '记一笔', open: openExpenseEditor },
@@ -23,6 +25,14 @@ const boards = [
 ];
 const primaryIds = ['ideas', 'papers', 'sites', 'kb'];
 const secondaryIds = ['eggs', 'expenses', 'achievements'];
+
+/** M20 任务 B：手机端视角下要藏起来的板块（文献 / 网页）。
+ *  判定沿用 messages 先例的 !isDesktop()——health 未回时 isDesktop() 按桌面兜底，
+ *  原生壳内必隐藏、电脑端必显示。sidebar / 手机底部导航 / 「更多」面板共用这一个口径。 */
+function visibleBoards() {
+  const desktop = isDesktop();
+  return boards.filter((b) => desktop || !b.desktopOnly);
+}
 
 export function useWorkspace(visibleCount) {
   const moreOpen = ref(false);
@@ -50,6 +60,18 @@ export function useWorkspace(visibleCount) {
     }
   });
   const todayLabel = computed(() => new Date(state.now).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }));
+  // M20 任务 A 离线诚实提示：当前板块的数据正来自本机镜像时，如实告诉用户它有多旧。
+  // 镜像从未同步过（staleBoards 里是空串）就说「暂无本地数据」，不假装是实时数据。
+  const offlineNotice = computed(() => {
+    const key = currentBoard.value.collection;
+    const stale = state.staleBoards || {};
+    if (!Object.prototype.hasOwnProperty.call(stale, key)) return '';
+    const at = stale[key];
+    if (!at) return '离线 · 本机还没有这部分数据，连上电脑后自动补齐';
+    const d = new Date(at);
+    const hhmm = Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return hhmm ? `离线 · 数据截至 ${hhmm}` : '离线 · 显示本机缓存数据';
+  });
   const moreActive = computed(() => secondaryIds.includes(state.board) || state.board === 'messages');
   function navigate(id) {
     moreOpen.value = false;
@@ -72,10 +94,10 @@ export function useWorkspace(visibleCount) {
   onMounted(() => window.addEventListener('keydown', onKey));
   onUnmounted(() => window.removeEventListener('keydown', onKey));
   return {
-    currentBoard, searchTerm, totalCount, visibleCount, canCreate, collectionCount, summaries,
-    primaryBoards: boards.filter(b => primaryIds.includes(b.id)),
-    secondaryBoards: boards.filter(b => secondaryIds.includes(b.id)),
-    moreBoards: computed(() => boards.filter(b => secondaryIds.includes(b.id) || (b.id === 'messages' && isDesktop()))),
+    currentBoard, searchTerm, totalCount, visibleCount, canCreate, collectionCount, summaries, offlineNotice,
+    primaryBoards: computed(() => visibleBoards().filter(b => primaryIds.includes(b.id))),
+    secondaryBoards: computed(() => visibleBoards().filter(b => secondaryIds.includes(b.id))),
+    moreBoards: computed(() => visibleBoards().filter(b => secondaryIds.includes(b.id) || (b.id === 'messages' && isDesktop()))),
     boardCount: id => state[boards.find(b => b.id === id).collection].length,
     moreOpen, moreActive, layout, setLayout, todayLabel, navigate, createEntry,
   };

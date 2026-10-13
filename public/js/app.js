@@ -140,6 +140,7 @@ import { AchievementEditor } from './components/achievement-editor.js';
 import { KbCard } from './components/kb-card.js';
 import { KbEditor } from './components/kb-editor.js';
 import { KbMerge } from './components/kb-merge.js';
+import { MasonryList } from './components/masonry-list.js';
 import { PairDrawer } from './components/pair-drawer.js';
 
 /* ---------------- 根应用 ---------------- */
@@ -301,8 +302,8 @@ const app = createApp({
       load();
       loadMessages().catch(() => {});
       settleOverdue();
-      loadPapers();
-      loadSites();
+      // M20 任务 B：手机端视角没有文献 / 网页入口，这两个板块不必拉
+      if (isDesktop()) { loadPapers(); loadSites(); }
       loadExpenses();
       loadInsights();
       loadIdeas();
@@ -315,8 +316,7 @@ const app = createApp({
       load();
       loadMessages().catch(() => {});
       settleOverdue();
-      loadPapers();
-      loadSites();
+      if (isDesktop()) { loadPapers(); loadSites(); }   // M20 任务 B 同上
       loadExpenses();
       loadInsights();
       loadIdeas();
@@ -339,6 +339,8 @@ const app = createApp({
       // 这里再兜一道：手机端若因旧版本 localStorage 停在 messages 页，会看到一个
       // 永远空着、又退不出去的板块，直接送回想法板块。
       if (!isDesktop() && state.board === 'messages') switchBoard('ideas');
+      // M20 任务 B：文献 / 网页在手机端视角已隐藏入口，兜底同样送回随记
+      if (!isDesktop() && (state.board === 'papers' || state.board === 'sites')) switchBoard('ideas');
       // 电脑端订阅「手机后台同步」回报：手机同步成功/失败会即时推来，这里弹通知 + 刷新消息中心。
       // 必须在 installSync 之后——isDesktop() 依赖 health 探回来的 role，冷启动时还是 unknown。
       // 通道 + 兜底轮询双保险：SSE 死了至少还有 45 秒一次的补拉
@@ -353,16 +355,15 @@ const app = createApp({
       window.addEventListener('danji:remote-change', onRemoteChange);
 
       if (offlineBoot) {
-        // 离线冷启动：默认落到想法（本地镜像∪队列），其它板块标记已加载空态
+        // 离线冷启动：默认落到想法（本地镜像∪队列）。
+        // 其余板块不再一律标「已加载 + 空数组」（那会显示成静默空白），
+        // 改成照常走各自 load —— 内部离线时会静默回落镜像并显示离线提示条。
         if (state.board !== 'ideas') switchBoard('ideas');
-        state.loaded = true;
-        state.papersLoaded = true;
-        state.sitesLoaded = true;
-        state.expensesLoaded = true;
-        state.insightsLoaded = true;
-        state.messagesLoaded = true;
-        state.achievementsLoaded = true;
-        state.kbLoaded = true;
+        loadExpenses();
+        loadInsights();
+        loadAchievements();
+        loadKb();
+        load();
         loadIdeas();
       } else {
         await load();
@@ -478,6 +479,7 @@ app.component('achievement-editor', AchievementEditor);
 app.component('kb-card', KbCard);
 app.component('kb-editor', KbEditor);
 app.component('kb-merge', KbMerge);
+app.component('masonry-list', MasonryList);
 app.component('pair-drawer', PairDrawer);
 app.component('sync-status', SyncStatus);
 

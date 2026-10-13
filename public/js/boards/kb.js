@@ -9,6 +9,7 @@ import { toast } from '../toast.js';
 import { api } from '../api.js';
 import { NOTE_TEXT_FIELDS, NOTE_FIELD_LABEL } from '../util/paper-note.js';
 import { siteNoteFields, siteNoteFieldLabel } from '../util/site-note.js';
+import { loadBoardWithMirror } from '../offline.js';
 
 // paper-note 的标签表只覆盖三个基本字段，其余沉淀时用这份补全
 const PAPER_LABEL_FALLBACK = {
@@ -17,12 +18,11 @@ const PAPER_LABEL_FALLBACK = {
 };
 
 async function loadKb() {
-  try {
-    const res = await api('/api/kb');
-    state.kb = await res.json();
-  } catch {
-    toast('知识库加载失败', 'warn');
-  }
+  // M20 任务 A：REST 优先，手机端离线/请求失败时静默回落镜像（并置离线提示）
+  const r = await loadBoardWithMirror('/api/kb', 'kb', (items) => {
+    state.kb = items;
+  });
+  if (r.failed) toast('知识库加载失败', 'warn');
   state.kbLoaded = true;
 }
 

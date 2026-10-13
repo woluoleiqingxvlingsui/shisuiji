@@ -11,13 +11,15 @@ import { toast } from '../toast.js';
 import { api } from '../api.js';
 import { CONFIG } from '../../config.js';
 import { buildSubjectInsight, matchSubjects } from '../util/expense.js';
+import { loadBoardWithMirror } from '../offline.js';
 
 async function loadInsights() {
-  try {
-    state.insights = await api('/api/insights').then((r) => r.json());
-  } catch {
-    toast('评价数据加载失败', 'warn');
-  }
+  // M20 任务 A：花销「体感评价」页消费本集合（insights 早已在镜像 7 键里），
+  // 顺手做同模式回落，成本几行
+  const r = await loadBoardWithMirror('/api/insights', 'insights', (items) => {
+    state.insights = items;
+  });
+  if (r.failed) toast('评价数据加载失败', 'warn');
   state.insightsLoaded = true;
 }
 function setExpenseView(view) {
