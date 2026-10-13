@@ -627,7 +627,6 @@ input, select, textarea { font: inherit; color: inherit; }
   background: var(--accent); border: 2px solid var(--bg);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.timeline-items { position: relative; }
 
 .achievement-card .card-head { align-items: baseline; flex-wrap: wrap; row-gap: 4px; }
 /* 类别徽章复用 cat-chip（色相来自 config.js 的类别定义） */
@@ -1168,8 +1167,6 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .egg-list.masonry .masonry-col > * { animation: masonry-in .25s ease both; }
 @keyframes masonry-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .workspace[data-board="messages"] .egg-list.masonry-2 .masonry-col { max-width: none; }
-/* 成果时间线按年份分组，每组内条目少、卡片高，仍保持单列，避免出现半空的第二列 */
-.layout-grid .timeline-items { display: flex; }
 .card { padding: 22px; border-left-width: 1px; border-radius: 14px; cursor: default; min-width: 0; }
 .card:hover { transform: translateY(-1px); }
 .card.lv-red, .card.lv-orange, .card.lv-yellow, .card.lv-over { border-left-width: 3px; }

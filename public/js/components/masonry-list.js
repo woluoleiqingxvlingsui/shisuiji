@@ -19,6 +19,11 @@ const MasonryList = {
     layout: { type: String, default: 'grid' },
     // 单列布局下由 CSS 负责，这里不参与分列
     estimate: { type: Function, default: null },
+    // 显式列数覆盖：null = 跟随断点（宽屏 2 列）。
+    // 成果时间线按年份分组、组内条目少且卡片高，强制 1 列 —— 必须在组件层
+    // 就只分一列，不能靠 CSS 事后合并：两个 .masonry-col 纵向堆叠会把卡片
+    // 顺序错成 1,3,5…2,4,6…。
+    columns: { type: Number, default: null },
     // 取哪个字段当 key：绝大多数板块用 item.id；
     // 花销体感行的数据形状是 { subject, insight, verdict }，要走 subject.id
     keyField: { type: String, default: 'id' },
@@ -31,7 +36,8 @@ const MasonryList = {
 
     const columns = computed(() => {
       if (props.layout === 'list') return [props.items || []];
-      return distributeIntoColumns(props.items, masonryColumnCount(width.value), props.estimate || estimateCardHeight);
+      const count = props.columns || masonryColumnCount(width.value);
+      return distributeIntoColumns(props.items, count, props.estimate || estimateCardHeight);
     });
 
     const keyOf = (item) => {
