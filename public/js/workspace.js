@@ -70,9 +70,11 @@ const collectionCount = computed(() => boards.filter(b => b.id !== 'messages' &&
   // 镜像从未同步过（staleBoards 里是空串）就说「暂无本地数据」，不假装是实时数据。
   const offlineNotice = computed(() => {
     const key = currentBoard.value.collection;
-    const stale = state.staleBoards || {};
-    if (!Object.prototype.hasOwnProperty.call(stale, key)) return '';
-    const at = stale[key];
+    // 必须先读值再判断：Vue 3 的响应式只跟踪 get/deleteProperty，
+    // Object.prototype.hasOwnProperty 走不到 Proxy 的依赖收集 ——
+    // 用它判存在的话，新增一个键时这个 computed 根本不会被重新求值。
+    const at = (state.staleBoards || {})[key];
+    if (at === undefined) return '';      // 没有这个键 = 数据不是镜像来的
     if (!at) return '离线 · 本机还没有这部分数据，连上电脑后自动补齐';
     const d = new Date(at);
     const hhmm = Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
