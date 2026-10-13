@@ -131,6 +131,7 @@ const EXPENSE_COMPUTE_KEYWORDS = ['算力', '租用', 'autodl', 'gpu'];
 // 花销体感评价：只存用户敲定的结论（主体识别与摘录凝练在 config.js + 前端做），按 subject 唯一
 // decision 是「后续打算」：continue 继续 / reduce 减少 / hold 观望 / stop 停掉
 const INSIGHTS_FILE = path.join(DATA_DIR, 'insights.json');
+const TRASH_FILE = path.join(DATA_DIR, 'trash.json');
 const INSIGHT_DECISIONS = ['continue', 'reduce', 'hold', 'stop'];
 
 // 消息中心：目前有「已过期」（过了使用截止）与「已截止」（过了领取截止）两个来源
@@ -281,6 +282,7 @@ route('DELETE', '/api/activities/:id', async (ctx) => {
   const index = db.activities.findIndex((a) => a.id === ctx.params.id);
   if (index === -1) return ctx.json({ error: '记录不存在' }, 404);
   const [removed] = db.activities.splice(index, 1);
+  await pushToTrash('activities', removed);
   await saveData();
   ctx.json({ ok: true, deleted: removed.id });
 });
@@ -874,10 +876,11 @@ route('PUT', '/api/papers/:id', async (ctx) => {
 });
 
 route('DELETE', '/api/papers/:id', async (ctx) => {
-  // 只删记录，磁盘上的文件保持原位
+  // 只删记录，磁盘上的文件保持原位（回收站也一样不碰文件）
   const idx = paperDb.papers.findIndex((p) => p.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '记录不存在' }, 404);
   const [removed] = paperDb.papers.splice(idx, 1);
+  await pushToTrash('papers', removed);
   await savePapers();
   ctx.json({ ok: true, deleted: removed.id });
 });
@@ -1115,6 +1118,7 @@ route('DELETE', '/api/sites/:id', async (ctx) => {
   const idx = siteDb.sites.findIndex((s) => s.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '记录不存在' }, 404);
   const [removed] = siteDb.sites.splice(idx, 1);
+  await pushToTrash('sites', removed);
   await saveSites();
   ctx.json({ ok: true, deleted: removed.id });
 });
@@ -1190,6 +1194,7 @@ route('DELETE', '/api/expenses/:id', async (ctx) => {
   const idx = expenseDb.expenses.findIndex((e) => e.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '记录不存在' }, 404);
   const [removed] = expenseDb.expenses.splice(idx, 1);
+  await pushToTrash('expenses', removed);
   await saveExpenses();
   ctx.json({ ok: true, deleted: removed.id });
 });
@@ -1494,8 +1499,8 @@ async function saveIdeasNow() {
 
 // 写盘串行化：同一集合并发写会共用同一个 .tmp 文件名，不排队会互相覆盖
 let ioQueue = Promise.resolve();
-function queueWrite(fn) {
-  const run = ioQueue.then(fn, fn).then(markDataChanged, markDataChanged);
+function queueWrite(fn, onWritten = markDataChanged) {
+  const run = ioQueue.then(fn, fn).then(onWritten, onWritten);
   ioQueue = run.catch(() => {}); // 出错不能把队列毒死
   return run;
 }
@@ -1741,9 +1746,9 @@ route('DELETE', '/api/ideas/:id', async (ctx) => {
     return ctx.json({ error: '这条是电脑端记的，手机上删不了', code: 'forbidden' }, 403);
   }
   const [removed] = ideaDb.ideas.splice(idx, 1);
+  // 进回收站不删图：payload 保留 images 引用，只有彻底删除/到期清理时才 prune
+  await pushToTrash('ideas', removed);
   await saveIdeas();
-  // 删除带图随记：图片文件一并删掉（仍被其他随记引用的跳过，作误伤保险）
-  pruneImageFiles((removed.images || []).map((im) => im.id)).catch(() => {});
   ctx.json({ ok: true, deleted: removed.id });
 });
 
@@ -1874,6 +1879,7 @@ route('DELETE', '/api/achievements/:id', async (ctx) => {
   const idx = achievementDb.achievements.findIndex((a) => a.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '成果不存在', code: 'missing' }, 404);
   const [removed] = achievementDb.achievements.splice(idx, 1);
+  await pushToTrash('achievements', removed);
   await saveAchievements();
   ctx.json({ ok: true, deleted: removed.id });
 });
@@ -1990,8 +1996,187 @@ route('DELETE', '/api/kb/:id', async (ctx) => {
   const idx = kbDb.kb.findIndex((k) => k.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '知识不存在', code: 'missing' }, 404);
   const [removed] = kbDb.kb.splice(idx, 1);
+  await pushToTrash('kb', removed);
   await saveKb();
   ctx.json({ ok: true, deleted: removed.id });
+});
+
+// ---------- 回收站（M20 任务 D）----------
+// 删除不再物理抹掉：先进回收站保留 30 天，期间可恢复，到期才真正消失。
+// 关键取舍 —— **回收站内部操作绝不 bump dataVersion**：
+//   彻底删除 / 清空 / 到期懒清理都只动 trash.json，pull 响应里没有 trash，
+//   手机端视角完全无变化，bump 只会凭空制造一次「手机落后了」的同步噪音。
+// 删除进站与恢复是真数据变更（板块数组变了），照常 bump。
+const TRASH_RETENTION_DAYS = 30;
+const TRASH_MAX_ITEMS = 2000;
+
+let trashDb = null;
+
+function defaultTrashData() {
+  return { schema_version: SCHEMA_VERSION, items: [] };
+}
+
+// 各来源板块：数组在哪、怎么落盘。恢复/彻底删除都靠它把 payload 放回原处。
+const TRASH_SOURCES = {
+  activities: () => db.activities,
+  ideas: () => ideaDb.ideas,
+  expenses: () => expenseDb.expenses,
+  achievements: () => achievementDb.achievements,
+  kb: () => kbDb.kb,
+  sites: () => siteDb.sites,
+  papers: () => paperDb.papers,
+};
+const TRASH_SOURCE_SAVE = {
+  activities: () => saveData(),
+  ideas: () => saveIdeas(),
+  expenses: () => saveExpenses(),
+  achievements: () => saveAchievements(),
+  kb: () => saveKb(),
+  sites: () => saveSites(),
+  papers: () => savePapers(),
+};
+
+function trashNowIso() { return new Date().toISOString(); }
+
+/** 从回收站条目取出随记贴图的 id（只有 ideas 源会有） */
+function trashImageIds(entry) {
+  if (!entry || entry.source !== 'ideas' || !entry.payload) return [];
+  return (Array.isArray(entry.payload.images) ? entry.payload.images : [])
+    .map((im) => im && im.id).filter(Boolean);
+}
+
+/** 丢掉已过期的条目；ideas 源的图片此时才真正删盘（进站时是保留的） */
+function pruneExpiredTrash() {
+  if (!trashDb.items.length) return false;
+  const now = Date.now();
+  const keep = [];
+  const gone = [];
+  for (const item of trashDb.items) {
+    const t = Date.parse(item.expire_at || '');
+    if (Number.isFinite(t) && t <= now) gone.push(item);
+    else keep.push(item);
+  }
+  if (!gone.length) return false;
+  trashDb.items = keep.slice(0, TRASH_MAX_ITEMS);
+  const imageIds = gone.flatMap(trashImageIds);
+  if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  return true;
+}
+
+async function loadTrash() {
+  try {
+    const raw = await fsp.readFile(TRASH_FILE, 'utf8');
+    trashDb = JSON.parse(raw);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    trashDb = defaultTrashData();
+    await saveTrashNow();
+    return;
+  }
+  if (!Array.isArray(trashDb.items)) trashDb.items = [];
+  // 启动时顺手懒清理过期项（到期的图片在这里才真正删盘）
+  if (pruneExpiredTrash()) await saveTrashNow();
+}
+
+async function saveTrashNow() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
+  const tmp = TRASH_FILE + '.tmp';
+  await fsp.writeFile(tmp, JSON.stringify(trashDb, null, 2), 'utf8');
+  await fsp.rename(tmp, TRASH_FILE);
+}
+
+/**
+ * 回收站自己的写盘：**不碰 dataVersion**（见上方取舍说明）。
+ * 同时走 queueWrite 的串行队列，只是挂一个什么都不做的 onWritten，
+ * 这样并发写 trash.json 仍不会互相覆盖 .tmp 文件。
+ */
+function saveTrash() {
+  return queueWrite(saveTrashNow, () => {});
+}
+
+/**
+ * 把**已经从原数组摘掉**的一条记录放进回收站（摘的动作由各 DELETE 路由自己
+ * 做，它们本来就要按自己的数组顺序来）。
+ * 注意：进站时**不删任何文件**（含随记贴图），彻底删除时才删。
+ */
+async function pushToTrash(source, record) {
+  if (!record || !record.id) return false;
+  if (!TRASH_SOURCES[source]) return false;
+
+  pruneExpiredTrash(); // 顺手清一次到期的，控制文件体积
+  const deletedAt = trashNowIso();
+  trashDb.items.unshift({
+    id: newId(),
+    source,
+    deleted_at: deletedAt,
+    expire_at: new Date(Date.parse(deletedAt) + TRASH_RETENTION_DAYS * 86400000).toISOString(),
+    payload: record,
+  });
+  if (trashDb.items.length > TRASH_MAX_ITEMS) {
+    // 极端情况：只保留最新 TRASH_MAX_ITEMS 条，被挤出去的按到期处理（图片该删就删）
+    const dropped = trashDb.items.splice(TRASH_MAX_ITEMS);
+    const imageIds = dropped.flatMap(trashImageIds);
+    if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  }
+  await saveTrash();
+  return true;
+}
+
+/** 彻底删除：只动回收站，不 bump 版本 */
+async function purgeTrashItem(entry) {
+  const idx = trashDb.items.findIndex((x) => x.id === entry.id);
+  if (idx === -1) return false;
+  trashDb.items.splice(idx, 1);
+  await saveTrash();
+  const imageIds = trashImageIds(entry);
+  if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  return true;
+}
+
+route('GET', '/api/trash', async (ctx) => {
+  // 读到过期项就顺手清掉并落盘（否则每次拉列表都会重复触发一次图片删除）
+  if (pruneExpiredTrash()) await saveTrash();
+  ctx.json({ ok: true, items: trashDb.items, retention_days: TRASH_RETENTION_DAYS });
+});
+
+route('POST', '/api/trash/:id/restore', async (ctx) => {
+  const idx = trashDb.items.findIndex((x) => x.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '回收站里没有这一条' }, 404);
+  const [entry] = trashDb.items.splice(idx, 1);
+  const array = TRASH_SOURCES[entry.source] && TRASH_SOURCES[entry.source]();
+  const save = TRASH_SOURCE_SAVE[entry.source];
+  if (!array || !save) {
+    trashDb.items.unshift(entry); // 来源不认识，原样放回去
+    await saveTrash();
+    return ctx.json({ error: '这条记录的来源板块已不存在' }, 400);
+  }
+  // 原时间戳原样保留：恢复不是「新建」，板块里的排序位置应回到删除前
+  const record = { ...entry.payload };
+  const clash = array.findIndex((x) => x.id === record.id);
+  if (clash === -1) {
+    array.push(record);
+  } else {
+    record.id = newId(); // 极小概率：原 id 已被占用，换新 id 放回，绝不覆盖新数据
+  }
+  await save();
+  await saveTrash();
+  ctx.json({ ok: true, restored: record.id, source: entry.source, duplicate_id: clash !== -1 });
+});
+
+route('DELETE', '/api/trash/:id', async (ctx) => {
+  const idx = trashDb.items.findIndex((x) => x.id === ctx.params.id);
+  if (idx === -1) return ctx.json({ error: '回收站里没有这一条' }, 404);
+  await purgeTrashItem(trashDb.items[idx]);
+  ctx.json({ ok: true, purged: ctx.params.id });
+});
+
+route('DELETE', '/api/trash', async (ctx) => {
+  const entries = trashDb.items;
+  trashDb.items = [];
+  await saveTrash();
+  const imageIds = entries.flatMap(trashImageIds);
+  if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  ctx.json({ ok: true, purged: entries.length });
 });
 
 // ---------- 随记贴图：上传与回读 ----------
@@ -2131,8 +2316,9 @@ function applyIdeaOp(op, role) {
   if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
   if (conflicted(prev, op)) return { id, status: 'conflict', applied: false, server: prev };
   if (kind === 'delete') {
+    // 手机删的也进回收站（反悔的余地与电脑端一致），返回语义不变
     ideaDb.ideas.splice(idx, 1);
-    pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+    pushToTrash('ideas', prev).catch(() => {});
     return { id, status: 'ok', applied: true, deleted: true };
   }
   const idea = normalizeIdea(op, prev, { keepClientTimes: true });
@@ -2425,7 +2611,7 @@ server.on('error', (err) => {
 });
 
 Promise.all([
-  loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(), loadAchievements(), loadKb(),
+  loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(), loadAchievements(), loadKb(), loadTrash(),
 ]).then(() => {
   server.listen(PORT, HOST, () => {
     const scheme = USING_TLS ? 'https' : 'http';

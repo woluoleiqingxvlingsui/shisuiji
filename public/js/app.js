@@ -1,6 +1,6 @@
 /* 拾穗集 —— 前端应用（Vue 3 运行时编译，无构建步骤）
    板块：🥚 赛博鸡蛋（原蛋记） / 📄 文献（论文待读已读管理） */
-import { createApp, reactive, computed, ref, onMounted, onUnmounted, nextTick, provide } from './vue-globals.js';
+import { createApp, reactive, computed, ref, onMounted, onUnmounted, nextTick, provide, watch } from './vue-globals.js';
 import { state } from './state.js';
 import { useWorkspace, dialogDirective } from './workspace.js';
 import { AppIcon } from './components/app-icon.js';
@@ -13,6 +13,7 @@ import { loadPapers, openPaperEditor, savePaper, setPaperStatus, logPaper, openP
 import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, knownSiteKinds, siteUsageOptions, siteUrls, siteHaystack, filteredSites } from './boards/sites.js';
 import { expensePeriodInit, loadExpenses, openExpenseEditor, saveExpense, removeExpense, setExpenseMode, pickExpenseCategory, clearExpenseCategory, setExpenseYear, setExpenseMonth, stepExpensePeriod, expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories, expensePeriodLabel, expenseYearOptions } from './boards/expenses.js';
 import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, expenseInsights, expenseUnmatchedText } from './boards/insights.js';
+import { loadTrash, restoreTrashEntry, purgeTrashEntry, emptyTrash, filteredTrash } from './boards/trash.js';
 import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin } from './boards/ideas.js';
 import { loadAchievements, filteredAchievements, achievementTimeline, achievementCategories, achievementCategoryCounts, openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement } from './boards/achievements.js';
 import { loadKb, filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb, depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge } from './boards/kb.js';
@@ -141,6 +142,7 @@ import { KbCard } from './components/kb-card.js';
 import { KbEditor } from './components/kb-editor.js';
 import { KbMerge } from './components/kb-merge.js';
 import { MasonryList } from './components/masonry-list.js';
+import { TrashCard } from './components/trash-card.js';
 import { PairDrawer } from './components/pair-drawer.js';
 
 /* ---------------- 根应用 ---------------- */
@@ -303,7 +305,7 @@ const app = createApp({
       loadMessages().catch(() => {});
       settleOverdue();
       // M20 任务 B：手机端视角没有文献 / 网页入口，这两个板块不必拉
-      if (isDesktop()) { loadPapers(); loadSites(); }
+      if (isDesktop()) { loadPapers(); loadSites(); loadTrash(); }
       loadExpenses();
       loadInsights();
       loadIdeas();
@@ -316,7 +318,7 @@ const app = createApp({
       load();
       loadMessages().catch(() => {});
       settleOverdue();
-      if (isDesktop()) { loadPapers(); loadSites(); }   // M20 任务 B 同上
+      if (isDesktop()) { loadPapers(); loadSites(); loadTrash(); }   // M20 任务 B/D 同上
       loadExpenses();
       loadInsights();
       loadIdeas();
@@ -328,6 +330,11 @@ const app = createApp({
       applyTheme();
       observeTopbar();
       syncTopbarHeight();
+
+      // M20 任务 D：回收站只在电脑端、且真的切到它时才拉一次。
+      // 其他板块删完东西进站，回收站列表就变了 —— 进板块时重拉保证看到最新的，
+      // 平时不做无谓的定时请求。
+      watch(() => state.board, (board) => { if (board === 'trash' && isDesktop()) loadTrash(); });
 
       // P6/P9：先探测角色。手机端启用同步层；离线时跳过 REST，避免一串失败提示
       // M3.1：原生先落在「想法」，避免默认「蛋」板块空转
@@ -341,6 +348,8 @@ const app = createApp({
       if (!isDesktop() && state.board === 'messages') switchBoard('ideas');
       // M20 任务 B：文献 / 网页在手机端视角已隐藏入口，兜底同样送回随记
       if (!isDesktop() && (state.board === 'papers' || state.board === 'sites')) switchBoard('ideas');
+      // M20 任务 D：回收站是电脑端专属板块
+      if (!isDesktop() && state.board === 'trash') switchBoard('ideas');
       // 电脑端订阅「手机后台同步」回报：手机同步成功/失败会即时推来，这里弹通知 + 刷新消息中心。
       // 必须在 installSync 之后——isDesktop() 依赖 health 探回来的 role，冷启动时还是 unknown。
       // 通道 + 兜底轮询双保险：SSE 死了至少还有 45 秒一次的补拉
@@ -381,6 +390,8 @@ const app = createApp({
         loadAchievements();
         loadKb();
       }
+      // M20 任务 D：回收站启动时拉一次（侧栏角标要一直准），手机端视角不拉
+      if (isDesktop()) loadTrash();
       tickTimer = setInterval(() => {
         state.now = Date.now();
         if (!(state.sync && state.sync.offline)) settleOverdue();
@@ -412,7 +423,7 @@ const app = createApp({
         papers: filteredPapers.value.length, sites: filteredSites.value.length,
         expenses: state.expenseView === 'insight' ? expenseInsights.value.rows.length : expenseVisibleItems.value.length,
         achievements: filteredAchievements.value.length, kb: filteredKb.value.length,
-        messages: state.messages.length,
+        messages: state.messages.length, trash: filteredTrash.value.length,
       })[state.board] || 0)),
       state, statusTabs, filteredActivities, urgentItems, platformOptions, toast,
       openEditor, saveActivity, setStatus, reopenActivity, removeActivity, jumpTo,
@@ -438,6 +449,8 @@ const app = createApp({
       openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement,
       filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb,
       depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge,
+      // M20 任务 D：回收站（仅电脑端）
+      filteredTrash, restoreTrashEntry, purgeTrashEntry, emptyTrash,
       canWriteEggs: computed(() => canWrite('eggs')),
       canWritePapers: computed(() => canWrite('papers')),
       canWriteSites: computed(() => canWrite('sites')),
@@ -481,6 +494,7 @@ app.component('kb-editor', KbEditor);
 app.component('kb-merge', KbMerge);
 app.component('masonry-list', MasonryList);
 app.component('pair-drawer', PairDrawer);
+app.component('trash-card', TrashCard);
 app.component('sync-status', SyncStatus);
 
 // 全局兜底：未被处理的网络/脚本错误给出可见提示，不再静默失败（覆盖删除、状态流转等所有板块的请求）

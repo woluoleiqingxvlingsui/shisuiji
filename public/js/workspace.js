@@ -10,6 +10,7 @@ import { openSiteEditor } from './boards/sites.js';
 import { openExpenseEditor } from './boards/expenses.js';
 import { openAchievementEditor } from './boards/achievements.js';
 import { openKbEditor } from './boards/kb.js';
+import { trashDaysLeft } from './util/trash.js';
 
 const boards = [
   { id: 'ideas', label: '随记', eyebrow: 'DAILY NOTES', description: '把一闪而过的灵感，变成随时能找回的记录。', collection: 'ideas', search: 'ideaSearch', placeholder: '搜索标题或随记内容…', action: '记随记', open: openIdeaEditor },
@@ -22,6 +23,8 @@ const boards = [
   { id: 'expenses', label: '花销', eyebrow: 'SPENDING JOURNAL', description: '清楚记下每一笔投入，让花销与体感都有迹可循。', collection: 'expenses', search: 'expenseSearch', placeholder: '搜索花销内容或备注…', action: '记一笔', open: openExpenseEditor },
   { id: 'achievements', label: '成果', eyebrow: 'MILESTONES', description: '把走过的路与完成的事，慢慢积累成自己的履历。', collection: 'achievements', search: 'achievementSearch', placeholder: '搜索成果、标签或链接…', action: '记成果', open: openAchievementEditor },
   { id: 'messages', label: '消息', eyebrow: 'UPDATES', description: '同步进展与到期提醒，都在这里及时了解。', collection: 'messages' },
+  // M20 任务 D：回收站。desktopOnly —— 手机端根本不该有「删了还能捞回来」的入口
+  { id: 'trash', label: '回收站', eyebrow: 'TRASH', description: '删除的记录先在这里放一放，随时可以捞回来。', collection: 'trash', search: 'trashSearch', placeholder: '搜索来源或标题…', desktopOnly: true },
 ];
 const primaryIds = ['ideas', 'papers', 'sites', 'kb'];
 const secondaryIds = ['eggs', 'expenses', 'achievements'];
@@ -46,7 +49,8 @@ export function useWorkspace(visibleCount) {
   });
   const totalCount = computed(() => state[currentBoard.value.collection].length);
   const canCreate = computed(() => !!currentBoard.value.open && canWrite(state.board));
-  const collectionCount = computed(() => boards.filter(b => b.id !== 'messages').reduce((sum, b) => sum + state[b.collection].length, 0));
+  // M20：回收站与消息中心都不是可计数的数据板块，不计入「总收集」
+const collectionCount = computed(() => boards.filter(b => b.id !== 'messages' && b.id !== 'trash').reduce((sum, b) => sum + state[b.collection].length, 0));
   const summaries = computed(() => {
     const records = state[currentBoard.value.collection];
     switch (state.board) {
@@ -56,6 +60,8 @@ export function useWorkspace(visibleCount) {
       case 'kb': return [{ label: '知识条目', value: records.length }, { label: '知识标签', value: new Set(records.flatMap(i => i.tags || [])).size }, { label: '有来源的知识', value: records.filter(i => i.source?.type && i.source.type !== 'manual').length }];
       case 'eggs': return [{ label: '收集的鸡蛋', value: records.length }, { label: '等待领取', value: records.filter(i => i.status === 'pending').length }, { label: '已经领取', value: records.filter(i => i.status === 'claimed').length }];
       case 'achievements': return [{ label: '全部成果', value: records.length }, { label: '已经完成', value: records.filter(i => i.status === 'done').length }, { label: '正在进行', value: records.filter(i => i.status === 'doing').length }];
+      // M20 任务 D：回收站的「总收集」只数真实数据板块，回收站本身不算
+      case 'trash': return [{ label: '回收站里', value: records.length }, { label: '保留天数', value: state.trashRetentionDays }, { label: '今天到期', value: records.filter(i => trashDaysLeft(i, state.now) <= 0).length }];
       default: return [];
     }
   });
@@ -72,7 +78,7 @@ export function useWorkspace(visibleCount) {
     const hhmm = Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     return hhmm ? `离线 · 数据截至 ${hhmm}` : '离线 · 显示本机缓存数据';
   });
-  const moreActive = computed(() => secondaryIds.includes(state.board) || state.board === 'messages');
+  const moreActive = computed(() => secondaryIds.includes(state.board) || state.board === 'messages' || state.board === 'trash');
   function navigate(id) {
     moreOpen.value = false;
     switchBoard(id);
@@ -97,7 +103,7 @@ export function useWorkspace(visibleCount) {
     currentBoard, searchTerm, totalCount, visibleCount, canCreate, collectionCount, summaries, offlineNotice,
     primaryBoards: computed(() => visibleBoards().filter(b => primaryIds.includes(b.id))),
     secondaryBoards: computed(() => visibleBoards().filter(b => secondaryIds.includes(b.id))),
-    moreBoards: computed(() => visibleBoards().filter(b => secondaryIds.includes(b.id) || (b.id === 'messages' && isDesktop()))),
+    moreBoards: computed(() => visibleBoards().filter(b => secondaryIds.includes(b.id) || ((b.id === 'messages' || b.id === 'trash') && isDesktop()))),
     boardCount: id => state[boards.find(b => b.id === id).collection].length,
     moreOpen, moreActive, layout, setLayout, todayLabel, navigate, createEntry,
   };

@@ -82,6 +82,11 @@ const state = reactive({
   editingKb: null,
   kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
   kbMerge: null,         // 笔记更新 vs 手动调整过的知识库条目：合并层数据
+  // 回收站（M20 任务 D）：删除先进这里保留 30 天。仅电脑端，不进镜像不参与同步
+  trash: [],
+  trashLoaded: false,
+  trashSearch: '',
+  trashRetentionDays: 30,
   // 角色（权限）：desktop/mobile/unknown，来自 /api/health
   // 电脑上把窗口拖窄只会改 isPhone，不会把 role 变成 mobile
   role: 'unknown',
