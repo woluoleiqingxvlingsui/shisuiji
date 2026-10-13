@@ -331,7 +331,7 @@ const PairDrawer = {
 
         <label class="sync-hint bg-sync-row" v-if="hasPair && bgAvailable">
           <input type="checkbox" :checked="bgOn" :disabled="busy" @change="onToggleBg">
-          <span>后台同步：熄屏后约每 15 分钟自动同步一次（通知栏会显示一条常驻通知）</span>
+          <span>后台同步：熄屏后约每 15 分钟自动同步一次</span>
         </label>
         <p class="sync-hint bg-sync-sub" v-if="hasPair && bgAvailable && bgOn">
           长时间没同步？请在系统设置里允许本应用「自启动」，并把省电策略设为「无限制」——部分国产系统会强杀后台应用。

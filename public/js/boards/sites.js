@@ -13,7 +13,7 @@ import { api } from '../api.js';
 import { autoSyncFromSiteNote } from './kb.js';
 import { CONFIG } from '../../config.js';
 import { SITE_DRAFT_PREFIX, clearDraft, readDraft, writeDraft } from '../util/draft.js';
-import { blankSiteNote, siteNoteFieldLabel, siteNoteIsEmpty, siteNoteKeys, siteNoteMissing } from '../util/site-note.js';
+import { blankSiteNote, kindMeta, sanitizeKind, siteNoteFieldLabel, siteNoteIsEmpty, siteNoteKeys, siteNoteMissing } from '../util/site-note.js';
 import { readSortKey } from '../util/sort.js';
 import { normalizeUrl } from '../util/text.js';
 import { flashCard } from '../ui.js';
@@ -225,7 +225,23 @@ const siteCounts = computed(() => ({
   noted: state.sites.filter((s) => (s.logs || []).length).length,
   unnoted: state.sites.filter((s) => !(s.logs || []).length).length,
 }));
-const siteKindOptions = computed(() => CONFIG.siteNote.kinds);
+// 筛选栏的类型选项：内置两个 + 网页记录里出现过的自定义类型（去重、稳定序）
+// M20 任务 C 起 kind 不再是白名单，自定义类型必须能从筛选栏选到
+const siteKindOptions = computed(() => {
+  const seen = new Set(CONFIG.siteNote.kinds.map((k) => k.id));
+  const out = [...CONFIG.siteNote.kinds];
+  const extra = [];
+  for (const s of state.sites) {
+    const kind = sanitizeKind(s.kind);
+    if (!kind || seen.has(kind)) continue;
+    seen.add(kind);
+    extra.push(kindMeta(kind));
+  }
+  extra.sort((a, b) => String(a.label).localeCompare(String(b.label), 'zh'));
+  return [...out, ...extra];
+});
+// 新建网页抽屉的建议来源：内置 + 已用过的自定义类型
+const knownSiteKinds = computed(() => siteKindOptions.value.filter((k) => k.custom).map((k) => k.label));
 const siteUsageOptions = computed(() => CONFIG.siteNote.usage);
 const siteUrls = computed(() => state.sites.map((s) => normalizeUrl(s.url)).filter(Boolean));
 function siteHaystack(site) {
@@ -255,4 +271,4 @@ const filteredSites = computed(() => {
       || String(a.title || '').localeCompare(String(b.title || ''), 'zh'));
 });
 
-export { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, siteUsageOptions, siteUrls, siteHaystack, filteredSites };
+export { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, knownSiteKinds, siteUsageOptions, siteUrls, siteHaystack, filteredSites };

@@ -495,7 +495,7 @@
   </paper-log-drawer>
 
   <site-editor v-if="state.board === 'sites' && state.siteEditorOpen" :initial="state.editingSite"
-               :known-urls="siteUrls" @save="saveSite" @close="state.siteEditorOpen = false"></site-editor>
+               :known-urls="siteUrls" :known-kinds="knownSiteKinds" @save="saveSite" @close="state.siteEditorOpen = false"></site-editor>
   <site-note-drawer v-if="state.board === 'sites' && state.siteNoteOpen && siteNoteItem" :site="siteNoteItem"
                     :editing="state.siteNoteEditing" :pending-read="state.siteNotePendingRead" :restored="state.siteNoteRestored"
                     @save="saveSiteNote" @draft="saveSiteNoteDraft" @discard-draft="discardSiteNoteDraft"

@@ -2,7 +2,7 @@
 import { reactive, computed, watch, onMounted, onUnmounted } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
-import { blankSiteNote, kindMeta, siteNoteFields, siteNoteIsEmpty, siteNoteRows, usageMeta } from '../util/site-note.js';
+import { blankSiteNote, kindMeta, sanitizeKind, siteNoteFields, siteNoteIsEmpty, siteNoteRows, usageMeta } from '../util/site-note.js';
 
 const SiteNoteDrawer = {
   name: 'SiteNoteDrawer',
@@ -15,7 +15,15 @@ const SiteNoteDrawer = {
   emits: ['save', 'remove', 'edit', 'new', 'back', 'empty', 'draft', 'discard-draft', 'deposit', 'close'],
   setup(props, { emit }) {
 
-    const kindOptions = CONFIG.siteNote.kinds;
+    // 选项 = 内置两个 + 这条网页自己的类型。自定义类型（M20 任务 C）如果不在
+    // 内置列表里必须补进来 —— 否则一条自定义类型的网页，笔记抽屉里两个 chip
+    // 都不亮，「这是哪类网页」就显示成了空。
+    const kindOptions = computed(() => {
+      const list = CONFIG.siteNote.kinds.map((k) => ({ ...k }));
+      const cur = sanitizeKind(props.site && props.site.kind);
+      if (cur && !list.some((k) => k.id === cur)) list.push(kindMeta(cur));
+      return list;
+    });
     const usageOptions = CONFIG.siteNote.usage;
 
     function blank() { return blankSiteNote(props.site.kind); }

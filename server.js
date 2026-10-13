@@ -106,7 +106,10 @@ const PAPER_LOG_LIST_FIELDS = ['parts'];
 
 // 网页板块：待读/已读的网页链接（没有磁盘文件，只存链接与笔记）
 const SITE_STATUSES = ['to_read', 'read'];
-const SITE_KINDS = ['tech', 'misc'];
+// M20 任务 C：kind 不再是白名单。前端改成「内置两个 + 用户自建短词」的
+// combobox，自建类型要能原样存下来，否则会被这里的 includes 静默改写成 tech。
+// 仍需守住两件事：非空字符串 + 限长（见 SITE_KIND_MAX_LEN）。
+const SITE_KIND_MAX_LEN = 12;
 const SITE_USAGES = ['now', 'later', 'wide'];
 const SITE_FIELDS = ['title', 'url', 'domain', 'kind', 'status', 'notes'];
 // 网页笔记：一个网页可以记多条（重读再记）；字段按类型分两套，共用核心那几个
@@ -417,6 +420,14 @@ function siteDomain(url) {
   try { return new URL(url).hostname.replace(/^www\./i, ''); } catch { return ''; }
 }
 
+// 网页类型（M20 任务 C）：内置 tech / misc 之外允许自建短词。
+// 只做三件事 —— 转字符串、去首尾空白、限长；为空才回落 'tech'。
+// 不做白名单校验，否则用户敲的类型会被静默改成「技术」。
+function normalizeSiteKind(value) {
+  const v = String(value == null ? '' : value).trim().slice(0, SITE_KIND_MAX_LEN);
+  return v || 'tech';
+}
+
 // 一条网页笔记：按 id 合并既有内容，便于单独编辑/删除
 function normalizeSiteNote(input, existing = {}) {
   const log = { ...existing };
@@ -426,7 +437,7 @@ function normalizeSiteNote(input, existing = {}) {
     log[field] = value === null || value === undefined ? '' : String(value).trim();
   }
   if (!log.id) log.id = crypto.randomUUID();
-  if (!SITE_KINDS.includes(log.kind)) log.kind = 'tech';
+  log.kind = normalizeSiteKind(log.kind);
   if (!SITE_USAGES.includes(log.usage)) log.usage = '';
   log.created_at = existing.created_at || new Date().toISOString();
   log.updated_at = new Date().toISOString();
@@ -460,7 +471,7 @@ function normalizeSite(input, existing = {}) {
     site.logs = [];
   }
   if (!site.id) site.id = crypto.randomUUID();
-  if (!SITE_KINDS.includes(site.kind)) site.kind = 'tech';
+  site.kind = normalizeSiteKind(site.kind);
   if (!SITE_STATUSES.includes(site.status)) site.status = 'to_read';
   site.url = normalizeSiteUrl(site.url) || '';
   site.domain = siteDomain(site.url);

@@ -4,12 +4,14 @@ import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from '../vu
 import { CONFIG } from '../../config.js';
 import { api } from '../api.js';
 import { normalizeUrl } from '../util/text.js';
+import { isBuiltinKind, kindMeta, sanitizeKind, KIND_MAX_LEN } from '../util/site-note.js';
 
 const SiteEditor = {
   name: 'SiteEditor',
   props: {
     initial: { type: Object, default: null },
     knownUrls: { type: Array, default: () => [] }, // 已记录过的链接，用来提示重复
+    knownKinds: { type: Array, default: () => [] }, // 已用过的自定义类型（M20 任务 C）
   },
   emits: ['save', 'close'],
   setup(props, { emit }) {
@@ -24,6 +26,9 @@ const SiteEditor = {
       notes: props.initial?.notes || '',
     });
 
+    // 抽屉标题 / 面包屑 / 卡片标签共用这个回显；自定义类型如实显示自己的名字
+    const kind = computed(() => kindMeta(form.kind));
+
     const fetching = ref(false);
     const titleHint = ref('');
     const duplicate = computed(() => {
@@ -31,6 +36,81 @@ const SiteEditor = {
       const url = normalizeUrl(form.url);
       return !!url && props.knownUrls.includes(url);
     });
+
+    /* ---- 类型下拉（combobox，可输自建类型）----
+     * 与蛋编辑器的「平台」下拉同一套交互（焦点展开 / ↑↓ 选 / Enter 选中 / Esc 收起 /
+     * 点外部收起），这里选项少、且允许自由输入，不做输入过滤，只做「非空提示」。 */
+    const comboOpen = ref(false);
+    const comboIndex = ref(-1);
+    const comboRoot = ref(null);
+    const kindInput = ref(null);
+    let suppressFocusOpen = false;
+
+    // 选项 = 内置类型 + 已用过的自定义类型。输入框里已填的若是自定义类型，
+    // 也补进列表，避免「编辑一条老记录时列表里找不到它自己」。
+    const kindOptions = computed(() => {
+      const out = CONFIG.siteNote.kinds.map((k) => ({ id: k.id, label: k.label, emoji: k.emoji }));
+      const seen = new Set(out.map((k) => k.id));
+      const push = (label) => {
+        const v = sanitizeKind(label);
+        if (!v || seen.has(v)) return;
+        seen.add(v);
+        out.push({ id: v, label: v, emoji: kindMeta(v).emoji });
+      };
+      props.knownKinds.forEach(push);
+      if (!isBuiltinKind(form.kind)) push(form.kind);
+      return out;
+    });
+
+    function openCombo() { comboOpen.value = true; comboIndex.value = -1; }
+    function closeCombo() { comboOpen.value = false; comboIndex.value = -1; }
+    function toggleCombo() { comboOpen.value ? closeCombo() : openCombo(); }
+    function pickKind(id) {
+      form.kind = id;
+      closeCombo();
+      suppressFocusOpen = true;
+      kindInput.value && kindInput.value.focus();
+    }
+    function highlightNext() {
+      if (!comboOpen.value) { openCombo(); return; }
+      const n = kindOptions.value.length;
+      if (!n) return;
+      comboIndex.value = comboIndex.value < n - 1 ? comboIndex.value + 1 : 0;
+    }
+    function highlightPrev() {
+      if (!comboOpen.value) { openCombo(); return; }
+      const n = kindOptions.value.length;
+      if (!n) return;
+      comboIndex.value = comboIndex.value > 0 ? comboIndex.value - 1 : n - 1;
+    }
+    function onComboEnter(e) {
+      if (comboOpen.value && comboIndex.value >= 0) {
+        const hit = kindOptions.value[comboIndex.value];
+        if (hit) { e.preventDefault(); pickKind(hit.id); }
+      }
+    }
+    function onComboFocus() {
+      if (suppressFocusOpen) { suppressFocusOpen = false; return; }
+      openCombo();
+    }
+    function onComboInput() { openCombo(); }
+    function onComboEsc(e) {
+      if (!comboOpen.value) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeCombo();
+    }
+    function onDocMousedown(e) {
+      if (!comboOpen.value) return;
+      if (comboRoot.value && comboRoot.value.contains(e.target)) return;
+      closeCombo();
+    }
+    // 输入超长时即时截断，别让用户敲到第 30 个字才发现存不进去
+    function onKindInput(e) {
+      form.kind = String(e.target.value || '').slice(0, KIND_MAX_LEN);
+      e.target.value = form.kind;
+      openCombo();
+    }
 
     // 抓标题：只在标题还空着的时候自动填，不覆盖手写的内容；force=true 是点「自动取标题」
     async function fetchTitle(force = false) {
@@ -64,11 +144,16 @@ const SiteEditor = {
       const url = normalizeUrl(form.url);
       if (!url) return alert('请填写合法的链接（http / https，裸域名会自动补 https://）');
       if (!form.title.trim()) return alert('请填写标题，或点「自动取标题」');
-      localStorage.setItem('danji.lastSiteKind', form.kind);
+      // 类型：内置原样存；自定义存去空白、限长后的短词；清空则退回默认（不静默存空串）
+      const raw = sanitizeKind(form.kind);
+      const finalKind = raw || 'tech';
+      // 内置类型的默认选择不需要写 localStorage —— 只有自定义类型才值得记住
+      if (!isBuiltinKind(finalKind)) localStorage.setItem('danji.lastSiteKind', finalKind);
+      else localStorage.removeItem('danji.lastSiteKind');
       emit('save', {
         url,
         title: form.title.trim(),
-        kind: form.kind,
+        kind: finalKind,
         status: form.status,
         tags: form.tagsText.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
         notes: form.notes.trim(),
@@ -78,10 +163,14 @@ const SiteEditor = {
     const onKey = (e) => { if (e.key === 'Escape') emit('close'); };
     onMounted(async () => {
       window.addEventListener('keydown', onKey);
+      document.addEventListener('mousedown', onDocMousedown);
       await nextTick();
       urlInput.value && urlInput.value.focus();
     });
-    onUnmounted(() => window.removeEventListener('keydown', onKey));
+    onUnmounted(() => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDocMousedown);
+    });
 
     let pressOnOverlay = false;
     const onOverlayMousedown = (e) => { pressOnOverlay = e.target === e.currentTarget; };
@@ -92,7 +181,9 @@ const SiteEditor = {
 
     return {
       form, urlInput, fetching, titleHint, duplicate, onUrlBlur, fetchTitle, save,
-      kindOptions: CONFIG.siteNote.kinds,
+      kind, kindOptions, comboOpen, comboIndex, comboRoot, kindInput,
+      openCombo, closeCombo, toggleCombo, pickKind, highlightNext, highlightPrev,
+      onComboEnter, onComboFocus, onComboEsc, onDocMousedown, onKindInput,
       close: () => emit('close'),
       onOverlayMousedown, onOverlayMouseup,
     };
@@ -118,13 +209,32 @@ const SiteEditor = {
           <span class="date-hint" v-if="titleHint">{{ titleHint }}</span>
         </label>
 
-        <p class="drawer-section">类型（决定读完时的引导表单）</p>
-        <div class="chip-picks">
-          <button type="button" class="chip-pick" v-for="k in kindOptions" :key="k.id"
-                  :class="{ on: form.kind === k.id }" @click="form.kind = k.id">
-            {{ k.emoji }} {{ k.label }}
-          </button>
-        </div>
+        <label class="combo-label">类型
+          <div class="combo" ref="comboRoot">
+            <div class="combo-control">
+              <input ref="kindInput" :value="form.kind"
+                     placeholder="内置：技术 / 杂项；也可自己起一个"
+                     autocomplete="off" maxlength="12"
+                     role="combobox" :aria-expanded="comboOpen ? 'true' : 'false'"
+                     @focus="onComboFocus" @input="onKindInput"
+                     @keydown.down.prevent="highlightNext"
+                     @keydown.up.prevent="highlightPrev"
+                     @keydown.enter="onComboEnter"
+                     @keydown.esc="onComboEsc">
+              <button type="button" class="combo-arrow" tabindex="-1"
+                      :aria-expanded="comboOpen ? 'true' : 'false'"
+                      aria-label="打开类型列表"
+                      @click.stop="toggleCombo">▼</button>
+            </div>
+            <ul class="combo-menu" v-if="comboOpen && kindOptions.length" role="listbox">
+              <li v-for="(k, i) in kindOptions" :key="k.id"
+                  role="option" :class="{ on: i === comboIndex }"
+                  @mouseenter="comboIndex = i"
+                  @mousedown.prevent="pickKind(k.id)">{{ k.emoji }} {{ k.label }}</li>
+            </ul>
+          </div>
+          <span class="date-hint">想不出来就留「技术」。自建类型会出现在筛选栏里，读完时按「杂项」那套宽松字段引导。</span>
+        </label>
 
         <div class="row">
           <label>状态

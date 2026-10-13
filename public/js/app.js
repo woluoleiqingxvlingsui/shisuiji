@@ -10,7 +10,7 @@ import { switchBoard, syncTopbarHeight, observeTopbar, stopObserveTopbar } from 
 import { loadMessages, pushExpiredMessage, pushClosedMessage, markMessageRead, removeMessage, markAllRead, clearReadMessages, unreadCount } from './boards/messages.js';
 import { NOTIFIED_KEY, rememberNotified, load, saveActivity, patchActivity, setStatus, reopenActivity, removeActivity, platformOptions, counts, statusTabs, filteredActivities, urgentItems, openEditor, focusActivity, jumpTo, gotoActivity, checkReminders, settleRunning, settleOverdue, loadSamples } from './boards/eggs.js';
 import { loadPapers, openPaperEditor, savePaper, setPaperStatus, logPaper, openPaperLog, startPaperRead, newPaperLog, editPaperLog, backToLogList, draftTimer, saveLogDraft, discardLogDraft, closePaperLog, savePaperLog, removePaperLog, openPaper, openPaperReveal, removePaper, paperCounts, logHaystack, filteredPapers } from './boards/papers.js';
-import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, siteUsageOptions, siteUrls, siteHaystack, filteredSites } from './boards/sites.js';
+import { loadSites, openSiteEditor, saveSite, setSiteStatus, openSite, removeSite, siteNoteItem, openSiteNote, startSiteRead, newSiteNote, editSiteNote, backToSiteNoteList, siteDraftTimer, saveSiteNoteDraft, discardSiteNoteDraft, closeSiteNote, saveSiteNote, removeSiteNote, siteCounts, siteKindOptions, knownSiteKinds, siteUsageOptions, siteUrls, siteHaystack, filteredSites } from './boards/sites.js';
 import { expensePeriodInit, loadExpenses, openExpenseEditor, saveExpense, removeExpense, setExpenseMode, pickExpenseCategory, clearExpenseCategory, setExpenseYear, setExpenseMonth, stepExpensePeriod, expensePeriodItems, expenseVisibleItems, expenseTotal, expenseChart, expenseCategories, expensePeriodLabel, expenseYearOptions } from './boards/expenses.js';
 import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, expenseInsights, expenseUnmatchedText } from './boards/insights.js';
 import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin } from './boards/ideas.js';
@@ -422,7 +422,7 @@ const app = createApp({
       openPaperEditor, savePaper, setPaperStatus, openPaper, openPaperReveal, removePaper,
       logPaper, startPaperRead, openPaperLog, savePaperLog, removePaperLog, editPaperLog, newPaperLog,
       backToLogList, closePaperLog, saveLogDraft, discardLogDraft,
-      siteCounts, filteredSites, siteNoteItem, siteKindOptions, siteUsageOptions, siteUrls,
+      siteCounts, filteredSites, siteNoteItem, siteKindOptions, knownSiteKinds, siteUsageOptions, siteUrls,
       openSiteEditor, saveSite, setSiteStatus, openSite, removeSite,
       startSiteRead, openSiteNote, saveSiteNote, removeSiteNote, editSiteNote, newSiteNote,
       backToSiteNoteList, closeSiteNote, saveSiteNoteDraft, discardSiteNoteDraft,
