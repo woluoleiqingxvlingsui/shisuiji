@@ -298,7 +298,17 @@ try {
   const byId = ideasList.filter((x) => x.id === a1.body.id);
   ok('id 冲突时换新 id 放回，绝不覆盖新数据', byId.length === 1 && byId[0].title === '占位的同 id', JSON.stringify(byId.map((x) => [x.id, x.title])));
   ok('冲突恢复返回 duplicate_id 标记', restoredClash.body.duplicate_id === true, JSON.stringify(restoredClash.body));
-  void a2;
+  // 换新 id 的那条**必须真的回到板块**（审查发现的丢数据 bug：只改 id 没 push，
+  // 结果既不在回收站也没回板块，等于静默丢失）
+  const reissued = ideasList.filter((x) => x.title === '冲突源');
+  ok('换新 id 的记录确实回到 ideas 板块', reissued.length === 1, JSON.stringify(ideasList.map((x) => [x.id, x.title])));
+  ok('换新 id 后与被占用的 id 不同', reissued.length === 1 && reissued[0].id !== a1.body.id, reissued.map((x) => x.id).join(','));
+  ok('换新 id 的记录内容与删除前一致', reissued.length === 1 && reissued[0].created_at === clashEntry.payload.created_at,
+    `${clashEntry.payload.created_at} → ${reissued[0] && reissued[0].created_at}`);
+  ok('恢复响应里的 restored 就是这条新 id', reissued.length === 1 && restoredClash.body.restored === reissued[0].id,
+    `${restoredClash.body.restored} vs ${reissued[0] && reissued[0].id}`);
+  ok('回收站里那条已经取走', !(await listTrash()).some((t) => t.id === clashEntry.id));
+  assert.equal(a2.body.id, a1.body.id, '占位记录用的就是同一个 id');
 
   // ---------- 9. 源码钉死 ----------
   const src = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');

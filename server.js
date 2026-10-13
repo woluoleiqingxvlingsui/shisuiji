@@ -2156,7 +2156,11 @@ route('POST', '/api/trash/:id/restore', async (ctx) => {
   if (clash === -1) {
     array.push(record);
   } else {
-    record.id = newId(); // 极小概率：原 id 已被占用，换新 id 放回，绝不覆盖新数据
+    // 极小概率：原 id 已被占用，换新 id 放回，绝不覆盖新数据。
+    // 注意换了 id 也**必须 push** —— 漏掉就是这条记录既不在回收站、也没回板块，
+    // 等于静默丢数据（2026-10-13 审查发现）。
+    record.id = newId();
+    array.push(record);
   }
   await save();
   await saveTrash();
