@@ -4,6 +4,8 @@
 
 import { STORE_MIRROR, idbGet, idbPut } from './idb.js';
 
+// 与 /api/sync/pull 的 9 个集合一一对应：少一个键，该集合的 pull 数据就被
+// writeMirror 直接丢弃、永不落镜像（成果 / 知识库曾因此离线全白）
 const MIRROR_KEYS = [
   'activities',
   'papers',
@@ -12,6 +14,8 @@ const MIRROR_KEYS = [
   'insights',
   'messages',
   'ideas',
+  'achievements',
+  'kb',
 ];
 
 function emptyCollection() {
