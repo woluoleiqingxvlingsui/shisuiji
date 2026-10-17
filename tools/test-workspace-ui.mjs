@@ -161,6 +161,71 @@ try {
       await checkLayout('desktop ' + board + ' editor');
     }
   }
+
+  /* ---- M21 验收：网页类型中文、知识库标签复用、花销四位小数、回收站完整内容 ---- */
+  // 网页类型：新建抽屉里类型输入框应显示「技术」而不是内部 id「tech」
+  await navigate('sites');
+  await evaluate(`document.querySelector('.create-button').click()`);
+  await eventually(() => evaluate(`!!document.querySelector('.drawer .combo-control input')`), 'site editor type combo');
+  assert.equal(await evaluate(`document.querySelector('.drawer .combo-control input').value`), '技术', 'site kind input shows Chinese label');
+  await evaluate(`document.querySelector('.drawer-head .btn.ghost').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close site editor');
+  console.log('✓ 网页类型输入框显示中文「技术」');
+
+  // 知识库标签复用：点已有标签胶囊 → 标签进入输入框；再点一次移除
+  await navigate('kb');
+  await evaluate(`document.querySelector('.create-button').click()`);
+  await eventually(() => evaluate(`!!document.querySelector('.kb-tag-picks .chip')`), 'kb known tag picks');
+  await evaluate(`[...document.querySelectorAll('.kb-tag-picks .chip')].find(b => b.textContent.includes('研究方法')).click()`);
+  await pause(80);
+  assert.ok((await evaluate(`document.querySelector('.drawer input[placeholder*="逗号分隔"]').value`)).includes('研究方法'), 'known tag added to input');
+  await evaluate(`[...document.querySelectorAll('.kb-tag-picks .chip')].find(b => b.textContent.includes('研究方法')).click()`);
+  await pause(80);
+  assert.ok(!(await evaluate(`document.querySelector('.drawer input[placeholder*="逗号分隔"]').value`)).includes('研究方法'), 'known tag removed on second click');
+  await evaluate(`document.querySelector('.drawer-head .btn.ghost').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close kb editor');
+  console.log('✓ 知识库已有标签可点选复用/取消');
+
+  // 花销四位小数：卡片显示 ¥0.1234，旧的两位小数记录仍显示 ¥128.50
+  const decExpense = await fetch(base + '/api/expenses', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '四位小数验收（演示）', amount: 0.1234, date: new Date().toISOString().slice(0, 10) }),
+  });
+  assert.ok(decExpense.ok, 'create 4-decimal expense fixture');
+  await navigate('expenses');
+  const expenseTexts = await eventually(async () => {
+    const text = await evaluate(`[...document.querySelectorAll('.expense-card')].map(c => c.textContent).join('\\n')`);
+    return text.includes('¥0.1234') ? text : '';
+  }, 'expense 4-decimal render');
+  assert.ok(expenseTexts.includes('¥128.50'), 'legacy 2-decimal amount display unchanged');
+  console.log('✓ 花销四位小数与旧两位小数显示均正确');
+
+  // 回收站：长正文 + 带图随记删除后，卡片默认展开显示完整内容与缩略图
+  const longTail = 'M21-TRASH-TAIL-' + Date.now();
+  const longContent = '回收站完整内容验收：' + '这段正文用来确认默认展开后不会只显示六十个字。'.repeat(12) + longTail;
+  const upPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const upload = await fetch(base + '/api/uploads?name=trash-fixture.png', {
+    method: 'POST', headers: { 'Content-Type': 'image/png' }, body: upPng,
+  });
+  assert.ok(upload.ok, 'upload trash fixture image');
+  const imageInfo = await upload.json();
+  const trashIdea = await fetch(base + '/api/ideas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '回收站完整内容验收（演示）', content: longContent, images: [{ id: imageInfo.id, name: 'trash-fixture.png' }] }),
+  });
+  assert.ok(trashIdea.ok, 'create trash fixture idea');
+  const trashIdeaBody = await trashIdea.json();
+  assert.ok((await fetch(base + '/api/ideas/' + trashIdeaBody.id, { method: 'DELETE' })).ok, 'delete trash fixture idea');
+  await navigate('trash');
+  const trashDetail = await eventually(async () => {
+    const text = await evaluate(`document.querySelector('.trash-card .trash-detail') && document.querySelector('.trash-card .trash-detail').textContent`);
+    return text && text.includes(longTail) ? text : '';
+  }, 'trash card full content');
+  assert.ok(trashDetail.length > 200, 'trash detail renders full long content');
+  await eventually(() => evaluate(`document.querySelectorAll('.trash-card .trash-imgs img').length >= 1`), 'trash card image thumbnail');
+  await checkLayout('desktop trash');
+  console.log('✓ 回收站默认展开完整内容与贴图缩略图');
+
   await viewport(390, 844, true);
   await navigate('ideas');
   await checkLayout('phone 390px');

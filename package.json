@@ -19,10 +19,11 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node tools/check-syntax.mjs && node tools/test-sync-logic.mjs && node tools/test-api-base.mjs && node tools/test-pair.mjs && node tools/test-net-gate.mjs && node tools/test-bg-sync.mjs && node tools/test-sync-report.mjs && node tools/test-desktop-report-inbox.mjs && node tools/test-latency.mjs && node tools/test-server-boot.mjs && node tools/test-sync-no-selfexcite.mjs && node tools/test-trash.mjs",
+    "test": "node --check server.js && node tools/check-syntax.mjs && node tools/test-sync-logic.mjs && node tools/test-api-base.mjs && node tools/test-pair.mjs && node tools/test-net-gate.mjs && node tools/test-bg-sync.mjs && node tools/test-sync-report.mjs && node tools/test-desktop-report-inbox.mjs && node tools/test-latency.mjs && node tools/test-server-boot.mjs && node tools/test-sync-no-selfexcite.mjs && node tools/test-trash.mjs && node tools/test-m21-api.mjs",
     "test:sync:flow": "node tools/test-sync-flow.mjs",
     "test:sync:native": "node tools/test-native-snapshot.mjs",
     "test:ui": "node tools/test-workspace-ui.mjs",
+    "test:local-images": "node tools/test-local-images-ui.mjs",
     "test:render": "node tools/render-boards.mjs"
   },
   "engines": {
