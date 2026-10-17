@@ -549,6 +549,7 @@
                       @save="saveAchievement" @close="state.achievementEditorOpen = false"></achievement-editor>
 
   <kb-editor v-if="state.kbEditorOpen" :initial="state.editingKb" :prefill="state.kbPrefill"
+             :known-tags="kbTagOptions"
              @save="saveKb" @close="state.kbEditorOpen = false"></kb-editor>
 
   <kb-merge @resolve="resolveKbMerge"></kb-merge>

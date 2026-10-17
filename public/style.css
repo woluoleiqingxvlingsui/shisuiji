@@ -686,6 +686,54 @@ input, select, textarea { font: inherit; color: inherit; }
   margin: 0 0 12px; padding: 7px 10px; font-size: 12.5px; color: var(--muted);
   border: 1px dashed var(--border); border-radius: var(--radius-sm); background: var(--card-2);
 }
+/* M21-B：知识库编辑器里的「已有标签」快捷胶囊。点一下加入输入框，已加入的再点一下移除。
+   输入框本身仍可自由手打新标签；数量多时换行（不横向滚动，避免抽屉里藏操作） */
+.kb-tag-picks {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: -6px 0 18px; max-width: 100%;
+}
+.kb-tag-picks-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.kb-tag-picks .chip {
+  display: inline-flex; align-items: center; gap: 2px; max-width: 100%;
+  border: 1px dashed var(--border); background: transparent; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: border-color .15s ease, color .15s ease, background-color .15s ease;
+}
+.kb-tag-picks .chip:hover { border-color: var(--accent); color: var(--accent-strong); }
+.kb-tag-picks .chip.on {
+  border-style: solid; border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-soft); color: var(--accent-strong); font-weight: 700;
+}
+.kb-tag-picks .chip sup { font-size: 10px; opacity: .65; margin-left: 2px; }
+
+/* ---------- 回收站卡片（M21-A） ---------- */
+/* 默认展开：把被删记录的完整内容原样铺开，用户先确认删掉的是什么，再决定恢复/彻底删。
+   所有值 pre-wrap + overflow-wrap:anywhere：长 URL、长正文在双列瀑布流/列表下都不撑出横向滚动 */
+.trash-card { min-width: 0; }
+.trash-meta { margin-top: 8px; }
+.chip.trash-days { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+.chip.trash-days.warn { background: color-mix(in srgb, var(--orange) 14%, transparent); color: var(--orange); }
+.trash-detail {
+  display: flex; flex-direction: column; gap: 7px; min-width: 0;
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border);
+}
+.trash-row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.8; min-width: 0; }
+.trash-row-label { flex: none; width: 5.5em; white-space: nowrap; color: var(--muted); font-weight: 600; }
+.trash-row-value { flex: 1; min-width: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+/* 多行值（正文 / 备注 / 日志）：标签单独一行，正文吃满卡片宽度 */
+.trash-row.is-multiline { flex-direction: column; gap: 2px; }
+.trash-row.is-multiline .trash-row-label { width: auto; white-space: normal; }
+.trash-imgs { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.trash-imgs img {
+  width: 84px; height: 84px; object-fit: cover;
+  border-radius: var(--radius); border: 1px solid var(--border); background: var(--card-2);
+}
+/* 图片 blob 还没解析出来 / 加载失败：给同尺寸占位，不留空白也不撑布局 */
+.trash-img-missing {
+  display: inline-grid; place-items: center; width: 84px; height: 84px;
+  border-radius: var(--radius); border: 1px dashed var(--border);
+  background: var(--card-2); color: var(--muted); font-size: 18px;
+}
 
 /* ---------- 阅读记录 ---------- */
 .paper-log {

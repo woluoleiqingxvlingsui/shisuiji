@@ -7,7 +7,7 @@ import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
-import { trashDaysLeft, trashSummary, trashTitle } from '../util/trash.js';
+import { trashDaysLeft, trashSummary, trashTitle, trashDetailText } from '../util/trash.js';
 
 const loadTrash = async () => {
   try {
@@ -82,7 +82,8 @@ const filteredTrash = computed(() => {
   if (!kw) return state.trash;
   return state.trash.filter((t) => {
     const p = t.payload || {};
-    return [trashTitle(t), trashSummary(t), p.url, p.platform, t.source]
+    // M21-A：详情行里的完整正文/字段也纳入搜索（被删记录不再只有标题可搜）
+    return [trashTitle(t), trashSummary(t), trashDetailText(t), p.url, p.platform, t.source]
       .filter(Boolean).join(' ').toLowerCase().includes(kw);
   });
 });
