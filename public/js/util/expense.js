@@ -7,10 +7,19 @@ import { formatDate } from './date.js';
 import { formatMoney } from './money.js';
 import { platformHue } from './text.js';
 
+// 自动归类的匹配优先级：梯子必须最先（否则「机场订阅」会被套餐的「订阅」抢走）；
+// 其余类别按 config 里的显示顺序（plan → api → compute）。规则与 server.js 的 guessExpenseCategory 一致。
+const LADDER_CATEGORY = 'ladder';
+
 function guessExpenseCategory(title) {
   const s = String(title || '').toLowerCase();
   const cats = CONFIG.expenses.categories;
-  for (const c of cats) {
+  // 显示顺序里梯子在最后（plan/api/compute/ladder 更自然），所以这里显式把梯子提到最前
+  const ordered = [
+    ...cats.filter((c) => c.id === LADDER_CATEGORY),
+    ...cats.filter((c) => c.id !== LADDER_CATEGORY),
+  ];
+  for (const c of ordered) {
     if ((c.keywords || []).some((k) => s.includes(k))) return c.id;
   }
   return cats[0].id;

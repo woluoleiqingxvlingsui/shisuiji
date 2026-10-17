@@ -22,6 +22,29 @@ function sanitizeKind(value) {
 }
 
 /**
+ * 类型输入框的展示文本（M21 任务 B）：内置类型显示 config 里的中文 label（技术 / 杂项），
+ * 自定义类型如实显示自己的名字。存盘永远用 id，展示才用 label —— 老数据里存的 id 不动。
+ */
+function kindInputText(id) {
+  const built = CONFIG.siteNote.kinds.find((k) => k.id === id);
+  return built ? built.label : sanitizeKind(id);
+}
+
+/**
+ * 把输入框里的文本归一成要存盘的 kind（M21 任务 B）：
+ * - 「技术 / 杂项」这类内置 label、以及手打的内置 id（tech / misc）→ 内置 id；
+ * - 其它短词按自定义类型原样存；空串返回 ''（留给调用方决定回落，不在这里静默塞默认值）。
+ */
+function resolveKindInput(text) {
+  const raw = sanitizeKind(text);
+  if (!raw) return '';
+  const byId = CONFIG.siteNote.kinds.find((k) => k.id === raw);
+  if (byId) return byId.id;
+  const byLabel = CONFIG.siteNote.kinds.find((k) => k.label === raw);
+  return byLabel ? byLabel.id : raw;
+}
+
+/**
  * 类型元信息。内置类型走 config；自定义类型（不在 config 里的 kind）
  * 如实显示它自己的名字，emoji 用固定兜底 —— 绝不显示 undefined 或空白。
  */
@@ -74,4 +97,4 @@ function siteNoteRows(log) {
   return siteNoteFields(log.kind).filter((f) => String(log[f.key] || '').trim());
 }
 
-export { kindMeta, usageMeta, siteNoteKeys, siteNoteFields, siteNoteFieldLabel, blankSiteNote, siteNoteIsEmpty, siteNoteMissing, siteNoteSummary, siteNoteRows, isBuiltinKind, sanitizeKind, CUSTOM_KIND_EMOJI, KIND_MAX_LEN };
+export { kindMeta, usageMeta, siteNoteKeys, siteNoteFields, siteNoteFieldLabel, blankSiteNote, siteNoteIsEmpty, siteNoteMissing, siteNoteSummary, siteNoteRows, isBuiltinKind, sanitizeKind, kindInputText, resolveKindInput, CUSTOM_KIND_EMOJI, KIND_MAX_LEN };

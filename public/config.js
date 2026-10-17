@@ -96,7 +96,8 @@ export const CONFIG = {
     maxSlices: 24,   // 饼图最多几个扇区；超出时把最小的若干笔合并成「其余 N 笔」
     maxQuotes: 6,    // 体感评价里每个主体最多显示几句原话（按日期取最近的）
     // 类别：id 或关键词改动时，记得同步 server.js 的 EXPENSE_CATEGORIES 与关键词表
-    // 自动归类规则：套餐关键词优先（token 包、资源包算套餐），再匹配 API、算力租用，都没命中就归套餐
+    // 自动归类规则（两端一致）：梯子关键词最先匹配（否则「机场订阅」会被「订阅」抢到套餐），
+    // 再按套餐优先（token 包、资源包算套餐），然后 API、算力租用，都没命中就归套餐
     categories: [
       {
         id: 'plan', label: '套餐', emoji: '📦', hue: 210,
@@ -109,6 +110,11 @@ export const CONFIG = {
       {
         id: 'compute', label: '算力租用', emoji: '🖥️', hue: 275,
         keywords: ['算力', '租用', 'autodl', 'gpu'],
+      },
+      {
+        // 梯子 = 机场 / 代理 / VPN 这类翻墙工具（显示顺序放最后，归类时前端会显式提到最优先）
+        id: 'ladder', label: '梯子', emoji: '🪜', hue: 160,
+        keywords: ['梯子', '机场', 'vpn', '代理', '节点', 'clash', 'v2ray', '翻墙', '科学上网'],
       },
     ],
     // 体感评价：把花销的标题 + 备注认领到「主体」（各家模型 / 厂商），凝练使用体感。

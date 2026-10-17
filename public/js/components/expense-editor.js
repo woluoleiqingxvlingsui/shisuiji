@@ -6,6 +6,9 @@ import { formatDate, todayStr } from '../util/date.js';
 import { guessExpenseCategory } from '../util/expense.js';
 import { formatMoney, parseAmountInput } from '../util/money.js';
 
+// 金额输入的统一提示（M21 任务 B：精度放宽到最多四位小数；与 money.js / server.js 文案口径一致）
+const AMOUNT_INPUT_HINT = '金额得是正数，可以写 1280、1280.5、¥1,280；非整数最多四位小数';
+
 const ExpenseEditor = {
   name: 'ExpenseEditor',
   props: {
@@ -46,14 +49,14 @@ const ExpenseEditor = {
       if (!raw) return null;
       const n = parseAmountInput(raw);
       return n === null
-        ? { bad: true, text: '金额得是正数，可以写 1280、1280.5、¥1,280' }
+        ? { bad: true, text: AMOUNT_INPUT_HINT }
         : { bad: false, text: `→ ${formatMoney(n)}` };
     });
 
     function save() {
       if (!form.title.trim()) return alert('请填写花销内容');
       const amount = parseAmountInput(form.amountText);
-      if (amount === null) return alert('金额得是正数，可以写 1280、1280.5、¥1,280');
+      if (amount === null) return alert(AMOUNT_INPUT_HINT);
       const date = form.date.trim();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('日期写成 2026-09-10 这样');
       emit('save', { title: form.title.trim(), amount, date, notes: form.notes.trim(), category: form.category });
@@ -93,7 +96,7 @@ const ExpenseEditor = {
           <input ref="titleInput" v-model="form.title" placeholder="例：Coursera 年费 / 打印机墨盒 / 文献数据库会员">
         </label>
         <label>金额 *
-          <input v-model="form.amountText" inputmode="decimal" placeholder="1280 或 1280.5 或 ¥1,280">
+          <input v-model="form.amountText" inputmode="decimal" placeholder="1280 或 1280.5 或 ¥1,280（非整数最多四位小数）">
           <span class="date-hint" v-if="amountPreview" :class="amountPreview.bad ? 'bad' : 'ok'">{{ amountPreview.text }}</span>
         </label>
 

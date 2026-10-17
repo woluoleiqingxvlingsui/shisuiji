@@ -122,8 +122,10 @@ const SITE_NOTE_FIELDS = [
 
 // 花销板块：按条目记账，金额单独按数字处理；category 只用于归纳展示
 const EXPENSE_FIELDS = ['title', 'date', 'notes', 'category'];
-const EXPENSE_CATEGORIES = ['plan', 'api', 'compute'];
-// 自动归类关键词（与 public/config.js 的 expenses.categories 同步）；套餐优先，所以 token 包算套餐
+const EXPENSE_CATEGORIES = ['plan', 'api', 'compute', 'ladder'];
+// 自动归类关键词（与 public/config.js 的 expenses.categories 同步）；梯子优先，
+// 必须先于套餐匹配，否则「机场订阅」会被「订阅」归到套餐；套餐其次，所以 token 包算套餐
+const EXPENSE_LADDER_KEYWORDS = ['梯子', '机场', 'vpn', '代理', '节点', 'clash', 'v2ray', '翻墙', '科学上网'];
 const EXPENSE_PLAN_KEYWORDS = ['套餐', '会员', '订阅', '包月', '年费', '额度', 'token', '资源包', 'pro', 'plus'];
 const EXPENSE_API_KEYWORDS = ['api', '接口', '调用'];
 const EXPENSE_COMPUTE_KEYWORDS = ['算力', '租用', 'autodl', 'gpu'];
@@ -612,14 +614,15 @@ function saveExpenses() {
   return queueWrite(saveExpensesNow);
 }
 
-// 金额解析：容忍 ¥ / ￥ / 千分位 / 空格；负数与非法值一律返回 null
+// 金额解析：容忍 ¥ / ￥ / 千分位 / 空格；负数与非法值一律返回 null；最多保留四位小数
+// （精度与 public/js/util/money.js 的 parseAmountInput 保持一致；整数仍不带小数展示）
 function parseAmount(raw) {
   if (raw === null || raw === undefined) return null;
   const cleaned = String(raw).replace(/[¥￥,，\s]/g, '');
   if (!cleaned) return null;
   const n = Number(cleaned);
   if (!Number.isFinite(n) || n < 0) return null;
-  const rounded = Math.round(n * 100) / 100;
+  const rounded = Math.round(n * 10000) / 10000;
   if (rounded > 1e8) return null;
   return rounded;
 }
@@ -640,9 +643,11 @@ function normalizeExpenseDate(raw) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-// 按标题猜类别：套餐关键词优先（token 包、资源包算套餐），再匹配 API、算力租用，都没命中兜底套餐
+// 按标题猜类别：梯子关键词最先匹配（机场 / 代理 / VPN），再套餐优先（token 包、资源包算套餐），
+// 然后 API、算力租用，都没命中兜底套餐。前端 util/expense.js 的 guessExpenseCategory 同规则
 function guessExpenseCategory(title) {
   const s = String(title || '').toLowerCase();
+  if (EXPENSE_LADDER_KEYWORDS.some((k) => s.includes(k))) return 'ladder';
   if (EXPENSE_PLAN_KEYWORDS.some((k) => s.includes(k))) return 'plan';
   if (EXPENSE_API_KEYWORDS.some((k) => s.includes(k))) return 'api';
   if (EXPENSE_COMPUTE_KEYWORDS.some((k) => s.includes(k))) return 'compute';
@@ -1161,7 +1166,7 @@ route('POST', '/api/sites/:id/progress', async (ctx) => {
 });
 
 // ---------- 花销板块：路由 ----------
-const AMOUNT_ERROR = '金额得是正数（可写 1280、1280.5、¥1,280）';
+const AMOUNT_ERROR = '金额得是正数（可写 1280、1280.5、¥1,280；非整数最多四位小数）';
 
 route('GET', '/api/expenses', async (ctx) => ctx.json(expenseDb.expenses));
 

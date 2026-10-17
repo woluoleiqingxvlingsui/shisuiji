@@ -4,7 +4,7 @@ import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from '../vu
 import { CONFIG } from '../../config.js';
 import { api } from '../api.js';
 import { normalizeUrl } from '../util/text.js';
-import { isBuiltinKind, kindMeta, sanitizeKind, KIND_MAX_LEN } from '../util/site-note.js';
+import { isBuiltinKind, kindMeta, sanitizeKind, kindInputText, resolveKindInput, KIND_MAX_LEN } from '../util/site-note.js';
 
 const SiteEditor = {
   name: 'SiteEditor',
@@ -28,6 +28,10 @@ const SiteEditor = {
 
     // 抽屉标题 / 面包屑 / 卡片标签共用这个回显；自定义类型如实显示自己的名字
     const kind = computed(() => kindMeta(form.kind));
+
+    // 输入框里显示的展示文本（M21 任务 B）：内置类型显示「技术 / 杂项」，
+    // 自定义类型显示原名；form.kind 始终是存盘用的 id，两者分开，避免把中文 label 存进数据。
+    const kindText = ref(kindInputText(form.kind));
 
     const fetching = ref(false);
     const titleHint = ref('');
@@ -67,6 +71,7 @@ const SiteEditor = {
     function toggleCombo() { comboOpen.value ? closeCombo() : openCombo(); }
     function pickKind(id) {
       form.kind = id;
+      kindText.value = kindInputText(id);
       closeCombo();
       suppressFocusOpen = true;
       kindInput.value && kindInput.value.focus();
@@ -105,10 +110,13 @@ const SiteEditor = {
       if (comboRoot.value && comboRoot.value.contains(e.target)) return;
       closeCombo();
     }
-    // 输入超长时即时截断，别让用户敲到第 30 个字才发现存不进去
+    // 输入超长时即时截断，别让用户敲到第 30 个字才发现存不进去。
+    // 输入框里保留用户正在敲的原文（打「技术」不会中途被换成 tech），存盘值由 resolveKindInput 归一。
     function onKindInput(e) {
-      form.kind = String(e.target.value || '').slice(0, KIND_MAX_LEN);
-      e.target.value = form.kind;
+      const raw = String(e.target.value || '').slice(0, KIND_MAX_LEN);
+      kindText.value = raw;
+      form.kind = resolveKindInput(raw);
+      e.target.value = raw;
       openCombo();
     }
 
@@ -144,9 +152,9 @@ const SiteEditor = {
       const url = normalizeUrl(form.url);
       if (!url) return alert('请填写合法的链接（http / https，裸域名会自动补 https://）');
       if (!form.title.trim()) return alert('请填写标题，或点「自动取标题」');
-      // 类型：内置原样存；自定义存去空白、限长后的短词；清空则退回默认（不静默存空串）
-      const raw = sanitizeKind(form.kind);
-      const finalKind = raw || 'tech';
+      // 类型：内置 label（技术 / 杂项）与内置 id 都归一成内置 id 存；自定义存去空白、限长后的短词；
+      // 清空则退回默认（不静默存空串）
+      const finalKind = resolveKindInput(kindText.value) || 'tech';
       // 内置类型的默认选择不需要写 localStorage —— 只有自定义类型才值得记住
       if (!isBuiltinKind(finalKind)) localStorage.setItem('danji.lastSiteKind', finalKind);
       else localStorage.removeItem('danji.lastSiteKind');
@@ -181,7 +189,7 @@ const SiteEditor = {
 
     return {
       form, urlInput, fetching, titleHint, duplicate, onUrlBlur, fetchTitle, save,
-      kind, kindOptions, comboOpen, comboIndex, comboRoot, kindInput,
+      kind, kindText, kindOptions, comboOpen, comboIndex, comboRoot, kindInput,
       openCombo, closeCombo, toggleCombo, pickKind, highlightNext, highlightPrev,
       onComboEnter, onComboFocus, onComboEsc, onDocMousedown, onKindInput,
       close: () => emit('close'),
@@ -212,7 +220,7 @@ const SiteEditor = {
         <label class="combo-label">类型
           <div class="combo" ref="comboRoot">
             <div class="combo-control">
-              <input ref="kindInput" :value="form.kind"
+              <input ref="kindInput" :value="kindText"
                      placeholder="内置：技术 / 杂项；也可自己起一个"
                      autocomplete="off" maxlength="12"
                      role="combobox" :aria-expanded="comboOpen ? 'true' : 'false'"
