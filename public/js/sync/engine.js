@@ -21,12 +21,20 @@ import {
 } from './mirror.js';
 import {
   listOutbox,
+  getOutbox,
   enqueueOutbox,
   dequeueOutbox,
   putOutbox,
   mergeDisplayItems,
   toPushPayload,
 } from './outbox.js';
+import {
+  isLocalImageId,
+  hasLocalImages,
+  resolveOutboxImages,
+  deleteLocalImages,
+  localImageIds,
+} from '../local-images.js';
 
 const MOBILE_FORCE_KEY = 'danji-mobile';
 
@@ -507,13 +515,78 @@ async function applyPushResult(entry, result) {
   return { action: 'dequeue_error', status: status || 'error' };
 }
 
+/* ---- M21-C：本地图片（'local:<uuid>'）解析 ----
+ * push 前必须把 outbox payload.images 里的 local id 上传成服务端 UUID 并写回，
+ * 否则服务端 sanitizeImages（只认标准 UUID）会把这些图静默丢掉。
+ * 离线时 syncNow 门闩已经挡住，走不到这里；上传失败抛错让本轮走失败/离线重试，
+ * 待同步队列原样保留，绝不把 local id 发出去。
+ */
+
+/** 把 outbox 条目里的本地图片上传替换；每成功一张立刻持久化中间态，防重试丢图 */
+async function resolveOutboxLocalImages(ops) {
+  const out = [];
+  for (const entry of ops) {
+    const images = entry.payload && Array.isArray(entry.payload.images) ? entry.payload.images : null;
+    if (!images || !hasLocalImages(images)) {
+      out.push(entry);
+      continue;
+    }
+    let current = entry;
+    let superseded = false;
+    const nextImages = await resolveOutboxImages(images, {
+      onProgress: async (partial) => {
+        // 上传可能要好几秒：期间用户又编辑了同一条 → 不能拿旧 payload 把新编辑冲掉。
+        // 只在没有更新本地编辑时写回；被覆盖时返回 false，让本地 blob 先留着。
+        const latest = await getOutbox(entry.id).catch(() => null);
+        if (latest && latest.updated_at !== entry.updated_at) {
+          superseded = true;
+          return false;
+        }
+        current = { ...current, payload: { ...current.payload, images: partial } };
+        await putOutbox(current);
+        return true;
+      },
+    });
+    if (superseded) {
+      // 上传期间用户又改了这条：本轮先不推它（拿旧快照推会冲掉新编辑）。
+      // 新编辑入队时自己会触发下一轮同步，届时按最新 payload 解析本地图。
+      // 本地 blob 也先留着（resolveOutboxImages 收到 false 不会删），下一轮还要用。
+      continue;
+    }
+    current = { ...current, payload: { ...current.payload, images: nextImages } };
+    await putOutbox(current);
+    out.push(current);
+  }
+  return out;
+}
+
+/** 从 outbox 里彻底消失的本地图（编辑移除图片 / 本地新建后又删随记）→ 尽力删本地 blob */
+async function pruneDroppedLocalImages(prevEntry, nextEntry) {
+  const prevIds = localImageIds(prevEntry && prevEntry.payload && prevEntry.payload.images);
+  if (!prevIds.length) return;
+  const keep = new Set(localImageIds(nextEntry && nextEntry.payload && nextEntry.payload.images));
+  const dropped = prevIds.filter((id) => !keep.has(id));
+  if (dropped.length) await deleteLocalImages(dropped);
+}
+
 async function pushOnce() {
   // 冲突中且未解决的条目先不重复推，避免每 60 秒打一轮同样的 conflict
   const conflictIds = new Set((state.sync.conflicts || []).map((c) => c.id));
   const ops = (await listOutbox()).filter((o) => !conflictIds.has(o.id));
   if (!ops.length) return { pushed: 0, results: [] };
-  const payload = ops.map(toPushPayload).filter(Boolean);
+  // M21-C：组装 payload 前先把本地图片上传成服务端 UUID（并写回 outbox，重试不重复上传）
+  const opsResolved = await resolveOutboxLocalImages(ops);
+  const payload = opsResolved.map(toPushPayload).filter(Boolean);
   if (!payload.length) return { pushed: 0, results: [] };
+  // 红线兜底：local id 绝不能发给服务端。真走到这里说明解析漏了，
+  // 宁可让本轮失败、队列保留（用户能看到同步没成），也不能把图丢了。
+  for (const p of payload) {
+    for (const im of p.images || []) {
+      if (isLocalImageId(im && im.id)) {
+        throw new Error('本地图片还没上传成功，本轮同步中止（待同步队列保留）');
+      }
+    }
+  }
   const { ok, status, data } = await apiJson('/api/sync/push', {
     method: 'POST',
     body: JSON.stringify({ ideas: payload }),
@@ -528,11 +601,11 @@ async function pushOnce() {
   const results = data && data.results;
   // 2xx 但 body 不是预期 results（校园网强制门户/代理错误页会返回 200 HTML）：
   // 此时按 error 出队会把离线随记静默丢光，必须视为失败留队重试
-  if (!Array.isArray(results) || results.length !== ops.length) {
+  if (!Array.isArray(results) || results.length !== opsResolved.length) {
     throw new Error('同步返回异常（results 缺失或条数不符），待同步队列保留');
   }
   const byId = new Map(results.map((r) => [r.id, r]));
-  for (const entry of ops) {
+  for (const entry of opsResolved) {
     const result = byId.get(entry.id) || { id: entry.id, status: 'error', error: '服务端未返回该条结果' };
     await applyPushResult(entry, result);
   }
@@ -764,6 +837,8 @@ async function resolveConflict(id, choice) {
 async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
   const entryId = id || uuid();
   const now = new Date().toISOString();
+  // 折叠前的旧队列项：用于比对「哪些本地图被移除了」，尽力删掉不再引用的 blob
+  const prevEntry = await getOutbox(entryId).catch(() => null);
   // IDB 边界统一去 Proxy：调用方常把 Vue reactive 对象直接塞进 payload，
   // structured clone 遇到 Proxy 会 DataCloneError（已栽过两次），这里一次性洗成普通对象
   if (payload) payload = JSON.parse(JSON.stringify(payload));
@@ -806,7 +881,15 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
     origin: 'mobile',
     updated_at: now,
   };
-  await enqueueOutbox(merged);
+  const saved = await enqueueOutbox(merged);
+  // M21-C：编辑时移除本地图 / 本地新建后又删随记（create→delete 折叠成 null）：
+  // 队列里已不再引用的本地 blob 尽力删掉，避免离线图片仓越积越多。
+  // 清理失败不影响保存（blob 顶多留成孤儿，界面数据不受影响）。
+  try {
+    await pruneDroppedLocalImages(prevEntry, saved);
+  } catch (err) {
+    console.warn('[danji-local-image] 清理本地图片失败', err && err.message);
+  }
   await refreshPendingCount();
   await reloadIdeasDisplay();
   const online = typeof navigator === 'undefined' ? undefined : navigator.onLine;

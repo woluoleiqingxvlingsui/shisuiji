@@ -2,13 +2,16 @@
  * store:
  *   mirror — 键 = 集合名（ideas/activities/...），值 = { items, pulled_at }
  *   outbox — 键 = 想法 id，值 = 待发操作（已按 id 折叠，每 id 只有一条）
+ *   images — 键 = 'local:<uuid>'，值 = 本地图片 { id, name, type, size, blob, saved_at }
+ *            （M21-C 离线加图暂存仓，v2 新增；升级时只补建缺失 store，不动旧数据）
  */
 
 const DB_NAME = 'danji-sync';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_MIRROR = 'mirror';
 const STORE_OUTBOX = 'outbox';
-const STORES = [STORE_MIRROR, STORE_OUTBOX];
+const STORE_IMAGES = 'images';
+const STORES = [STORE_MIRROR, STORE_OUTBOX, STORE_IMAGES];
 
 let dbPromise = null;
 
@@ -21,12 +24,27 @@ function openDb() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    // 逐版本升级也走这里：只创建缺失的 store，mirror/outbox 里的旧数据原样保留
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_MIRROR)) db.createObjectStore(STORE_MIRROR, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(STORE_OUTBOX)) db.createObjectStore(STORE_OUTBOX, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(STORE_IMAGES)) db.createObjectStore(STORE_IMAGES, { keyPath: 'id' });
     };
-    req.onsuccess = () => resolve(req.result);
+    // 别的标签页还开着旧版本连接：升级会被阻塞。这里不 reject（阻塞解除后照样能成功），
+    // 只把情况记下来；同时顺手关闭自己的旧连接，别让别的窗口也被卡住。
+    req.onblocked = () => {
+      console.warn('[danji-idb] 数据库升级被其他标签页占用，等待其关闭旧连接');
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {
+        // 新版本要升级：主动让路，否则后续打开会一直 blocked
+        try { db.close(); } catch { /* ignore */ }
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => {
       dbPromise = null;
       reject(req.error || new Error('打开 IndexedDB 失败'));
@@ -95,6 +113,7 @@ export {
   DB_VERSION,
   STORE_MIRROR,
   STORE_OUTBOX,
+  STORE_IMAGES,
   STORES,
   idbAvailable,
   openDb,

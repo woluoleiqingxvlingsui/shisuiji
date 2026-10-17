@@ -3,9 +3,13 @@
  * https://localhost），而同一个地址走 fetch 却没问题（原生壳下 fetch 被
  * CapacitorHttp 接管走原生桥，同步/上传一直靠它）。所以贴图统一 fetch 成
  * blob 再转 objectURL 给 <img>，两条通道合一，不再看 WebView 脸色。
+ *
+ * M21-C：离线加图时 payload 里的 id 是 'local:<uuid>'（存在本机 IndexedDB），
+ * 这种 id 不走网络，直接从本地仓取 blob 生成 objectURL——离线也能看到缩略图。
  */
 import { ref, watch } from './vue-globals.js';
 import { api, resolveApiUrl, getToken } from './api.js';
+import { isLocalImageId, localImageObjectUrl } from './local-images.js';
 
 const cache = new Map(); // id -> Promise<objectURL>
 
@@ -33,8 +37,12 @@ async function fetchImageBlob(id) {
 }
 
 function imageObjectUrl(id) {
+  const local = isLocalImageId(id);
   if (!cache.has(id)) {
-    const p = (async () => URL.createObjectURL(await fetchImageBlob(id)))();
+    const p = local
+      // 本地图：直接从 IDB 取 blob，不走网络（离线时卡片/编辑器都能显示缩略图）
+      ? localImageObjectUrl(id)
+      : (async () => URL.createObjectURL(await fetchImageBlob(id)))();
     p.catch(() => cache.delete(id)); // 失败不缓存（离线时稍后还能重试）
     cache.set(id, p);
   }
