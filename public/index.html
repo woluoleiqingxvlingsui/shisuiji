@@ -38,7 +38,8 @@
       </button>
     </nav>
     <div class="sidebar-bottom">
-      <div class="collection-note"><app-icon name="sprout"></app-icon><p>一点一滴，皆有收获。<small>已收集 {{ collectionCount }} 份灵感与日常</small></p></div>
+      <!-- 与「收集与思考」「生活与成长」同体例的第三组：消息中心 / 回收站都是应用功能，不是收集内容 -->
+      <p class="nav-caption" v-if="isDesktopApp">系统与工具</p>
       <button v-if="isDesktopApp" class="sidebar-message" :class="{ active: state.board === 'messages' }" @click="navigate('messages')">
         <app-icon name="messages"></app-icon><span>消息中心</span><span class="nav-unread" v-if="unreadCount">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
       </button>
@@ -47,6 +48,8 @@
         <app-icon name="trash"></app-icon><span>回收站</span><span class="nav-unread" v-if="state.trash.length">{{ state.trash.length }}</span>
       </button>
       <span class="sidebar-signature">拾穗集 · 你的个人收藏空间</span>
+      <!-- 收集概览压在侧栏最下方：入口按钮（消息 / 回收站）在上，统计收尾 -->
+      <div class="collection-note"><app-icon name="sprout"></app-icon><p>一点一滴，皆有收获。<small>已收集 {{ collectionCount }} 份灵感与日常</small></p></div>
     </div>
   </aside>
 

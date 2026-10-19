@@ -1134,7 +1134,7 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .sidebar-nav button.active, .sidebar-message.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 650; }
 .sidebar-nav button.active small { background: var(--card); border-radius: 5px; }
 .sidebar-bottom { margin-top: auto; }
-.collection-note { display: flex; align-items: flex-start; gap: 9px; padding: 15px 12px; margin: 12px 0 18px; background: var(--card-2); border-radius: 12px; color: var(--accent-strong); }
+.collection-note { display: flex; align-items: flex-start; gap: 9px; padding: 15px 12px; margin: 14px 0 0; background: var(--card-2); border-radius: 12px; color: var(--accent-strong); }
 .collection-note > .app-icon { margin-top: 3px; }
 .collection-note p { margin: 0; font-size: 12px; line-height: 1.8; }
 .collection-note small { display: block; color: var(--muted); font-size: 10px; }
