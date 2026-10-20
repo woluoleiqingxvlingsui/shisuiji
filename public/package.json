@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "模块边界标记：public/ 下的 .js 全部按 ES module 解析。Node 18 没有 Node 22+ 的「模块语法自动探测」，缺这个文件时 tools/*.mjs 直接 import 前端 .js 会被当 CommonJS 解析而报 SyntaxError。浏览器直接加载 .js，不读 package.json；Capacitor 只是把本目录拷进 assets，不受影响。"
+}

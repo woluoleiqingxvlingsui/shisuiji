@@ -163,7 +163,7 @@ const PaperEditor = {
             <option value="__custom__">其他（手动填路径）…</option>
           </select>
           <input v-if="readerChoice === '__custom__'" v-model="form.reader"
-                 placeholder="粘贴阅读软件的 exe 完整路径，如 D:\\Soft\\SumatraPDF.exe">
+                 placeholder="粘贴阅读软件的 exe 完整路径，如 C:\\Program Files\\SumatraPDF\\SumatraPDF.exe">
           <span class="date-hint" v-if="readersLoading">正在扫描本机已装的阅读软件…</span>
           <span class="date-hint" v-else-if="!readers.length">没扫到常见阅读软件，可用系统默认或手动填路径</span>
         </label>

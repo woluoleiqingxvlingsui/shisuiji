@@ -317,7 +317,7 @@ const PairDrawer = {
       </header>
       <div class="drawer-form">
         <p class="sync-hint" v-if="hasPair">已配对：{{ pairedBase }}。同一 Wi-Fi 下自动同步，无需重扫；电脑 IP 变了先「清除配对」再重扫。</p>
-        <p class="sync-hint" v-else>同一 Wi-Fi：扫电脑控制台「🔗 配对码」窗口里的二维码。跳过也可离线记想法。<br>电脑若开了自签 HTTPS，请改用 HTTP 模式出码。</p>
+        <p class="sync-hint" v-else>同一 Wi-Fi：扫电脑控制台「🔗 配对码」窗口里的二维码。跳过也可离线记想法。<br>电脑若开了自签 HTTPS，App 连不上（壳里不放行证书告警）——请按 README 的 HTTP 启动与出码步骤操作，服务和二维码协议必须一致。</p>
 
         <div v-if="!hasNativeScanner" :id="SCAN_DOM_ID" style="width:100%;min-height:180px;background:#111;border-radius:10px;overflow:hidden"></div>
         <div class="scan-ui">

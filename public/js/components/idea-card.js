@@ -1,6 +1,7 @@
 /* ---------------- 组件：随记卡片 ---------------- */
 // 随记：一行点题 + 一段内容 + 贴图。origin 标明这条是从哪儿来的，
 // 手机记的能改，电脑记的在手机上只能看。
+// 📱 来源标记只在手机端显示：电脑端是同步的落点，所有内容都是同步来的，标了也没意义。
 // 桌面端默认折叠 3 行：列表要能一屏扫完，细看再展开；手机端默认全展开：版面小，怕漏看。
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
@@ -22,6 +23,8 @@ const IdeaCard = {
       return props.idea.origin !== 'desktop';
     });
     const images = computed(() => props.idea.images || []);
+    // 📱 标记只在手机端出现，电脑端不显示（内容都是同步来的，标了没意义）
+    const showMobileMark = computed(() => !isDesktop() && props.idea.origin === 'mobile');
     // 贴图走 fetch→blob 通道（见 img-urls.js），解析出 objectURL 后才渲染 <img>
     const { urls: imgUrls } = useImageUrls(images);
 
@@ -67,6 +70,12 @@ const IdeaCard = {
         ? el.scrollHeight > lh * 3 + 2
         : el.scrollHeight > el.clientHeight + 2; // 拿不到行高时退回旧比法（此时元素多半是折叠态）
     }
+    // 内容改了必须重测。列表按 id 复用同一个卡片，onMounted 不会因为编辑再跑一遍：
+    // 留着旧的 clampable，就会出现「本来 2 行没按钮，改成 4 行后文字被截断却没有展开按钮」
+    // （刷新页面能恢复就是这个原因），或者反过来「已经够短了却还挂着展开按钮」。
+    // measure 用的是绝对 3 行阈值而非 clientHeight 比值，所以展开/收起切换不必重测：
+    // 两种状态下算出来的答案一致，重测反而多余。
+    watch(() => props.idea.content, async () => { await nextTick(); measure(); });
     const onResize = () => measure();
     onMounted(async () => {
       await nextTick();
@@ -79,7 +88,7 @@ const IdeaCard = {
     }
 
     return {
-      timeText, writable, images, imgUrls,
+      timeText, writable, images, imgUrls, showMobileMark,
       viewer, openViewer, stepViewer, closeViewer,
       expanded, contentEl, clampable, toggleExpand,
       emitEdit: () => emit('edit'),
@@ -93,7 +102,7 @@ const IdeaCard = {
     <div class="card-head">
       <span class="st-pin" v-if="idea.pinned" title="已置顶"><app-icon name="pin"></app-icon></span>
       <h3 class="title">{{ idea.title || '（没写题目）' }}</h3>
-      <span class="idea-origin" v-if="idea.origin === 'mobile'" title="这条是在手机上记的">📱</span>
+      <span class="idea-origin" v-if="showMobileMark" title="这条是在手机上记的">📱</span>
       <span class="idea-time">{{ timeText }}</span>
     </div>
     <p class="idea-content" :class="{ clamped: !expanded }" ref="contentEl" v-if="idea.content">{{ idea.content }}</p>

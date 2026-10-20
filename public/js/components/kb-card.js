@@ -1,6 +1,6 @@
 /* ---------------- 组件：知识库卡片 ---------------- */
 // 标题 + 内容（默认折 3 行）+ 标签 + 来源引用。桌面可编辑删除，手机只读。
-import { computed, ref, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { canWrite } from '../perm.js';
 import { formatDate } from '../util/date.js';
@@ -29,6 +29,12 @@ const KbCard = {
       if (!el) return;
       clampable.value = el.scrollHeight > el.clientHeight + 2;
     }
+    // 内容改了必须重测。列表按 id 复用同一个卡片，onMounted 不会因为编辑再跑一遍：
+    // 留着旧的 clampable，就会出现「文字被截断了却没有展开按钮」（刷新页面能恢复就是这个原因），
+    // 或者反过来「没截断却挂着展开按钮」。
+    watch(() => props.entry.content, async () => { await nextTick(); measure(); });
+    // 展开/收起切换后也重测，clampable 始终描述「折起来时会不会被截断」
+    watch(expanded, async () => { await nextTick(); measure(); });
     const onResize = () => measure();
     onMounted(async () => {
       await nextTick();
