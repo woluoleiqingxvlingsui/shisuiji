@@ -21,7 +21,7 @@
 
 快捷键：`Ctrl / ⌘ + K` 聚焦搜索，`Alt + N` 新建当前板块的记录，在编辑表单中按 `Ctrl / ⌘ + Enter` 保存。手机端可以记随记，其余板块保留浏览权限。
 
-界面回归：Node.js 22+ 与本机 Edge 下运行 `node tools/test-workspace-ui.mjs`，会自动复制服务与前端到临时目录，并显式隔离文献库和数据。设置 `DANJI_UI_SCREENSHOTS=1` 可在 `output/ui-preview/` 留下演示截图。
+界面回归：Node.js 18+ 与本机 Edge 下运行 `node tools/test-workspace-ui.mjs`，会自动复制服务与前端到临时目录，并显式隔离文献库和数据。设置 `DANJI_UI_SCREENSHOTS=1` 可在 `output/ui-preview/` 留下演示截图。
 
 ## 环境要求
 
@@ -32,7 +32,7 @@
 
 双击 **`start.bat`** 或桌面「拾穗集」快捷方式，会弹出一个**图形控制台窗口**：自动在后台启动服务并打开 `http://localhost:8642`。
 
-- 窗口里有状态灯和三个按钮：**🚀 打开网页 / ▶ 启动服务 / ⏹ 停止服务**，全程没有黑窗口
+- 窗口里有状态灯和四个按钮：**🚀 打开网页 / 🔗 配对码 / ▶ 启动服务 / ⏹ 停止服务**，全程没有黑窗口
 - **关闭控制台窗口服务照常在后台运行**，网页不受影响；要真正停止请点「⏹ 停止服务」
 - 无黑框启动链路：桌面快捷方式 → `launch.vbs` → `control-ui.ps1`（图形窗口）
 - 也可以命令行操作：`powershell -File control.ps1 start|stop|status`；桌面快捷方式丢了就跑 `powershell -File make-shortcut.ps1` 重建
@@ -45,7 +45,8 @@ node server.js
 ```
 
 - 服务端零依赖：只用到 Node.js 标准库，`node server.js` **无需 npm install** 即可跑网页本体
-- 仅「🔗 配对码」二维码出图（`tools/pair-qr-png.mjs` / `tools/print-pair-qr.mjs`）依赖 `qrcode`：在仓库根目录执行一次 `npm install` 即可；未安装时图形控制台会回退为把配对 JSON 复制到剪贴板（App 里手动粘贴也能配对）
+- 仅「🔗 配对码」二维码出图（`tools/pair-qr-png.mjs` / `tools/print-pair-qr.mjs`）依赖 `qrcode`：`tools/qrcode-loader.mjs` 先找仓库根的 `node_modules/qrcode`，找不到再回落 `app/node_modules/qrcode`——在仓库根或 `app/` 目录任一处 `npm install` 都能出码（推荐在仓库根执行）
+- **没装 `qrcode` 就真的出不了码**：点「🔗 配对码」会弹「未能生成二维码图片」的提示，终端 ASCII 码走的是同一个依赖、同样出不来，控制台里只剩一段配对 JSON（也会顺手复制到剪贴板）。**App 只有扫码入口、没有手动粘贴框**，这段 JSON 用不上 → 装好 `qrcode` 再出码
 - 内存占用约 30MB，可以一直挂着
 - 配置：复制 `config.example.json` 为根目录 `config.json`（**已在 .gitignore，不会进仓库**）改端口/监听/论文库路径
 - **口令以本机 `config.json` 的 `sync.token` 为准**（该文件不入库）；读取优先级与服务端一致：config 优先、环境变量回落：
@@ -58,6 +59,19 @@ node server.js
 
 首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
 
+## 首次使用流程（新机器从零到可用）
+
+1. **装 Node.js ≥ 18**——去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版；服务端只用标准库，装完即用
+2. **复制配置**：把 `config.example.json` 复制为根目录 `config.json`（该文件不入库，改的就是本机这份）
+3. **按需要改 `config.json` 的字段**（不改就用默认值，也能跑）：
+   - `port`：服务端口，默认 `8642`，被占用就换一个
+   - `host`：监听地址，默认 `127.0.0.1`（仅本机）；**手机要访问就改成 `0.0.0.0`**
+   - `papers_dir`：论文库目录，相对路径相对项目根（如 `papers`），也可以填绝对路径
+   - `sync.token`：手机访问口令，留空 = 不校验（只靠监听地址保护）；建议设一个
+4. **改完必须重启服务才生效**（配置只在启动时读一次）：双击 `start.bat`，或依次执行 `powershell -File control.ps1 stop`、`powershell -File control.ps1 start`（`start` 不会重启已运行的服务）
+5. 浏览器打开 `http://localhost:8642`，确认页面能开、控制台状态灯变绿即完成
+6. （可选）手机与电脑同一 Wi-Fi，按「手机使用」章节配对；要离线冷启动再按「HTTPS 证书从哪来」配好证书
+
 ## 手机使用（离线优先 + 只读浏览）
 
 ### 电脑上怎么启动（推荐）
@@ -67,7 +81,7 @@ node server.js
 1. 双击桌面「拾穗集」快捷方式，或项目里的 `start.bat`
 2. 控制台会**自动**加载 `local.env.ps1` 里的口令；若存在 `danji-cert.pem` / `danji-key.pem` 则自动 HTTPS
 3. 点 **🚀 打开网页（电脑）** → `http://localhost:8642`（或 https）
-4. 点 **📋 复制手机访问地址** → 粘贴到手机浏览器（同一 Wi-Fi）
+4. 手机访问地址 = `http(s)://<电脑局域网IP>:8642`（图形控制台不显示这个地址；命令行 `powershell -File control.ps1` 的窗口里有「手机地址」）。用 App 的话直接点控制台的 **🔗 配对码** 扫码即可
 5. 手机首次访问填口令（`config.json` 的 `sync.token`）
 
 **方式 B：命令行**
@@ -86,12 +100,12 @@ powershell -File start-with-env.ps1
 | 未装 PWA 或未配 HTTPS | 电脑不可达时**打不开页面**（没有本地应用壳） |
 | 蛋 / 文献 / 网页 / 花销 / 消息 | 手机端**只读**（不显示编辑/删除/领取等按钮；消息也不标已读） |
 
-> Service Worker 只在 **https 或 localhost** 注册。局域网 `http://IP:端口` 下关掉浏览器再打开**无法**离线冷启动；配 HTTPS 并「添加到主屏幕」后才可以。
+> Service Worker 只在**安全上下文**（https 或 localhost）注册（`public/js/pwa.js`）。局域网 `http://IP:端口` 下直接跳过注册并打一条 console.warn，关掉浏览器再打开**无法**离线冷启动；**只有 SW 真的注册上了**（页面底部提示「离线壳已就绪」）再「添加到主屏幕」，才算装好离线壳——见「离线冷启动」一节。
 
 ### 日常（同网）
 
 1. 用图形工作台启动服务（见上「方式 A」）
-2. 手机与电脑同一 Wi-Fi，打开控制台显示的「手机访问地址」（或 `http://<电脑IP>:8642`）
+2. 手机与电脑同一 Wi-Fi，用 App 扫控制台的「🔗 配对码」，或用手机浏览器直接打开 `http://<电脑IP>:8642`
 3. 顶栏同步胶囊处填写 `config.json` 里的 `sync.token`
 4. 电脑本机请用控制台上的本机地址（`localhost` 免口令、完整功能）
 
@@ -101,23 +115,51 @@ powershell -File start-with-env.ps1
 
 | 操作 | 结果 |
 |------|------|
-| 关掉浏览器再打开（**不清数据**），从**主屏幕图标**进 | ✅ 可冷启动；能记随记；之后同网自动同步 |
+| 关掉浏览器再打开（**不清数据**），从**主屏幕图标**进 | ✅ 可冷启动；能记随记；之后同网自动同步（前提：离线壳已就绪，见下） |
 | **清理浏览器 / 清除网站数据** | ❌ 离线壳、缓存、本地待同步队列**全部被删**；电脑不在同一 Wi-Fi 时**进不去** |
 | 只是断 Wi-Fi，页面还开着 | ✅ 仍可记（进本地队列），联网后同步 |
-| 用 `http://IP` 且未配 HTTPS | ❌ 浏览器不给装离线壳，关掉后无法冷启动 |
+| 用 `http://IP`（局域网明文） | ❌ 非安全上下文，Service Worker 根本不注册，关掉后无法冷启动 |
 
-**正确开通步骤（只做一次）：**
+**开通步骤（只做一次）：**
 
-1. 电脑控制台启动服务（已自动 HTTPS + 口令）
-2. 手机与电脑同一 Wi-Fi，用 **https** 打开：`https://192.168.1.100:8642`  
-   （地址栏必须是 **https**，证书告警选继续）
+1. 电脑控制台启动服务（根目录有 `danji-cert.pem` / `danji-key.pem` 就走 HTTPS）
+2. 手机与电脑同一 Wi-Fi，用 **https** 打开 `https://<电脑IP>:8642`
 3. 浏览器菜单 → **添加到主屏幕 / 安装应用**
 4. **以后从桌面图标进**，不要每次都重输网址
-5. 底部提示出现「**离线壳已就绪**」即表示可以离线冷启动
+5. 看页面底部提示（提示语来自 `public/js/perm.js`），照提示处理：
+   - 「**离线壳已就绪**」→ Service Worker 已接管，离线壳装好了
+   - 「**离线壳未生效：请刷新一次再「添加到主屏幕」**」→ SW 还没接管，刷新一次再添加到主屏幕
+   - 「**未配 HTTPS：关掉浏览器后不能冷启动**」→ 当前是局域网明文 HTTP，SW 不会注册
+
+**关于自签证书（重要）：**
+
+- 浏览器报「证书不受信任」是正常的——自签证书没有 CA 背书。点「继续 / 前往」**只是这一次放行，不等于证书变成受信任证书**，也就**不保证** Service Worker 会注册成功、PWA 能离线用。
+- 各平台处理不同：桌面 Chrome / Edge 与 Android Chrome 在放行后通常还能继续用；**iOS Safari 不认未受信任证书**，光点「继续」没用，通常要把证书装成描述文件并开启「完全信任」才谈得上 HTTPS 可用（且 PWA 还必须从主屏图标进）。
+- 所以别把「点继续」当成功信号，**以页面底部的实际提示 + 断网实测为准**。
 
 **千万不要：** 在浏览器里「清理缓存 / 清除数据 / 清理空间」时勾选该站点——那等于卸载离线 App 并清空未同步随记。
 
 **验证方法：** 断网或关电脑 → 从主屏图标打开 → 应能进「随记」并新增 → 再连上电脑同一 Wi-Fi → 顶栏自动变「已同步 / N 条待同步」。
+
+### HTTPS 证书从哪来
+
+手机 PWA 离线冷启动、以及「添加到主屏幕」，都要求页面走 **https**（局域网 `http://IP` 浏览器不给装离线壳）。证书是一张**自签证书**，自己生成即可，不用买；注意它**默认不被任何设备信任**，手机上第一次访问一定会报证书告警：
+
+1. **生成证书**（在仓库根目录执行，需要本机装了 Git for Windows，自带 openssl）：
+
+   ```
+   & "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:2048 -nodes -keyout danji-key.pem -out danji-cert.pem -days 825 -subj "/CN=danji" -addext "subjectAltName=IP:192.168.1.100,IP:127.0.0.1,DNS:localhost"
+   ```
+
+   把 `IP:192.168.1.100` 换成**电脑当前的局域网 IP**（手机要访问的地址）；有效期 825 天，到期重跑一次即可
+2. **证书放在项目根目录**：`danji-cert.pem` + `danji-key.pem`（都已在 `.gitignore`，不会进仓库）
+3. **启动服务**：图形控制台点「启动服务」会**自动识别**这两个文件并走 HTTPS，无需额外配置；也可以 `powershell -File start-with-https.ps1`
+4. **手机访问**：`https://<电脑IP>:8642` → 浏览器报「证书不受信任」→ 点「继续」只是本次放行，**不等于证书可信**；之后按上一节看页面底部的「离线壳已就绪 / 未生效」提示，再「添加到主屏幕」
+5. **电脑 IP 变了要重签**：证书里固化了 IP，IP 变了手机会连不上——重跑第 1 步生成新证书、重启服务即可
+
+> 自签证书的告警是正常的（浏览器不认识你的自签 CA）。点「继续」**不保证** Service Worker 会注册、PWA 能离线；是否真的可用以页面实际提示和断网实测为准（平台差异见上一节）。
+>
+> **原生 App 壳内不做证书放行**：自签 HTTPS 的电脑在 App 里连不上（`MainActivity.java` 没有放行自签证书的逻辑）。所以 App 配对要走明文 HTTP，办法见「原生 App」一节——**没有「HTTP/HTTPS 模式」切换按钮**，控制台会自动探测证书，手动启动则由 TLS 环境变量决定。
 
 ### 原生 App（Android APK，推荐替代 PWA）
 
@@ -127,19 +169,39 @@ powershell -File start-with-env.ps1
 |------|--------------|----------|
 | 清除**手机浏览器**数据 | ❌ 离线壳 + 未同步随记全丢 | ✅ 不受影响 |
 | 不与电脑同 Wi-Fi 时冷启动 | ❌ 打不开（除非已装离线壳且不清数据） | ✅ 能进、能记随记 |
-| 局域网 HTTP 直接可用 | ❌ SW 不注册，需自签 HTTPS | ✅ HTTP + 私网门禁 |
+| 局域网 HTTP 直接可用 | ❌ SW 不注册，需 https（自签还要额外处理证书信任） | ✅ HTTP + 私网门禁 |
 
 **安装与配对（只做一次）：**
 
 1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或从 GitHub Actions 下载 APK
 2. APK 发到手机安装（允许未知来源）
-3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步。二维码出图需先在仓库根目录 `npm install`（装 `qrcode`）；未装时控制台会把配对 JSON 复制到剪贴板，App 里粘贴亦可配对
-4. 监听地址与口令以本机 `config.json` 为准（`host` + `sync.token`），任何启动方式都局域网可达且带口令；**电脑 IP 变化后必须在控制台重新出码再扫**（旧二维码里固化了旧 IP，扫旧码必 timeout）
+3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步。**App 只有扫码这一条入口**（没有手动输入 / 粘贴框）；二维码出图需要 `qrcode` 包（仓库根或 `app/` 目录 `npm install` 都行），没装就出不了码
+4. **二维码协议必须与实际服务一致**。原生 App 不接受自签 HTTPS；需要 HTTP 时，先在控制台停止服务（手动运行的服务在原终端按 Ctrl+C 停止），关闭旧控制台。保管好证书，不要删除。若已启用自签 HTTPS，推荐在项目目录另开一个新的 PowerShell 窗口，用下面命令启动 HTTP：
+
+   ```powershell
+   # 只清除此进程继承的 TLS 环境变量，不改本地配置或证书文件。
+   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
+   node server.js
+   ```
+
+   该窗口须保持运行；看到启动日志为 HTTP 后，再用新开的 PowerShell 生成与服务一致的二维码：
+
+   ```powershell
+   . .\lib.ps1
+   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
+   $pairBase = 'http://{0}:{1}' -f (Get-LanIPv4), (Get-AppConfig).port
+   # 明确使用 HTTP 出码；口令只在本机读取，请勿分享二维码。
+   node tools/print-pair-qr.mjs --base $pairBase --token (Get-EffectiveToken)
+   ```
+
+   先在手机浏览器访问二维码中的 HTTP 地址，确认能连接，再在 App 扫终端二维码。这个过程不使用控制台自动出码，因为它会探测根目录证书。之后仍须保持服务使用 HTTP；若重新用控制台启动且根目录有证书，服务会恢复 HTTPS，App 保存的 HTTP 配对随即失效。不要把“临时改协议配一次”当作持续可同步方案。没有证书、未设置 TLS 环境变量时，可直接使用图形控制台启动和出码。
+5. 监听地址与口令以本机 `config.json` 为准（`host` + `sync.token`）：**新克隆的默认配置是 `host: 127.0.0.1`（只监听本机回环，手机连不上）且 `sync.token` 为空（不校验口令）**。只有你在本机 `config.json` 里把 `host` 改成 `0.0.0.0`（或设 `DANJI_HOST=0.0.0.0`）**并且**设了 `sync.token`，才谈得上「局域网可达且带口令保护」；改完**必须重启服务**（配置只在启动时读一次）。本机回环访问永远免口令（`server.js` 按来源 IP 判定电脑端 / 手机端）
+6. **电脑 IP 变化后必须在控制台重新出码再扫**（旧二维码里固化了旧 IP，扫旧码必 timeout）
 
 **边界：**
 
 - HTTP 明文只允许连**局域网私网地址**（192.168.x.x / 10.x.x.x / 172.16-31.x 等）；公网地址必须 https
-- 电脑若开了自签 HTTPS，App 连不上（不做证书放行）——配对时请改用 HTTP 模式出码
+- 电脑若开了自签 HTTPS，App 连不上（壳内不做证书放行，`MainActivity.java` 没有放行自签证书的逻辑）——配对要走明文 HTTP，办法见上面第 4 步（先停服务，在新进程明确启动 HTTP 并按相同协议出码）；项目里**没有**协议切换按钮
 - 卸载 App / 清 App 数据仍会丢未同步记录——回到同一 Wi-Fi 让顶栏变「已同步」后再卸载，日常保持定期同网即可
 - 服务端升级 API 后，旧 APK 顶栏会提示「App 需升级」，重打安装新 APK 即可（数据保留）
 
@@ -149,8 +211,6 @@ powershell -File start-with-env.ps1
 - 口令写在本机 `config.json` 的 `sync.token`（已在 .gitignore，不入库）；环境变量 `DANJI_TOKEN` 可作回落，config 优先
 - 校园网若隔离设备，手机可能无法访问电脑 IP；可改用手机热点让电脑连入后再试
 - 原生 App 壳内页面源是 `https://localhost`，`<img>` 直连 `http://局域网IP` 会被 WebView 混合内容策略拦下；因此贴图统一走 `public/js/img-urls.js`：原生壳直连 CapacitorHttp 插件（`responseType:'blob'`，base64 回传解码成 Blob），Web 端走普通 fetch，最后转 objectURL 给 `<img>`——与同步/上传同一条已验证的 HTTP 通道。`app/capacitor.config.json` 的 `android.allowMixedContent` 也开着作保险
-
-首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
 
 ## 日常使用
 
@@ -163,7 +223,6 @@ powershell -File start-with-env.ps1
 | 过了领取截止 | 填了明确截止时间的蛋，一过点会自动转入「已截止」并记一条消息；所有待领取的蛋卡片上都常驻「⏳ 已截止」，没到期也能随时手动结掉（误判可点卡片上的「✅ 其实领到了」改回） |
 | 看过期消息 | 赛博鸡蛋顶栏「💬 消息」（在 🔔 通知开关左边）：未读时按钮上有红点数字，点开消息即已读变灰，可单条删 / 全部已读 / 清空已读；点「→ 查看原蛋」跳到对应分类并高亮 |
 | 紧急随记置顶 | 随记卡片上点「📌 置顶」（桌面悬停卡片出按钮，手机常显）：置顶条目排到列表最前并带 📌 标记与描边；多条置顶时按「最近动作」排——**刚编辑过的置顶随记会浮到置顶组最前**，没编辑过的按置顶时间；再点「📌 取消置顶」还原。手机上置顶/编辑离线也能操作，联网后自动同步到电脑 |
-| 换浅色 / 深色 | 顶栏的 🖥️ / ☀️ / 🌙 按钮：点一下循环「跟随系统 → 浅色 → 深色」，选择记在浏览器里；默认跟随系统 |
 
 ### 桌面提醒
 
@@ -205,7 +264,7 @@ papers\
 | 换类别 | 编辑里改类别，文件自动搬到新类别文件夹 |
 | 删除 | 只删记录，磁盘上的文件保持原位 |
 
-阅读软件路径示例：`D:\Soft\SumatraPDF\SumatraPDF.exe`，留空 = 系统默认打开方式；会记住上次填写的路径。
+阅读软件路径示例：`C:\Program Files\SumatraPDF\SumatraPDF.exe`，留空 = 系统默认打开方式；会记住上次填写的路径。
 
 ## 🌐 网页（待读网页 + 笔记）
 
@@ -279,11 +338,12 @@ papers\
 
 ## 数据与备份
 
-所有数据存在 `data/` 下的纯文本 JSON，每个板块一个文件：`eggs.json`（赛博鸡蛋）、`papers.json`（文献）、`sites.json`（网页）、`expenses.json`（花销）、`insights.json`（体感评价）、`messages.json`（消息）、`ideas.json`（随记）、`achievements.json`（成果）、`kb.json`（知识库）；随记贴图原图在 `data/images/`。均可直接查看编辑：
+所有数据存在 `data/` 下的纯文本 JSON，每个板块一个文件：`eggs.json`（赛博鸡蛋）、`papers.json`（文献）、`sites.json`（网页）、`expenses.json`（花销）、`insights.json`（体感评价）、`messages.json`（消息）、`ideas.json`（随记）、`achievements.json`（成果）、`kb.json`（知识库）、`trash.json`（回收站，各板块删除记录保留 30 天）；随记贴图原图在 `data/images/`。均可直接查看编辑：
 
-- **备份**：把 `data` 文件夹整个复制走就行（各板块 JSON + `images/` 贴图原图）
-- **恢复**：把备份的 JSON 放回 `data/` 对应位置
-- **迁移**：整个项目文件夹拷走就能用，数据跟着文件夹走
+- **先停服务再动手**：备份、恢复、手改 JSON 之前，先点控制台的「⏹ 停止服务」（或 `powershell -File control.ps1 stop`）。服务启动时把整个 JSON 读进内存，每次保存都是**整份重写**（临时文件 + 改名），所以服务开着的时候改文件会被内存里的旧数据覆盖回去
+- **备份**：停服务后把整个 `data/` 目录复制走（各板块 JSON + `images/` 贴图原图，整个目录复制，别只挑 JSON）
+- **恢复**：在停服务状态下把备份的 `data/` **完整**还原回项目根目录（含 `images/`），确认文件齐了再启动服务
+- **迁移**：项目目录和 `data/` 一起拷走即可；但**文献库不在 `data/` 里**——论文原文件放在 `config.json` 的 `papers_dir` 指向的目录（可能在项目外），要**单独备份**。迁移到新机器时，除了拷项目目录，还要把文献目录拷过去，并核对新机器 `config.json` 的 `papers_dir`（或 `DANJI_PAPERS_DIR`）——**只复制项目文件夹带不走外置文献库**
 - 列表排序用的 `last_read_at`（论文 = 最近一次点「📖 阅读」、网页 = 最近一次点「🌐 打开」的时间）就存在对应 JSON 里，可手动清空，清空后该条回落到按添加时间排
 - 写入采用「临时文件 + 重命名」，断电/崩溃不会写坏数据
 
@@ -309,9 +369,22 @@ papers\
 
 ## 开机自启（可选）
 
-`Win + R` 输入 `shell:startup`，把**桌面「拾穗集」快捷方式**复制进去即可（或对 `launch.vbs` 右键 → 发送到 → 桌面快捷方式，把生成的快捷方式放进去）。开机后服务静默启动，**不会弹出任何窗口**。
+`Win + R` 输入 `shell:startup`，把**桌面「拾穗集」快捷方式**复制进去即可（或对 `launch.vbs` 右键 → 发送到 → 桌面快捷方式，把生成的快捷方式放进去）。
+
+开机后的实际行为：`launch.vbs` → `control-ui.ps1` → **会弹出图形控制台窗口**（没有黑框，但有窗口），并且在服务没起来时会**自动启动服务并打开浏览器页面**。项目**没有**静默自启模式；不想被打扰就开机后把控制台窗口关掉（后台服务照常运行），或者干脆不放自启。
+
+## 卸载与清理
+
+1. **停服务**：图形控制台点「⏹ 停止服务」，或命令行 `powershell -File control.ps1 stop`；前台运行的话直接关窗口。确认状态灯变灰 / `control.ps1 status` 显示 stopped
+2. **撤销开机自启**：`Win + R` 输入 `shell:startup`，删除里面的「拾穗集」快捷方式
+3. **撤销桌面快捷方式**：删除桌面的「拾穗集」快捷方式（`make-shortcut.ps1` 生成的那个；想重建再跑一次该脚本）
+4. **删数据**：删除项目根目录的 `data/` 文件夹（各板块 JSON + 随记贴图原图）——**删了不可恢复**，先按「数据与备份」复制一份
+5. **删本地配置（可选）**：`config.json`、`local.env.ps1`、`danji-cert.pem` / `danji-key.pem` 都是本机私密文件，不需要了可直接删
+6. **卸载可选组件**：浏览器扩展去 `edge://extensions` 移除；原生 App 在手机上卸载即可（卸载前先联网同步，避免丢未同步随记）
 
 ## 技术栈
+
+Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端 `public/` 约 1.1 万行（不含 vendor 里的 Vue / 扫码库）、后端 `server.js` 约 2300 行，全部代码人类可读，适合随手改。
 
 ### 同步回归验证
 
@@ -325,8 +398,6 @@ papers\
 手机诊断可运行 `adb logcat -v time -s DanjiSync chromium`，对照原生 `cycle=… stage=snapshot-saved`、JS `[danji-snap] applied` 和 `[danji-sync]` 阶段记录；相同数据用 `boot` 与版本号对应。消息保留 `sync_source`、`sync_cycle`、`sync_stage` 等诊断字段。日志不记录内容正文和配对口令。
 
 失败回报只尝试即时发送，网络恢复后不补发旧失败；成功回报保留重试。断网告警仍保存在手机本地消息中。升级旧 APK 后先联网同步一次，可修复旧版本留下的空 `boot_id` 账本。服务端重启导致进程标识变化时，暂不跨进程导入快照，需联网同步建立新基线，避免旧快照覆盖新数据。
-
-Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端约 3300 行、后端约 1300 行，全部代码人类可读，适合随手改。
 
 ## License
 

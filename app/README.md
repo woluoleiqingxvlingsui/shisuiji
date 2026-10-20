@@ -71,7 +71,10 @@ powershell -ExecutionPolicy Bypass -File app\build-apk.ps1 -Release   # release 
 ## 说明
 
 - 原生探测：`window.Capacitor.isNativePlatform()`；SW 在原生环境会跳过（见 `public/js/pwa.js`）。
-- 配对：扫码单通道。原生走 `@capacitor-mlkit/barcode-scanning` 的 **startScan 路径**（CameraX 预览画在 WebView 背后 + 内置 ML Kit 解码，**不依赖 Google 服务**；`scan()` 那条 GmsBarcodeScanner 路径在国内无 GMS 机器上会报 module not available，勿用）。扫码期间页面加 `body.danji-scan-active` 透出相机画面（见 `public/style.css`）。浏览器兜底 html5-qrcode 仅调试用。
+- 配对：扫码单通道。原生走 `@capacitor-mlkit/barcode-scanning` 的 **startScan 路径**（CameraX 预览画在 WebView 背后 + 内置 ML Kit 解码，**不依赖 Google 服务**；`scan()` 那条 GmsBarcodeScanner 路径在国内无 GMS 机器上会报 module not available，勿用）。扫码期间页面加 `body.danji-scan-active` 透出相机画面（见 `public/style.css`）。浏览器兜底 html5-qrcode 仅调试用。**没有手动输入 / 粘贴配对 JSON 的入口**（`pair-drawer.js` 只有「开始扫码」按钮）。
+- **配对码的协议由电脑端决定，壳里没有切换开关**：控制台按项目根目录有没有 `danji-cert.pem` / `danji-key.pem` 决定出 `http://` 还是 `https://` 的码（`lib.ps1` 的 `Get-UseTls` / `Get-PairPayload`），同样这两个文件也决定服务端走不走 HTTPS（`server.js` 读 `DANJI_TLS_CERT` / `DANJI_TLS_KEY`）。要配明文 HTTP，就把证书文件临时移出项目根再用控制台启动（出码后可以改回来）。**自签 HTTPS 在 App 里连不上**：`MainActivity.java` 没有放行自签证书的逻辑（无 `onReceivedSslError` 处理），系统证书校验照常拒绝。`pair.js` 的 `isAllowedPairBase` 只管明文地址范围（http 限私网/回环/局域网主机名），不放行证书错误。
+- **电脑端出码需要 `qrcode` 包**：`tools/qrcode-loader.mjs` 先找仓库根 `node_modules/qrcode`，再回落 `app/node_modules/qrcode`——在仓库根或 `app/` 目录任一处 `npm install` 都行；两处都没有时控制台出不了码（只打印配对 JSON，而 App 只有扫码入口，用不上）。
+- **电脑端默认手机连不上**：新克隆的 `config.example.json` 是 `host: 127.0.0.1`（只监听本机回环）且 `sync.token` 为空（不校验口令）。要让 App 连得上，电脑端得在本机 `config.json` 里把 `host` 改成 `0.0.0.0`（或设 `DANJI_HOST=0.0.0.0`）、并设好 `sync.token`，然后**重启服务**（配置只在启动时读一次）。本机回环访问永远免口令（`server.js` 按来源 IP 判电脑端 / 手机端）。
 - **明文收紧（M5）**：Android NSC 无法按 IP 段放行，故 `usesCleartextTraffic=true` 保留，收紧在应用层——`pair.js` 的 `isAllowedPairBase` 只允许 http 连私网/回环/局域网主机名，公网必须 https；配对写入前强制校验。
 - **版本门禁（M5）**：壳内置 `CLIENT_VERSION`（`public/js/sync/net.js`），health 返回 `minClient`；过旧时顶栏胶囊显示「App 需升级」并弹一次提示，不阻断同步。改到「旧壳会静默出错」的行为时，同时递增 `server.js` 的 `MIN_CLIENT` 和 `net.js` 的 `CLIENT_VERSION`，并重打 APK。
 - 改应用名：改 `capacitor.config.json` 的 `appName`，再 **`npx cap sync android`**（`cap copy` 不会重写 `strings.xml`）。
