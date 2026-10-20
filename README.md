@@ -11,9 +11,15 @@
 - **📚 知识库**：从随记 / 文献阅读记录 / 网页笔记三处沉淀知识卡，同名知识可合并；编辑时可点已有标签复用，不用每次重打。
 - **🚮 回收站**：各板块删除的记录先进这里保留 30 天；卡片默认展开完整内容，确认后再「恢复」或「彻底删除」。
 
-| 🥚 赛博鸡蛋 | ✍️ 记蛋 | 💰 花销 |
+| 📝 随记 | 🥚 赛博鸡蛋 | ✍️ 记蛋 |
 |---|---|---|
-| ![赛博鸡蛋](assets/screenshots/eggs.png) | ![记蛋](assets/screenshots/editor.png) | ![花销](assets/screenshots/expenses.png) |
+| ![随记](assets/screenshots/ideas.png) | ![赛博鸡蛋](assets/screenshots/eggs.png) | ![记蛋](assets/screenshots/editor.png) |
+
+| 💰 花销 | 📚 知识库 |
+|---|---|
+| ![花销](assets/screenshots/expenses.png) | ![知识库](assets/screenshots/kb.png) |
+
+> 配图都是「填入示例数据看看效果」生成的演示内容，不是真实记录。界面改版后跑 `node tools/make-screenshots.mjs` 即可重新生成。
 
 ## 工作台界面
 
@@ -21,7 +27,7 @@
 
 快捷键：`Ctrl / ⌘ + K` 聚焦搜索，`Alt + N` 新建当前板块的记录，在编辑表单中按 `Ctrl / ⌘ + Enter` 保存。手机端可以记随记，其余板块保留浏览权限。
 
-界面回归：Node.js 18+ 与本机 Edge 下运行 `node tools/test-workspace-ui.mjs`，会自动复制服务与前端到临时目录，并显式隔离文献库和数据。设置 `DANJI_UI_SCREENSHOTS=1` 可在 `output/ui-preview/` 留下演示截图。
+界面回归：Node.js 18+ 与本机 Edge 下运行 `node tools/test-workspace-ui.mjs`，会自动复制服务与前端到临时目录，并显式隔离文献库和数据。设置 `DANJI_UI_SCREENSHOTS=1` 可在 `output/ui-preview/` 留下演示截图。README 配图由 `node tools/make-screenshots.mjs` 生成（同样是临时实例 + 示例数据，不碰真实文献库与 `data/`），输出到 `assets/screenshots/`。
 
 ## 环境要求
 

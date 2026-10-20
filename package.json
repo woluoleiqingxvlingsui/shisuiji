@@ -25,7 +25,8 @@
     "test:sync:native": "node tools/test-native-snapshot.mjs",
     "test:ui": "node tools/test-workspace-ui.mjs",
     "test:local-images": "node tools/test-local-images-ui.mjs",
-    "test:render": "node tools/render-boards.mjs"
+    "test:render": "node tools/render-boards.mjs",
+    "screenshots": "node tools/make-screenshots.mjs"
   },
   "engines": {
     "node": ">=18"
