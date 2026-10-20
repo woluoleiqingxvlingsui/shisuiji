@@ -3,7 +3,7 @@
  * 纯函数（collapseOutboxOp / mergeDisplayItems）可被 Node 直接单测。
  */
 
-import { STORE_OUTBOX, idbGet, idbGetAll, idbPut, idbDelete } from './idb.js';
+import { STORE_OUTBOX, idbGet, idbGetAll, idbPut, idbDelete, idbMutate } from './idb.js';
 
 /**
  * 把一条新操作并入该 id 的已有队列项。
@@ -20,13 +20,19 @@ function collapseOutboxOp(prev, next) {
     id: next.id,
     op,
     payload: next.payload != null ? next.payload : (prev && prev.payload) || null,
-    base_updated_at: next.base_updated_at
-      || (prev && prev.base_updated_at)
-      || '',
+    // 后续本地编辑不能用旧界面携带的基线撤销已确认的因果关系。
+    base_updated_at: prev ? (prev.base_updated_at || '') : (next.base_updated_at || ''),
     // 服务端是否已见过这条：见过则后续改/删是 update/delete，而不是 create
     confirmed: next.confirmed != null ? next.confirmed : (prev ? !!prev.confirmed : false),
     updated_at: next.updated_at || new Date().toISOString(),
     origin: next.origin || (prev && prev.origin) || 'mobile',
+    // 操作身份：同一条已发送操作的网络重试保持同一个 id，新的用户编辑换新的 id。
+    // 服务端靠它认出「这是同一次请求的重试」，不会把旧请求当成新编辑再写一遍。
+    operation_id: next.operation_id || (prev && prev.operation_id) || '',
+    // 是否已经发出过：区分「本地新建后取消」与「已发出、删除需要补偿」
+    sent: next.sent != null ? !!next.sent : (prev ? !!prev.sent : false),
+    sent_at: next.sent_at || (prev && prev.sent_at) || '',
+    sent_operation_id: (prev && prev.sent_operation_id) || '',
   };
 
   if (!prev) {
@@ -36,8 +42,15 @@ function collapseOutboxOp(prev, next) {
     return base;
   }
 
-  // create（未确认）后又 delete → 整条丢掉
-  if (prev.op === 'create' && !prev.confirmed && op === 'delete') return null;
+  // create（未确认）后又 delete → 看 create 有没有发出过
+  if (prev.op === 'create' && !prev.confirmed && op === 'delete') {
+    // 从未发出：用户的意图是「这条别存在」，整条取消。
+    if (!prev.sent) return null;
+    // 已经发出（服务端可能已创建）：删除意图必须保留到安全收尾——
+    // 折叠成 delete，等 create 的响应回来后由服务端真正删除并进回收站。
+    // 这里的 sent 要保留：这条 delete 依赖「服务端那边已经建了」。
+    return { ...base, op: 'delete', confirmed: true, sent: true };
+  }
 
   // 已是 delete 又来 create（同 id 复活）→ 变回 create，带最新 payload
   if (prev.op === 'delete' && op === 'create') {
@@ -147,14 +160,20 @@ async function getOutbox(id) {
 
 /** 写入/折叠一条操作；返回折叠后的项（null=整条已取消） */
 async function enqueueOutbox(op) {
-  const prev = await getOutbox(op.id);
-  const next = collapseOutboxOp(prev, op);
-  if (!next) {
-    if (prev) await idbDelete(STORE_OUTBOX, prev.id);
-    return null;
-  }
-  await idbPut(STORE_OUTBOX, next);
-  return next;
+  const result = await mutateOutbox(op.id, prev => collapseOutboxOp(prev, op));
+  return result.after;
+}
+
+/** 用户编辑、发送认领、图片替换和 ack 共用真实 IDB 事务，跨标签页也不会读后覆盖。 */
+function mutateOutbox(id, reducer) {
+  return idbMutate(STORE_OUTBOX, id, reducer);
+}
+
+function sameOutboxOperation(a, b) {
+  if (!a || !b || a.id !== b.id) return false;
+  if (a.operation_id || b.operation_id) return !!a.operation_id && a.operation_id === b.operation_id;
+  // 旧队列尚未认领时使用完整请求快照，不能仅比较毫秒时间。
+  return JSON.stringify(toPushPayload(a)) === JSON.stringify(toPushPayload(b));
 }
 
 /** 出队 */
@@ -189,6 +208,8 @@ function toPushPayload(entry) {
     // 手机端的编辑时间：服务端落库时保留它，同步不改写内容时间
     updated_at: payload.updated_at || entry.updated_at || '',
     base_updated_at: entry.base_updated_at || '',
+    // 操作身份：重试时保持不变，服务端据此认出「同一次请求」
+    operation_id: entry.operation_id || '',
     // 置顶状态：显式设置过才随 push 上行（避免旧队列项把服务端 pinned 冲掉）
     ...(payload.pinned !== undefined ? { pinned: !!payload.pinned } : {}),
   };
@@ -200,6 +221,8 @@ export {
   mergeDisplayItems,
   listOutbox,
   getOutbox,
+  mutateOutbox,
+  sameOutboxOperation,
   enqueueOutbox,
   dequeueOutbox,
   putOutbox,

@@ -21,10 +21,10 @@ import {
 } from './mirror.js';
 import {
   listOutbox,
+  mutateOutbox,
+  sameOutboxOperation,
   getOutbox,
   enqueueOutbox,
-  dequeueOutbox,
-  putOutbox,
   mergeDisplayItems,
   toPushPayload,
 } from './outbox.js';
@@ -458,61 +458,52 @@ function disposeSync() {
 /** 按 push 结果处理单条：出队 / 留队 / 删本地 / 回滚 */
 async function applyPushResult(entry, result) {
   const status = result && result.status;
-  if (status === 'ok') {
-    await dequeueOutbox(entry.id);
-    if (result.deleted) {
-      await removeMirrorItem('ideas', entry.id);
-      return { action: 'dequeue', status };
+  let action = 'skip_gone';
+  let conflictEntry = null;
+  const transaction = await mutateOutbox(entry.id, current => {
+    if (!current) return;
+    const same = sameOutboxOperation(current, entry);
+    if (status === 'ok') {
+      if (same) { action = 'dequeue'; return null; }
+      // 只推进确实依赖本次请求的后续操作，基线是当时应用的版本，不能取后来 pull 的版本。
+      const version = result.applied_version || (result.idea && result.idea.updated_at);
+      action = 'keep_superseded';
+      if (!result.deleted && version && current.sent_operation_id === entry.operation_id) {
+        return { ...current, op: current.op === 'create' ? 'update' : current.op,
+          base_updated_at: version, confirmed: true, sent: false, sent_at: '', sent_operation_id: '' };
+      }
+      return;
     }
-    if (result.idea) {
-      await upsertMirrorItem('ideas', result.idea);
+    if (status === 'missing' && (same || current.op === 'delete')) {
+      action = 'dequeue_missing'; return null;
     }
-    return { action: 'dequeue', status };
-  }
-  if (status === 'conflict') {
-    // 留队，进冲突列表等用户二选一
+    if (status === 'conflict' || (!same && status !== 'missing')) {
+      action = 'keep'; conflictEntry = current; return;
+    }
+    if (!same) { action = 'keep_superseded'; return; }
+    if (status === 'forbidden') { action = 'dequeue_forbidden'; return null; }
+    action = 'dequeue_error'; return null;
+  });
+  if (conflictEntry) {
     const server = result.server || null;
-    const localView = entry.payload
-      ? { ...(server || {}), ...entry.payload, id: entry.id }
-      : null;
-    const exists = state.sync.conflicts.some((c) => c.id === entry.id);
-    if (!exists) {
-      state.sync.conflicts.push({
-        id: entry.id,
-        op: entry.op,
-        entry,
-        server,
-        local: localView,
+    const conflict = { id: entry.id, op: conflictEntry.op, entry: conflictEntry, server,
+      local: conflictEntry.payload ? { ...(server || {}), ...conflictEntry.payload, id: entry.id } : null };
+    const index = state.sync.conflicts.findIndex(c => c.id === entry.id);
+    if (index < 0) state.sync.conflicts.push(conflict);
+    else state.sync.conflicts[index] = conflict;
+  }
+  if (transaction.changed && transaction.after === null) {
+    state.sync.conflicts = state.sync.conflicts.filter(c => c.id !== entry.id);
+    if (status === 'ok' || status === 'missing') {
+      await withMirrorLock(async () => {
+        if (result.deleted || status === 'missing') await removeMirrorItem('ideas', entry.id);
+        else if (result.idea) await upsertMirrorItem('ideas', result.idea);
       });
-    } else {
-      const idx = state.sync.conflicts.findIndex((c) => c.id === entry.id);
-      state.sync.conflicts[idx] = {
-        id: entry.id,
-        op: entry.op,
-        entry,
-        server,
-        local: localView,
-      };
+    } else if (action === 'dequeue_error') {
+      state.sync.lastError = result && result.error ? String(result.error) : '同步参数错误';
     }
-    return { action: 'keep', status };
   }
-  if (status === 'missing') {
-    await dequeueOutbox(entry.id);
-    await removeMirrorItem('ideas', entry.id);
-    state.sync.conflicts = state.sync.conflicts.filter((c) => c.id !== entry.id);
-    return { action: 'dequeue_missing', status };
-  }
-  if (status === 'forbidden') {
-    // 电脑端记的，手机改不了：出队并回滚到服务端观点（pull 稍后会覆盖；这里先删本地覆盖）
-    await dequeueOutbox(entry.id);
-    state.sync.conflicts = state.sync.conflicts.filter((c) => c.id !== entry.id);
-    // mirror 保持不动；若是本地 create 则不要插入
-    return { action: 'dequeue_forbidden', status };
-  }
-  // error：参数非法，重试无用，出队
-  await dequeueOutbox(entry.id);
-  state.sync.lastError = result && result.error ? String(result.error) : '同步参数错误';
-  return { action: 'dequeue_error', status: status || 'error' };
+  return { action, status };
 }
 
 /* ---- M21-C：本地图片（'local:<uuid>'）解析 ----
@@ -527,35 +518,21 @@ async function resolveOutboxLocalImages(ops) {
   const out = [];
   for (const entry of ops) {
     const images = entry.payload && Array.isArray(entry.payload.images) ? entry.payload.images : null;
-    if (!images || !hasLocalImages(images)) {
-      out.push(entry);
-      continue;
-    }
-    let current = entry;
+    if (!images || !hasLocalImages(images)) { out.push(entry); continue; }
     let superseded = false;
-    const nextImages = await resolveOutboxImages(images, {
-      onProgress: async (partial) => {
-        // 上传可能要好几秒：期间用户又编辑了同一条 → 不能拿旧 payload 把新编辑冲掉。
-        // 只在没有更新本地编辑时写回；被覆盖时返回 false，让本地 blob 先留着。
-        const latest = await getOutbox(entry.id).catch(() => null);
-        if (latest && latest.updated_at !== entry.updated_at) {
-          superseded = true;
-          return false;
-        }
-        current = { ...current, payload: { ...current.payload, images: partial } };
-        await putOutbox(current);
+    let current = entry;
+    await resolveOutboxImages(images, {
+      onProgress: async partial => {
+        const changed = await mutateOutbox(entry.id, latest => {
+          if (!sameOutboxOperation(latest, entry)) return;
+          return { ...latest, payload: { ...latest.payload, images: partial } };
+        });
+        if (!changed.changed) { superseded = true; return false; }
+        current = changed.after;
         return true;
       },
     });
-    if (superseded) {
-      // 上传期间用户又改了这条：本轮先不推它（拿旧快照推会冲掉新编辑）。
-      // 新编辑入队时自己会触发下一轮同步，届时按最新 payload 解析本地图。
-      // 本地 blob 也先留着（resolveOutboxImages 收到 false 不会删），下一轮还要用。
-      continue;
-    }
-    current = { ...current, payload: { ...current.payload, images: nextImages } };
-    await putOutbox(current);
-    out.push(current);
+    if (!superseded) out.push(current);
   }
   return out;
 }
@@ -569,13 +546,28 @@ async function pruneDroppedLocalImages(prevEntry, nextEntry) {
   if (dropped.length) await deleteLocalImages(dropped);
 }
 
+/** 请求发送前原子认领。图片尚未上传时不标记，取消新建仍可安全取消。 */
+async function claimOutboxEntry(entry) {
+  const claimed = await mutateOutbox(entry.id, current => {
+    if (!sameOutboxOperation(current, entry)) return;
+    const operationId = current.operation_id || uuid();
+    return { ...current, operation_id: operationId, sent: true,
+      sent_at: new Date().toISOString(), sent_operation_id: operationId };
+  });
+  return claimed.changed ? claimed.after : null;
+}
+
 async function pushOnce() {
   // 冲突中且未解决的条目先不重复推，避免每 60 秒打一轮同样的 conflict
   const conflictIds = new Set((state.sync.conflicts || []).map((c) => c.id));
   const ops = (await listOutbox()).filter((o) => !conflictIds.has(o.id));
   if (!ops.length) return { pushed: 0, results: [] };
-  // M21-C：组装 payload 前先把本地图片上传成服务端 UUID（并写回 outbox，重试不重复上传）
-  const opsResolved = await resolveOutboxLocalImages(ops);
+  const resolved = await resolveOutboxLocalImages(ops);
+  const opsResolved = [];
+  for (const entry of resolved) {
+    const claimed = await claimOutboxEntry(entry);
+    if (claimed) opsResolved.push(claimed);
+  }
   const payload = opsResolved.map(toPushPayload).filter(Boolean);
   if (!payload.length) return { pushed: 0, results: [] };
   // 红线兜底：local id 绝不能发给服务端。真走到这里说明解析漏了，
@@ -802,28 +794,29 @@ async function resolveConflict(id, choice) {
   // state 是 reactive 的，conflict 里嵌套对象是 Proxy；IndexedDB 结构化克隆
   // 序列化不了 Proxy（DataCloneError），先深拷成纯 JSON 再用
   const conflict = JSON.parse(JSON.stringify(state.sync.conflicts[idx]));
-  state.sync.conflicts.splice(idx, 1);
-
-  if (choice === 'mobile') {
-    const server = conflict.server || {};
-    const payload = conflict.entry && conflict.entry.payload
-      ? { ...conflict.entry.payload, id }
-      : { id };
-    const next = {
-      id,
-      op: conflict.op === 'delete' ? 'delete' : 'update',
-      payload,
-      // 强制覆盖：base 对齐服务端当前版本，服务端不会再报同一冲突
-      base_updated_at: server.updated_at || '',
-      confirmed: true,
-      updated_at: new Date().toISOString(),
-      origin: 'mobile',
+  const changed = await mutateOutbox(id, current => {
+    if (!sameOutboxOperation(current, conflict.entry)) return;
+    if (choice !== 'mobile') return null;
+    return {
+      ...current,
+      op: current.op === 'delete' ? 'delete' : 'update',
+      base_updated_at: (conflict.server && conflict.server.updated_at) || '',
+      confirmed: true, updated_at: new Date().toISOString(), operation_id: uuid(),
+      sent: false, sent_at: '', sent_operation_id: '',
     };
-    await putOutbox(next);
-  } else {
-    // 用电脑端：丢掉本地待发，镜像改成服务端版本
-    await dequeueOutbox(id);
-    if (conflict.server) await upsertMirrorItem('ideas', conflict.server);
+  });
+  if (!changed.changed) {
+    // 对话框打开期间又编辑过，不能用旧对话框覆盖新的队列项。
+    if (changed.after) {
+      state.sync.conflicts[idx] = { ...conflict, entry: changed.after, op: changed.after.op,
+        local: changed.after.payload ? { ...changed.after.payload, id } : null };
+      toast('这条随记刚刚又修改过，请确认最新内容后重新选择', 'warn');
+      return false;
+    }
+  }
+  state.sync.conflicts.splice(idx, 1);
+  if (choice !== 'mobile' && conflict.server) {
+    await withMirrorLock(() => upsertMirrorItem('ideas', conflict.server));
   }
   await refreshPendingCount();
   await reloadIdeasDisplay();
@@ -880,6 +873,9 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
     confirmed,
     origin: 'mobile',
     updated_at: now,
+    // 操作身份：每次用户操作一个新 id。同一条队列项被重复 push（网络重试）时
+    // 身份不变，服务端据此认出「同一次请求」，不会把旧请求当成新编辑再写一遍。
+    operation_id: uuid(),
   };
   const saved = await enqueueOutbox(merged);
   // M21-C：编辑时移除本地图 / 本地新建后又删随记（create→delete 折叠成 null）：

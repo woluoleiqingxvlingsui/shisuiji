@@ -903,7 +903,9 @@ route('POST', '/api/papers/:id/open', async (ctx) => {
     }
     spawn(paper.reader, [filePath], { detached: true, stdio: 'ignore' }).unref();
   } else {
-    spawn('cmd', ['/c', 'start', '', filePath], { detached: true, stdio: 'ignore' }).unref();
+    // 系统默认打开方式：直接交给 explorer.exe，不经过 cmd 解析——
+    // 文件名里的 & 等 cmd 元字符不会再被截断或注入（spawn 数组参数不经 shell）
+    spawn('explorer.exe', [filePath], { detached: true, stdio: 'ignore' }).unref();
   }
   // 打开成功 = 这次真的在读它：记下阅读时间，前端据此把这张卡刷到列表顶部
   paper.last_read_at = new Date().toISOString();
@@ -1480,7 +1482,7 @@ route('POST', '/api/messages/clear-read', async (ctx) => {
 let ideaDb = null;
 
 function defaultIdeaData() {
-  return { schema_version: SCHEMA_VERSION, ideas: [] };
+  return { schema_version: SCHEMA_VERSION, ideas: [], op_receipts: {}, idea_history: {} };
 }
 
 async function loadIdeas() {
@@ -1488,6 +1490,14 @@ async function loadIdeas() {
     const raw = await fsp.readFile(IDEAS_FILE, 'utf8');
     ideaDb = JSON.parse(raw);
     if (!Array.isArray(ideaDb.ideas)) ideaDb.ideas = [];
+    // 操作回执：旧数据文件没有这个字段，按空处理（向后兼容，不做迁移）
+    if (!ideaDb.op_receipts || typeof ideaDb.op_receipts !== 'object' || Array.isArray(ideaDb.op_receipts)) {
+      ideaDb.op_receipts = {};
+    }
+    if (!ideaDb.idea_history || typeof ideaDb.idea_history !== 'object' || Array.isArray(ideaDb.idea_history)) {
+      ideaDb.idea_history = {};
+    }
+    for (const idea of ideaDb.ideas) ideaDb.idea_history[idea.id] ||= { seen: true };
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
     ideaDb = defaultIdeaData();
@@ -1633,6 +1643,97 @@ function conflicted(prev, body) {
   return String(base) !== String(prev.updated_at);
 }
 
+// ---------- 操作身份与幂等回执 ----------
+// 一次用户操作 = 一个身份。手机端每条操作带 operation_id：
+// 同一条已发送操作的网络重试保持同一个 id（重发的是同一个请求），
+// 新的用户编辑换新的 id。老客户端没有这个字段，退回到「请求摘要」——
+// 同一请求原样重发时摘要相同，不同请求摘要不同。
+// 身份与摘要都写进 ideaDb.op_receipts：它和随记数据在同一个文件、同一原子写盘落下去，
+// 服务重启后仍认得出「这条已经应用过」，不会把旧请求当成新编辑再写一遍。
+// 回执只证明「这个操作曾被应用」，不证明「当前内容还是它」——当前内容变了
+// 说明别的端改过，那时要报冲突给用户选，而不是拿旧内容盖回去。
+const OP_RECEIPT_LIMIT = 8; // 每条随记保留最近若干条回执
+
+/** 请求摘要：只用原始字段，不经过 isoOrNow 清洗（清洗会让同一请求每次算出不同值） */
+function opDigest(op) {
+  const images = Array.isArray(op.images)
+    ? op.images.map((im) => [String((im && im.id) || ''), String((im && im.name) || '')])
+    : [];
+  const raw = JSON.stringify([
+    String(op.id || ''),
+    String(op.op || ''),
+    String(op.title || ''),
+    String(op.content || ''),
+    images,
+    op.pinned === undefined ? null : (op.pinned ? 1 : 0),
+    String(op.base_updated_at || ''),
+    String(op.updated_at || ''),
+  ]);
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 32);
+}
+
+/** 回执键：有 operation_id 用它，否则用请求摘要 */
+function opReceiptKey(op, digest) {
+  const opId = typeof op.operation_id === 'string' ? op.operation_id.trim() : '';
+  return opId ? 'op:' + opId : 'dg:' + digest;
+}
+
+function findOpReceipt(ideaId, key) {
+  const creation = ideaDb.idea_history[ideaId] && ideaDb.idea_history[ideaId].creation;
+  if (creation && creation.key === key) return creation;
+  const list = ideaDb.op_receipts && ideaDb.op_receipts[ideaId];
+  if (!Array.isArray(list)) return null;
+  for (const r of list) if (r && r.key === key) return r;
+  return null;
+}
+
+function ideaWasSeen(id) {
+  return !!ideaDb.idea_history[id] || (Array.isArray(ideaDb.op_receipts[id]) && ideaDb.op_receipts[id].length > 0);
+}
+
+function recordOpReceipt(ideaId, key, digest, op, version) {
+  if (!ideaDb.op_receipts || typeof ideaDb.op_receipts !== 'object') ideaDb.op_receipts = {};
+  const list = Array.isArray(ideaDb.op_receipts[ideaId]) ? ideaDb.op_receipts[ideaId] : [];
+  const receipt = {
+    key,
+    digest,
+    op: String(op.op || ''),
+    at: new Date().toISOString(),
+    version: version || '',
+  };
+  list.unshift(receipt);
+  const history = ideaDb.idea_history[ideaId] ||= { seen: true };
+  // 更新回执可以淘汰；创建身份与“曾存在”标记不淘汰，旧 create 不得复活已删记录。
+  if (op.op === 'create' && !history.creation) history.creation = receipt;
+  while (list.length > OP_RECEIPT_LIMIT) list.pop();
+  ideaDb.op_receipts[ideaId] = list;
+}
+
+// 重放幂等：update 一旦被服务端应用过（updated_at 已被改写），同一操作重放
+// （响应在返回途中丢失 / WebView 后台冻结 / 进程被杀——代码注释记录过这些都是常态）
+// 必然被判 conflict，队列从此卡死、状态灯常驻未同步。这里比对「服务端现存记录」
+// 与「这个 op 规范化后会产生的结果」：逐字段一致说明服务端已经写过，按已应用
+// 处理返回 ok（与 create 的 already 分支同一语义），而不是弹出一个假冲突。
+// opts.ignoreTime：只比内容、不比编辑时间。客户端时钟可能不准（手机时区/漂移），
+// 服务端 isoOrNow() 会把越界时间替换成服务端时间——同一条 op 重发两次，
+// 服务端看到的时间戳可能并不相同。create 语义下必须如此：服务端本来没有这条，
+// 内容一致就说明已经是用户想要的结果（用户也可能改过又改回原样）。
+function ideaMatchesOp(idea, op, opts = {}) {
+  const text = (v) => (v === null || v === undefined ? '' : String(v)).trim();
+  if (text(op.title) !== idea.title) return false;
+  if (text(op.content) !== idea.content) return false;
+  const imgs = sanitizeImages(op.images);
+  if (imgs.length !== idea.images.length) return false;
+  for (let i = 0; i < imgs.length; i++) {
+    if (imgs[i].id !== idea.images[i].id || imgs[i].name !== idea.images[i].name) return false;
+  }
+  const pinned = 'pinned' in op ? !!op.pinned : idea.pinned;
+  if (pinned !== idea.pinned) return false;
+  // keepClientTimes 下服务端存的就是客户端编辑时间，重放时两者一致
+  if (!opts.ignoreTime && isoOrNow(op.updated_at) !== idea.updated_at) return false;
+  return true;
+}
+
 // 贴图归一化：只认 uuid 形态的 id，超量截断，非法项丢弃
 function sanitizeImages(raw) {
   if (!Array.isArray(raw)) return [];
@@ -1689,6 +1790,9 @@ function normalizeIdea(input, existing = {}, opts = {}) {
   // 同步 push 带的是手机端真实编辑时间：保留它，同步只搬运不改写内容时间；
   // 桌面直连 REST 不带该字段，落服务端当前时间（编辑即发生在此刻）
   idea.updated_at = opts.keepClientTimes ? isoOrNow(input.updated_at) : new Date().toISOString();
+  if (idea.updated_at === existing.updated_at) {
+    idea.updated_at = new Date(Date.parse(existing.updated_at) + 1).toISOString();
+  }
   return idea;
 }
 
@@ -1718,9 +1822,13 @@ route('POST', '/api/ideas', async (ctx) => {
   const id = uuidOrNull(ctx.body.id);
   const hit = id ? ideaDb.ideas.find((i) => i.id === id) : null;
   if (hit) return ctx.json(hit, 200);
+  if (ctx.role === 'mobile' && id && ideaWasSeen(id)) {
+    return ctx.json({ error: '这条随记已删除，请从回收站恢复', code: 'missing' }, 409);
+  }
   const idea = normalizeIdea(ctx.body);
   if (ctx.role === 'mobile') idea.origin = 'mobile';
   ideaDb.ideas.push(idea);
+  ideaDb.idea_history[idea.id] = { seen: true };
   await saveIdeas();
   ctx.json(idea, 201);
 });
@@ -1751,6 +1859,7 @@ route('DELETE', '/api/ideas/:id', async (ctx) => {
     return ctx.json({ error: '这条是电脑端记的，手机上删不了', code: 'forbidden' }, 403);
   }
   const [removed] = ideaDb.ideas.splice(idx, 1);
+  ideaDb.idea_history[removed.id] ||= { seen: true };
   // 进回收站不删图：payload 保留 images 引用，只有彻底删除/到期清理时才 prune
   await pushToTrash('ideas', removed);
   await saveIdeas();
@@ -2311,28 +2420,83 @@ function applyIdeaOp(op, role) {
   const idx = ideaDb.ideas.findIndex((i) => i.id === id);
   const prev = idx === -1 ? null : ideaDb.ideas[idx];
   const kind = op.op === 'update' || op.op === 'delete' ? op.op : 'create';
+  const opId = typeof op.operation_id === 'string' ? op.operation_id.trim() : '';
+  const digest = opDigest(op);
+  const key = opReceiptKey(op, digest);
+
+  /* ---- 幂等回执：这是不是同一次请求？ ---- */
+  const receipt = findOpReceipt(id, key);
+  if (receipt) {
+    if (receipt.digest !== digest) {
+      // 同一个操作标识却带了不同内容：受控拒绝，绝不当成重放成功
+      return { id, status: 'conflict', applied: false, error: '同一操作标识携带了不同内容，已拒绝', server: prev || null };
+    }
+    // 确认是同一次请求的重试：这条操作当初确实应用过
+    if (!prev) return { id, status: 'missing', applied: false };
+    if (receipt.version === prev.updated_at && ideaMatchesOp(prev, op, { ignoreTime: true })) {
+      // 当前内容仍就是这个操作的结果 → 确认已应用，幂等成功（不回写）
+      return { id, status: 'ok', applied: false, idea: prev, applied_version: receipt.version, already: true };
+    }
+    // 当前内容已经被别的端改过 → 真冲突，交给用户选，绝不拿旧内容盖回去
+    return { id, status: 'conflict', applied: false, server: prev };
+  }
 
   if (kind === 'create') {
-    // 已经有 = 这次是重放，直接把服务端的版本还回去，别写第二条
-    if (prev) return { id, status: 'ok', applied: false, idea: prev, already: true };
+    if (prev) {
+      if (!opId) {
+        // 老客户端没有操作标识：无法确认这条是重试还是用户的新编辑。
+        // 保守处理——内容一致当重放（already），内容不一致报冲突让用户选，
+        // 绝不静默覆盖（更不能覆盖电脑端后来改的内容）。
+        if (ideaMatchesOp(prev, op, { ignoreTime: true })) {
+          return { id, status: 'ok', applied: false, idea: prev, already: true };
+        }
+        return { id, status: 'conflict', applied: false, server: prev };
+      }
+      // 新身份只证明是新操作，不证明用户见过当前版本。覆盖已存在记录必须有基线。
+      if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
+      // 乐观锁不能因为「走的是 create 分支」就被绕开：客户端带了基线就说明它知道
+      // 服务端当前版本，对不上说明别的端在这期间改过这条——保留冲突让用户选，
+      // 不能静默用手机内容盖掉电脑端的修改。基线为空（客户端不知道服务端版本）时
+      // 不判冲突，与既有乐观锁语义一致。
+      if (!op.base_updated_at || conflicted(prev, op)) {
+        return { id, status: 'conflict', applied: false, server: prev };
+      }
+      const updated = normalizeIdea(op, prev, { keepClientTimes: true });
+      updated.id = id;
+      if (role === 'mobile') updated.origin = 'mobile';
+      ideaDb.ideas[idx] = updated;
+      // 先写回再清理：pruneImageFiles 会重扫引用集，仍被新版本引用的图不会被删
+      pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+      recordOpReceipt(id, key, digest, op, updated.updated_at);
+      return { id, status: 'ok', applied: true, idea: updated };
+    }
+    if (ideaWasSeen(id)) return { id, status: 'missing', applied: false };
     const idea = normalizeIdea(op, {}, { keepClientTimes: true });
     idea.id = id;
     if (role === 'mobile') idea.origin = 'mobile';
     ideaDb.ideas.push(idea);
+    recordOpReceipt(id, key, digest, op, idea.updated_at);
     return { id, status: 'ok', applied: true, idea };
   }
   if (!prev) return { id, status: 'missing', applied: false };
   if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
-  if (conflicted(prev, op)) return { id, status: 'conflict', applied: false, server: prev };
+  if (conflicted(prev, op)) {
+    // 冲突优先于内容比对：基线对不上说明别的端改过这条，
+    // 交给用户选择，手机与电脑谁的内容留下由人决定。
+    return { id, status: 'conflict', applied: false, server: prev };
+  }
   if (kind === 'delete') {
     // 手机删的也进回收站（反悔的余地与电脑端一致），返回语义不变
     ideaDb.ideas.splice(idx, 1);
+    ideaDb.idea_history[id] ||= { seen: true };
     pushToTrash('ideas', prev).catch(() => {});
+    recordOpReceipt(id, key, digest, op, prev.updated_at);
     return { id, status: 'ok', applied: true, deleted: true };
   }
   const idea = normalizeIdea(op, prev, { keepClientTimes: true });
   ideaDb.ideas[idx] = idea;
   pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+  recordOpReceipt(id, key, digest, op, idea.updated_at);
   return { id, status: 'ok', applied: true, idea };
 }
 
@@ -2531,7 +2695,17 @@ function loadTlsOptions() {
 }
 
 async function handleRequest(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  // Host 头可能非法（例如 "["），拼出来的 base URL 会让 new URL 直接抛异常。
+  // 过去这个异常一路冒泡成未捕获的 Promise 拒绝，进程当场退出（一个畸形请求
+  // 就能把整台机器上的服务打掉）。这里受控处理：回一个 400，进程继续活着。
+  let url;
+  try {
+    url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  } catch (err) {
+    console.error(`[shisuiji] 非法请求目标已拒绝: ${err.message}`);
+    sendJson(res, 400, { error: 'Bad Request' });
+    return;
+  }
   const pathname = url.pathname;
 
   if (pathname.startsWith('/api/')) {
@@ -2604,7 +2778,35 @@ async function handleRequest(req, res) {
 
 const TLS_OPTIONS = loadTlsOptions();
 const USING_TLS = !!TLS_OPTIONS;
-const server = USING_TLS ? https.createServer(TLS_OPTIONS, handleRequest) : http.createServer(handleRequest);
+// handleRequest 是 async：它内部抛出的任何异常都会变成未捕获的 Promise 拒绝，
+// Node 默认会因此退出进程。兜一层 catch，保证服务只回 500、不因单个请求而猝死。
+function onRequest(req, res) {
+  try {
+    const p = handleRequest(req, res);
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        console.error('[shisuiji] 请求处理异常:', err && err.stack ? err.stack : err);
+        try {
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ error: 'Internal Error' }));
+          } else {
+            res.end();
+          }
+        } catch { /* 连接可能已断 */ }
+      });
+    }
+  } catch (err) {
+    console.error('[shisuiji] 请求处理异常:', err && err.stack ? err.stack : err);
+    try {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: 'Internal Error' }));
+      }
+    } catch { /* 连接可能已断 */ }
+  }
+}
+const server = USING_TLS ? https.createServer(TLS_OPTIONS, onRequest) : http.createServer(onRequest);
 
 if (!fs.existsSync(PUBLIC_DIR)) {
     console.error('[shisuiji] 缺少 public 目录，请确认程序完整性');

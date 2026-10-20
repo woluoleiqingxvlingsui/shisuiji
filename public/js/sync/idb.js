@@ -87,6 +87,33 @@ async function idbPut(store, value) {
   return value;
 }
 
+/** 在同一个读写事务内比较并更新一条记录。reducer 必须同步：
+ * undefined=不动，null=删除，其余=写回。不能在 get 与 put 之间 await 网络或另一个事务。 */
+async function idbMutate(store, key, reducer) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    const bucket = tx.objectStore(store);
+    let result;
+    let failure;
+    bucket.get(key).onsuccess = (event) => {
+      try {
+        const before = event.target.result || null;
+        const next = reducer(before);
+        if (next && typeof next.then === 'function') throw new Error('IDB reducer must be synchronous');
+        if (next === null) bucket.delete(key);
+        else if (next !== undefined) bucket.put(next);
+        result = { before, after: next === undefined ? before : next, changed: next !== undefined };
+      } catch (err) {
+        failure = err;
+        tx.abort();
+      }
+    };
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = tx.onabort = () => reject(failure || tx.error || new Error('IndexedDB 事务中止'));
+  });
+}
+
 async function idbDelete(store, key) {
   const db = await openDb();
   const tx = db.transaction(store, 'readwrite');
@@ -120,6 +147,7 @@ export {
   idbGet,
   idbGetAll,
   idbPut,
+  idbMutate,
   idbDelete,
   idbClear,
   closeDb,
