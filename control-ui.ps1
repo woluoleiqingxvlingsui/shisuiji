@@ -13,6 +13,8 @@ $script:LaunchPending   = $false
 $script:StartTicks      = 0
 $script:AutoOpenPending = $false
 $script:EnvInfo         = Import-LocalEnv
+# 最近一条要告诉用户的提示（停止失败 / 端口被占等），短时间内在状态栏里保留
+$script:LastNotice      = $null
 
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -118,20 +120,65 @@ try {
 function Start-ServerFire {
   $script:EnvInfo = Import-LocalEnv
   Refresh-AddressLabels
-  # 带 local.env / TLS 环境启动；端口有残留但探活失败时先停再起（HTTP→HTTPS）
-  if (-not (Test-Up) -and (Get-ServerPid)) {
-    Stop-Server | Out-Null
+  # 端口被别的程序占着：只提示，不结束它
+  $owner = Get-PortOwner
+  if ($owner.State -notin @('Free', 'Project')) {
+    $msg = Get-PortConflictMessage -OwnerPid $owner.Pid -Verdict $owner.Verdict
+    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
+    $dot.Fill        = ColorBrush '#F5A623'
+    $statusText.Text = "端口被其他程序占用"
+    $statusDetail.Text = $msg
+    $btnOpen.IsEnabled  = $true
+    $btnStart.IsEnabled = $true
+    $btnStop.IsEnabled  = $false
+    return
+  }
+  # 端口有残留但探活失败：只有确认是拾穗集自己的进程才停（HTTP→HTTPS 切换）
+  if (-not (Test-Up) -and $owner.State -eq 'Project') {
+    $null = Stop-Server
     Start-Sleep -Milliseconds 400
   }
-  Start-Process -FilePath "node" -ArgumentList "server.js" -WorkingDirectory $Base -WindowStyle Hidden
+  if (-not (Start-ServerProcess)) {
+    $msg = ("启动失败：找不到 {0}。" -f (Get-ProjectServerPath))
+    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
+    $statusDetail.Text = $msg
+    $btnStart.IsEnabled = $true
+    $btnStop.IsEnabled  = $false
+    return
+  }
   $script:LaunchPending = $true
   $script:StartTicks = 0
+}
+
+function Get-NoticeText {
+  if (-not $script:LastNotice) { return $null }
+  $age = ((Get-Date) - $script:LastNotice.At).TotalSeconds
+  if ($age -gt 25) { return $null }
+  return $script:LastNotice.Text
 }
 
 function Update-Status {
   Refresh-AddressLabels
   $up = Test-Up
-  if ($up) {
+  # 端口上到底是谁：只有确认是拾穗集自己的进程才算「服务在跑」
+  $owner = Get-PortOwner
+  $mine = ($owner.State -eq 'Project')
+
+  if ($owner.State -notin @('Free', 'Project')) {
+    # 端口被别的程序占着：明确说出来，拾穗集不会去结束它
+    $msg = Get-PortConflictMessage -OwnerPid $owner.Pid -Verdict $owner.Verdict
+    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
+    $dot.Fill        = ColorBrush '#F5A623'
+    $statusText.Text = "端口被其他程序占用"
+    $statusDetail.Text = $msg
+    $btnOpen.IsEnabled  = $true
+    $btnStart.IsEnabled = $true
+    $btnStop.IsEnabled  = $false
+    $script:LaunchPending = $false
+    return
+  }
+
+  if ($up -and $mine) {
     $srvPid = Get-ServerPid
     $dot.Fill        = ColorBrush '#3DD68C'
     $statusText.Text = "服务运行中" + $(if ($srvPid) { " · PID $srvPid" } else { '' })
@@ -154,6 +201,8 @@ function Update-Status {
       $dot.Fill          = ColorBrush '#FF5C5C'
       $statusText.Text   = "启动失败"
       $statusDetail.Text = "端口 $($Port) 可能被占用，或 node 报错。可在项目目录运行 node server.js 看日志"
+      $notice = Get-NoticeText
+      if ($notice) { $statusDetail.Text = $notice }
       $btnOpen.IsEnabled  = $true
         $btnStart.IsEnabled = $true
       $btnStop.IsEnabled  = $false
@@ -171,13 +220,15 @@ function Update-Status {
   $dot.Fill          = ColorBrush '#FF5C5C'
   $statusText.Text   = "服务已停止"
   $statusDetail.Text = "点「启动服务」或「打开网页」都可以把它拉起来（会自动加载口令）"
+  $notice = Get-NoticeText
+  if ($notice) { $statusDetail.Text = $notice }
   $btnOpen.IsEnabled  = $true
   $btnStart.IsEnabled = $true
   $btnStop.IsEnabled  = $false
 }
 
 $btnOpen.Add_Click({
-  if (Test-Up) {
+  if ((Test-Up) -and (Test-ServerIdentity)) {
     Start-Process $Url
   } elseif (-not $script:LaunchPending) {
     Start-ServerFire
@@ -258,7 +309,9 @@ $btnStart.Add_Click({
 })
 
 $btnStop.Add_Click({
-  Stop-Server | Out-Null
+  $null = Stop-Server
+  $why = Get-LastStopMessage
+  if ($why) { $script:LastNotice = @{ Text = $why; At = (Get-Date) } }
   Update-Status
 })
 

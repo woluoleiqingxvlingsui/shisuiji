@@ -6,6 +6,8 @@
 # 产物：app\android\app\build\outputs\apk\debug\app-debug.apk
 #   或：app\android\app\build\outputs\apk\release\app-release.apk
 # 国内网络默认走镜像（Gradle 腾讯 / Maven 阿里）。
+# 镜像配置只对本次构建生效：写成构建专用 init script 交给 Gradle --init-script，
+# 不会写、也不会改用户全局 %USERPROFILE%\.gradle\init.gradle。
 
 param([switch]$Release)
 
@@ -17,7 +19,9 @@ $ToolsRoot = Join-Path $env:USERPROFILE 'tools'
 $JdkDir = Join-Path $ToolsRoot 'jdk-21'
 $SdkDir = Join-Path $ToolsRoot 'android-sdk'
 $GradleDir = Join-Path $ToolsRoot 'gradle-8.11.1'
-$InitGradle = Join-Path $env:USERPROFILE '.gradle\init.gradle'
+# 镜像配置只对本次构建生效：写成构建专用 init script，交给 Gradle 的 --init-script。
+# 绝不写/改用户全局 %USERPROFILE%\.gradle\init.gradle（那是用户自己的文件）。
+$InitGradle = Join-Path ([IO.Path]::GetTempPath()) "danji-gradle-init-$PID.gradle"
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Get-File($url, $dest) {
@@ -84,8 +88,7 @@ if (Test-Path $gradleBin) {
   Remove-Item $zip -Force
 }
 
-Write-Step 'Write Gradle mirrors init.gradle and local.properties'
-New-Item -ItemType Directory -Force -Path (Join-Path $env:USERPROFILE '.gradle') | Out-Null
+Write-Step 'Prepare CN mirrors init script content and local.properties'
 $init = @"
 // CN mirrors for Gradle deps
 allprojects {
@@ -103,7 +106,6 @@ allprojects {
   }
 }
 "@
-[IO.File]::WriteAllText($InitGradle, $init, [Text.UTF8Encoding]::new($false))
 $sdkProp = $SdkDir.Replace('\', '\\')
 [IO.File]::WriteAllText((Join-Path $AndroidDir 'local.properties'), "sdk.dir=$sdkProp`n", [Text.UTF8Encoding]::new($false))
 
@@ -151,9 +153,15 @@ try {
 
 Push-Location $AndroidDir
 try {
-  & $gradleBin $gradleTask --no-daemon
+  # 镜像配置只在本次构建内生效：写构建专用 init script 并用 --init-script 传给 Gradle。
+  # 构建结束（含失败）即删除，绝不触碰用户全局 %USERPROFILE%\.gradle\init.gradle。
+  [IO.File]::WriteAllText($InitGradle, $init, [Text.UTF8Encoding]::new($false))
+  & $gradleBin $gradleTask --no-daemon --init-script $InitGradle
   if ($LASTEXITCODE -ne 0) { throw "$gradleTask failed ($LASTEXITCODE)" }
-} finally { Pop-Location }
+} finally {
+  Pop-Location
+  if (Test-Path $InitGradle) { Remove-Item $InitGradle -Force -ErrorAction SilentlyContinue }
+}
 
 $apk = if ($Release) {
   Join-Path $AndroidDir 'app\build\outputs\apk\release\app-release.apk'

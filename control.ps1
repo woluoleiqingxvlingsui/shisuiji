@@ -16,7 +16,13 @@ function Show-Menu {
     if (Get-EffectiveToken) { Write-Host "  口令：已配置（config.json sync.token 或 local.env.ps1）" -ForegroundColor DarkGray }
     $srvPid = Get-ServerPid
     if ($null -eq $srvPid) {
-      Write-Host "  服务状态：未运行" -ForegroundColor Yellow
+      # 端口被别的程序占着时要说清楚：那不是拾穗集，拾穗集也不会去动它
+      $owner = Get-PortOwner
+      if ($owner.State -notin @('Free', 'Project')) {
+        Write-Host "  服务状态：未运行（端口 $Port 被其他程序占用，PID $($owner.Pid)，不是拾穗集）" -ForegroundColor Red
+      } else {
+        Write-Host "  服务状态：未运行" -ForegroundColor Yellow
+      }
     } else {
       Write-Host "  服务状态：后台运行中 (PID $srvPid)" -ForegroundColor Green
     }
@@ -33,6 +39,8 @@ function Show-Menu {
         if (Stop-Server) {
           Write-Host "`n  拾穗集已停止，后台服务已关闭。" -ForegroundColor Green
         } else {
+          $why = Get-LastStopMessage
+          if ($why) { Write-Host "`n  $why" -ForegroundColor Yellow }
           Write-Host "`n  拾穗集当前没有在运行。" -ForegroundColor Yellow
         }
         Start-Sleep -Seconds 2
@@ -53,12 +61,20 @@ switch ($Action.ToLower()) {
       if (Get-EffectiveToken) { Write-Host "token: configured (config.json sync.token or DANJI_TOKEN)" }
       if (Get-UseTls) { Write-Host "tls: https" }
     } else {
+      $why = Get-LastStartMessage
+      if ($why) { Write-Host $why -ForegroundColor Yellow }
       Write-Host "shisuiji failed to start"
       exit 1
     }
   }
   "stop" {
-    if (Stop-Server) { Write-Host "shisuiji stopped" } else { Write-Host "shisuiji is not running"; exit 1 }
+    if (Stop-Server) { Write-Host "shisuiji stopped" }
+    else {
+      $why = Get-LastStopMessage
+      if ($why) { Write-Host $why -ForegroundColor Yellow }
+      Write-Host "shisuiji is not running"
+      exit 1
+    }
   }
   "status" {
     if ($null -ne (Get-ServerPid)) { Write-Host "running" } else { Write-Host "stopped" }
