@@ -190,10 +190,36 @@ function Get-ProjectServerPath {
   return (Join-Path $Base 'server.js')
 }
 
-# 路径归一化：统一分隔符与大小写，方便比较
+# 8.3 短名（RUNNER~1、PROGRA~2）还原成长名。
+# 短名与长名指的是同一个文件，但字符串不同：Node / 资源管理器给的可能是短名，
+# 而 PowerShell 解析出来的 $PSScriptRoot 一定是长名。不还原就直接比字符串，
+# 会把「本项目自己的实例」判成「别的程序占用」（CI 的 windows runner 就是这样：
+# 临时目录在 C:\Users\RUNNER~1\ 下，探针拿到的却是长名路径）。
+# Get-Item 的 FullName 返回长名；路径不存在时退回原串，不影响原有行为。
+function Expand-LongPath([string]$p) {
+  if ([string]::IsNullOrWhiteSpace($p)) { return '' }
+  try {
+    $item = Get-Item -LiteralPath $p -Force -ErrorAction Stop
+    return [string]$item.FullName
+  } catch { }
+  # 文件本身不存在（进程命令行指向已删除的文件）：长名化父目录，再拼回文件名
+  $dir = [System.IO.Path]::GetDirectoryName($p)
+  $leaf = [System.IO.Path]::GetFileName($p)
+  if ($dir -and $leaf) {
+    try {
+      $d = (Get-Item -LiteralPath $dir -Force -ErrorAction Stop).FullName
+      return (Join-Path $d $leaf)
+    } catch { }
+  }
+  return $p
+}
+
+# 路径归一化：统一分隔符与大小写、还原 8.3 短名，方便比较
 function ConvertTo-PathKey([string]$p) {
   if ([string]::IsNullOrWhiteSpace($p)) { return '' }
-  return ($p.Trim().Trim('"').Replace('/', '\')).ToLowerInvariant()
+  $t = ($p.Trim().Trim('"').Replace('/', '\'))
+  $t = Expand-LongPath $t
+  return $t.ToLowerInvariant()
 }
 
 # 取进程信息（命令行 / 可执行路径）。读不到返回 $null。

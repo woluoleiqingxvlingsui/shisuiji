@@ -58,6 +58,18 @@ function portOwners(port) {
   return (r.stdout || '').trim();
 }
 
+// 8.3 短名（RUNNER~1、DANJIG~1）：同一个文件的另一种写法。
+// CI 的 windows runner 上临时目录就是短名，PowerShell 解析出的却是长名——
+// 归属判定不还原短名，就会把本项目自己的实例判成「别的程序占用」。
+// 本机没启用 8.3 生成（或该目录没有别名）时返回 null，调用方跳过该场景。
+function shortPath8_3(p) {
+  const r = spawnSync('powershell', ['-NoProfile', '-Command',
+    `cmd /c 'for %I in ("${p.replace(/'/g, "''")}") do @echo %~sI'`],
+    { encoding: 'utf8' });
+  const out = (r.stdout || '').trim();
+  return out && out !== p ? out : null;
+}
+
 function pidAlive(pid) {
   if (!pid) return false;
   try {
@@ -306,6 +318,33 @@ async function main() {
   ok('停止：本项目进程确实被结束', () => {
     assert.equal(gone, true);
   });
+
+  // ---- 场景 3b：以 8.3 短名启动的本项目实例 ----
+  // 短名与长名是同一个文件，但字符串不同：进程命令行里是短名，
+  // lib.ps1 拿到的项目路径是长名。不还原短名就会误判成「别的程序占用」。
+  console.log('\n场景 3b：以 8.3 短名启动的本项目实例');
+  const shortServer = shortPath8_3(path.join(projDir, 'server.js'));
+  if (!shortServer) {
+    console.log('  · 本机未启用 8.3 短名生成，跳过本场景');
+  } else {
+    const shortProc = startNode([shortServer, String(port), '--no-marker']);
+    assert.ok(await waitPort(port), '短名启动的项目实例没有监听到测试端口');
+    res = runProbe(ctx, 'status');
+    ok('状态：短名启动的实例仍被识别为本项目', () => {
+      assert.equal(res.state, 'Project');
+      assert.equal(res.serverPid, shortProc.pid);
+      assert.equal(res.identity, true);
+    });
+    res = runProbe(ctx, 'stop');
+    ok('停止：允许停止短名启动的本项目实例', () => {
+      assert.equal(res.ok, true);
+    });
+    const shortGone = await waitGone(shortProc.pid);
+    ok('停止：短名启动的进程确实被结束', () => {
+      assert.equal(shortGone, true);
+    });
+    try { shortProc.kill(); } catch { /* ignore */ }
+  }
 
 
   // 相对路径启动不能证明工作目录；产品健康标识不能作为停止凭证。
