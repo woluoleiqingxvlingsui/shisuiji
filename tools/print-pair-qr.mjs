@@ -3,14 +3,9 @@
  * 用法（仓库根目录）：
  *   node tools/print-pair-qr.mjs --base http://192.168.1.5:8642 --token SECRET
  *   node tools/print-pair-qr.mjs --base http://192.168.1.5:8642   # 口令可空
- * 依赖 app/node_modules/qrcode（先 cd app && npm install）。
+ * 依赖 qrcode：在仓库根目录执行一次 npm install 即可（见 README）。
  */
-import path from 'node:path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
+import { loadQrcode } from './qrcode-loader.mjs';
 
 function parseArgs(argv) {
   const out = { base: '', token: '' };
@@ -30,21 +25,15 @@ async function main() {
     console.error('缺少 --base，例如 --base http://192.168.1.5:8642');
     process.exit(1);
   }
-  let QRCode;
-  try {
-    QRCode = require(path.join(__dirname, '..', 'app', 'node_modules', 'qrcode'));
-  } catch {
-    console.error('找不到 qrcode，请先：cd app && npm install');
-    process.exit(1);
-  }
+  const QRCode = loadQrcode();
 
   const payload = JSON.stringify({ v: 1, base: base.replace(/\/+$/, ''), token: token || '' });
   const ascii = await QRCode.toString(payload, { type: 'terminal', small: true, errorCorrectionLevel: 'M' });
   console.log(ascii);
-  console.log('----- 配对 JSON（App → 粘贴码） -----');
+  console.log('----- 配对 JSON（扫码失败时可手工排查用） -----');
   console.log(payload);
   console.log('--------------------------------------');
-  console.log('用「拾穗集」App 扫码，或粘贴上面的 JSON。含口令，请勿截图外传。');
+  console.log('用「拾穗集」App 扫码配对。含口令，请勿截图外传。');
 }
 
 main().catch((e) => {

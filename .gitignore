@@ -8,6 +8,11 @@ local.env.ps1
 *.pem.bak
 danji-key.pem
 danji-cert.pem
+# Android 签名材料（重打 APK 用，同样不入库）
+*.keystore
+*.jks
+# 环境变量文件（只匹配名为 .env 的文件；local.env.ps1 由上一行单独兜住）
+.env
 
 # 论文库：首次使用自动创建，里面是你的 PDF，不入库
 papers/

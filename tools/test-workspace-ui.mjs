@@ -186,6 +186,52 @@ try {
   await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close kb editor');
   console.log('✓ 知识库已有标签可点选复用/取消');
 
+  /* ---- 内容变长后展开按钮必须当场出现 ----
+   * 曾经的 bug：卡片只在 onMounted 测一次「能不能折叠」。列表按 id 复用同一个卡片实例，
+   * 编辑保存后没人重测——先记 2 行、再改成 4 行，文字被 CSS 截断了却没有展开按钮，
+   * 非得刷新页面重新挂载才恢复。这里用真实编辑走一遍，确保修的是用户遇到的那条路径。
+   */
+  const growTail = 'EXPAND-BTN-' + Date.now();
+  const shortKb = await fetch(base + '/api/kb', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: '展开按钮验收（演示）', content: '先记一句短话。', source: { type: 'manual' } }),
+  });
+  assert.ok(shortKb.ok, 'create short kb fixture');
+  await navigate('kb');
+  const shortTitle = '展开按钮验收（演示）';
+  await eventually(() => evaluate(`[...document.querySelectorAll('.kb-card')].some(c => c.textContent.includes('${shortTitle}'))`), 'short kb card rendered');
+  const noToggleBefore = await evaluate(`[...document.querySelectorAll('.kb-card')].find(c => c.textContent.includes('${shortTitle}')).querySelector('.idea-toggle')`);
+  assert.equal(noToggleBefore, null, 'short content has no expand toggle');
+  await evaluate(`(() => { const card = [...document.querySelectorAll('.kb-card')].find(c => c.textContent.includes('${shortTitle}')); [...card.querySelectorAll('.card-actions button')].find(b => b.textContent.includes('编辑')).click(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.drawer textarea')`), 'kb edit drawer');
+  await evaluate(`(() => { const ta = document.querySelector('.drawer textarea'); ta.value = '改长之后的正文-${growTail}：' + '这段文字用来把内容撑到超过三行，从而触发折叠与展开按钮。'.repeat(6); ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('.drawer button[type="submit"]').click(); })()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer') && [...document.querySelectorAll('.kb-card')].some(c => c.textContent.includes('${growTail}'))`), 'kb edit saved');
+  const afterGrow = await eventually(async () => {
+    const value = await evaluate(`(() => { const card = [...document.querySelectorAll('.kb-card')].find(c => c.textContent.includes('${shortTitle}')); const p = card.querySelector('.kb-content'); return { clamped: p.classList.contains('clamped'), toggle: !!card.querySelector('.idea-toggle'), scroll: p.scrollHeight, client: p.clientHeight }; })()`);
+    return value.toggle ? value : null;
+  }, 'expand toggle appears after edit grows content');
+  assert.equal(afterGrow.clamped, true, 'grown content is clamped');
+  assert.ok(afterGrow.scroll > afterGrow.client, 'clamped content is actually cut off');
+  // 同样的病在随记卡片上也有一份：短内容编辑成长内容后也要立刻能展开
+  const shortIdea = await fetch(base + '/api/ideas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: shortTitle, content: '先记一句短话。', images: [] }),
+  });
+  assert.ok(shortIdea.ok, 'create short idea fixture');
+  await navigate('ideas');
+  await eventually(() => evaluate(`[...document.querySelectorAll('.idea-card')].some(c => c.textContent.includes('${shortTitle}'))`), 'short idea card rendered');
+  await evaluate(`(() => { const card = [...document.querySelectorAll('.idea-card')].find(c => c.textContent.includes('${shortTitle}')); [...card.querySelectorAll('.card-actions button')].find(b => b.textContent.includes('编辑')).click(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.drawer textarea')`), 'idea edit drawer');
+  await evaluate(`(() => { const ta = document.querySelector('.drawer textarea'); ta.value = '改长之后的正文-${growTail}：' + '这段文字用来把内容撑到超过三行，从而触发折叠与展开按钮。'.repeat(6); ta.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('.drawer button[type="submit"]').click(); })()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer') && [...document.querySelectorAll('.idea-card')].some(c => c.textContent.includes('${growTail}'))`), 'idea edit saved');
+  await eventually(() => evaluate(`(() => { const card = [...document.querySelectorAll('.idea-card')].find(c => c.textContent.includes('${growTail}')); return !!card.querySelector('.idea-toggle'); })()`), 'idea expand toggle appears after edit');
+  const ideaClamped = await evaluate(`(() => { const p = [...document.querySelectorAll('.idea-card')].find(c => c.textContent.includes('${growTail}')).querySelector('.idea-content'); return p.classList.contains('clamped'); })()`);
+  assert.equal(ideaClamped, true, 'grown idea content is clamped');
+  // 用完即删：后面的离线用例要断言 ideas 仍是 5 条，多一条就会误报
+  const shortIdeaBody = await shortIdea.json();
+  assert.ok((await fetch(base + '/api/ideas/' + shortIdeaBody.id, { method: 'DELETE' })).ok, 'clean up short idea fixture');
+  console.log('✓ 内容编辑变长后展开按钮当场出现（无需刷新）');
+
   // 花销四位小数：卡片显示 ¥0.1234，旧的两位小数记录仍显示 ¥128.50
   const decExpense = await fetch(base + '/api/expenses', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

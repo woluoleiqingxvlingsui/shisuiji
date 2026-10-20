@@ -3,14 +3,9 @@
  * 供图形控制台 control-ui.ps1 调用：把配对载荷渲染成 PNG 文件，窗口里直接显示可扫。
  * 用法（仓库根目录）：
  *   node tools/pair-qr-png.mjs --base http://192.168.1.5:8642 --token SECRET --out C:\path\qr.png
- * 依赖 qrcode（npm install）。
+ * 依赖 qrcode：在仓库根目录执行一次 npm install 即可（见 README）。
  */
-import path from 'node:path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
+import { loadQrcode } from './qrcode-loader.mjs';
 
 function parseArgs(argv) {
   const out = { base: '', token: '', file: '' };
@@ -35,13 +30,7 @@ async function main() {
     console.error('缺少 --out，指定 PNG 输出路径');
     process.exit(1);
   }
-  let QRCode;
-  try {
-    QRCode = require('qrcode');
-  } catch {
-    console.error('找不到 qrcode，请先在仓库根目录执行：npm install');
-    process.exit(1);
-  }
+  const QRCode = loadQrcode();
 
   const payload = JSON.stringify({ v: 1, base, token });
   await QRCode.toFile(file, payload, {

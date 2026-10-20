@@ -16,4 +16,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
+          # 锁文件在仓库根，缓存只认根目录的 package-lock.json
+          cache: npm
+      # 干净检出没有 node_modules：tools/test-qrcode-loader.mjs 需要真实的 qrcode 包，
+      # 没有它 npm test 必然失败。用 lockfile 安装（npm ci），不手改 lockfile。
+      - run: npm ci
       - run: npm test
+      # ESM 边界回归：public/ 下的 .js 必须在 Node 18 语义下也按 ESM 解析
+      - run: node tools/test-esm-boundary.mjs
