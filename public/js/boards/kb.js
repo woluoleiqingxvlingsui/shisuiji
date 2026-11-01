@@ -1,12 +1,13 @@
 /* 拾穗集 —— 知识库：可反复复用的精华沉淀
  * 手动记录 + 论文/网页笔记、想法一键沉淀；标签 + 全文叠加检索（类别已废弃）。
- * 桌面端直连 REST 管理；手机端在线只读浏览（不接 outbox）。
+ * 桌面端直连 REST 管理；手机端在线只读浏览（不接 outbox），也不提供沉淀入口。
  */
 
 import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
+import { isDesktop } from '../perm.js';
 import { NOTE_TEXT_FIELDS, NOTE_FIELD_LABEL } from '../util/paper-note.js';
 import { siteNoteFields, siteNoteFieldLabel } from '../util/site-note.js';
 import { loadBoardWithMirror } from '../offline.js';
@@ -57,7 +58,12 @@ function openKbEditor(entry) {
 }
 
 // 一键沉淀：带着预填内容开编辑器，作为新条目保存
+// 沉淀属于「知识库管理」，只在电脑端做：手机端知识库只读，入口已隐藏，这里再兜一道
 function openKbWithPrefill(prefill) {
+  if (!isDesktop()) {
+    toast('沉淀到知识库只在电脑端可用', 'warn');
+    return;
+  }
   state.editingKb = null;
   state.kbPrefill = prefill;
   state.kbEditorOpen = true;
