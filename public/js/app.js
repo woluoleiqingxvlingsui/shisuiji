@@ -142,6 +142,7 @@ import { KbCard } from './components/kb-card.js';
 import { KbEditor } from './components/kb-editor.js';
 import { KbMerge } from './components/kb-merge.js';
 import { MasonryList } from './components/masonry-list.js';
+import { ContentPage, openContentPage, closeContentPage, editContentPage, contentPageItem, contentPageMeta } from './components/content-page.js';
 import { TrashCard } from './components/trash-card.js';
 import { PairDrawer } from './components/pair-drawer.js';
 
@@ -449,6 +450,8 @@ const app = createApp({
       openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement,
       filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb,
       depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge,
+      // 长内容全屏页（读 / 写都进全屏，应用内视图，不是新标签页）
+      openContentPage, closeContentPage, editContentPage, contentPageItem, contentPageMeta,
       // M20 任务 D：回收站（仅电脑端）
       filteredTrash, restoreTrashEntry, purgeTrashEntry, emptyTrash,
       canWriteEggs: computed(() => canWrite('eggs')),
@@ -493,6 +496,7 @@ app.component('kb-card', KbCard);
 app.component('kb-editor', KbEditor);
 app.component('kb-merge', KbMerge);
 app.component('masonry-list', MasonryList);
+app.component('content-page', ContentPage);
 app.component('pair-drawer', PairDrawer);
 app.component('trash-card', TrashCard);
 app.component('sync-status', SyncStatus);

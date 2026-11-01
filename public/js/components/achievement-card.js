@@ -1,5 +1,6 @@
 /* ---------------- 组件：成果卡片（时间线单项） ---------------- */
 // 类别徽章 + 状态 + 时间 + 内容/亮点/标签/链接。桌面端可编辑删除，手机端只读。
+// 正文是直接铺开的（成果卡不折叠），所以给一个「查看全文」进全屏页看。
 import { computed } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
@@ -32,7 +33,7 @@ function humanDate(d) {
 const AchievementCard = {
   name: 'AchievementCard',
   props: { achievement: { type: Object, required: true } },
-  emits: ['edit', 'remove'],
+  emits: ['edit', 'remove', 'openFull'],
   setup(props, { emit }) {
     const cat = computed(() => categoryMeta(props.achievement.category));
     const st = computed(() => statusMeta(props.achievement.status));
@@ -46,6 +47,8 @@ const AchievementCard = {
       cat, st, catStyle, dateText, safeLinks, writable,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
+      // 长内容进全屏页看（应用内视图，不是新标签页）
+      emitOpenFull: () => emit('openFull'),
     };
   },
   template: `
@@ -57,6 +60,9 @@ const AchievementCard = {
       <span class="ach-date" v-if="dateText">🗓 {{ dateText }}</span>
     </div>
     <p class="ach-content" v-if="achievement.content">{{ achievement.content }}</p>
+    <button type="button" class="idea-toggle" v-if="achievement.content" @click.stop="emitOpenFull">
+      查看全文 ⌄
+    </button>
     <p class="ach-highlight" v-if="achievement.highlight" title="亮点摘要：可直接抄进简历">
       <span class="ach-highlight-mark">📌 简历</span>{{ achievement.highlight }}
     </p>

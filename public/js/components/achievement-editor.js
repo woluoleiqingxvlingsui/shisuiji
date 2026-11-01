@@ -68,7 +68,7 @@ const AchievementEditor = {
     };
   },
   template: `
-  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+  <div class="overlay full" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
     <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑成果' : '🏅 记一项成果' }}</h2>

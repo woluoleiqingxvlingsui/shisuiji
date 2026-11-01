@@ -16,6 +16,12 @@
 const CHAR_WIDTH = 15;   // 卡片正文一行大约放得下的中文字符数（与 style.css 的字号/宽度对齐）
 const LINE_HEIGHT = 25;  // 一行正文的高度
 const BASE_HEIGHT = 96;  // 卡片内边距 + 标题行 + 底部操作栏的固定开销
+/** 桌面端正文折叠后的行数：style.css 的 .clamped 是 -webkit-line-clamp: 3 */
+const CLAMP_ROWS = 3;
+/** 贴图一行放几张（.idea-imgs 是 flex-wrap，84px 缩略图 + 8px gap，双列时列宽有限） */
+const IMAGES_PER_ROW = 4;
+/** 贴图一行的高度：84px 缩略图 + 8px 行间距 */
+const IMAGE_ROW_HEIGHT = 92;
 
 /** 文本按字符数折行数 */
 function lines(text, perLine = CHAR_WIDTH) {
@@ -29,21 +35,34 @@ function rowsOf(list, perRow = 3) {
   return n <= 0 ? 0 : Math.ceil(n / perRow);
 }
 
-/** 通用预估：把一张卡上「一定会渲染出来的文字与图」加起来 */
-export function estimateCardHeight(item) {
+/**
+ * 通用预估：把一张卡上「一定会渲染出来的文字与图」加起来。
+ *
+ * @param {any} item 卡片数据
+ * @param {{clampRows?: boolean}} options
+ *   clampRows = 当前是不是折叠态。桌面端正文被 .clamped 折成 3 行（style.css），
+ *   预估却按全文字符数算行数的话，一条 359 字的随记会估出 24 行 / 600px，
+ *   实际只渲染 3 行 / 约 80px —— 高估 2.5 倍，贪心就把它单独塞进一列，
+ *   后面所有卡片全被挤到另一列，左半边于是持续空着。
+ *   折叠与否由调用方按 MASONRY_BREAKPOINT 决定（双列 = 桌面 = 折叠）。
+ */
+export function estimateCardHeight(item, options = {}) {
   if (!item || typeof item !== 'object') return BASE_HEIGHT;
+  const clampRows = !!options.clampRows;
   let h = BASE_HEIGHT;
 
   // 标题：一行放不下就折行
   h += lines(item.title || item.name || item.platform, 16) * 28;
   // 正文类：随记 content、花销备注、成果 content、知识库 content、蛋的备注
-  h += lines(item.content || item.body || item.remark || item.note, CHAR_WIDTH) * LINE_HEIGHT;
+  const bodyRows = lines(item.content || item.body || item.remark || item.note, CHAR_WIDTH);
+  h += (clampRows ? Math.min(bodyRows, CLAMP_ROWS) : bodyRows) * LINE_HEIGHT;
   // 网址 / 文件路径这类长串
   h += lines(item.url || item.file || item.path, 26) * 20;
   // 标签、链接、贴图
   h += rowsOf(item.tags) * 24;
   h += rowsOf(item.links) * 24;
-  h += (Array.isArray(item.images) ? item.images.length : 0) * 120;
+  // 贴图按行算：一行约 4 张、每行约 92px（原来按每张 120px 算，高估了一倍多）
+  h += rowsOf(item.images, IMAGES_PER_ROW) * IMAGE_ROW_HEIGHT;
   // 文献 / 网页的笔记条数：每条笔记露出摘要行
   h += (Array.isArray(item.logs) ? item.logs.length : 0) * 26;
 
@@ -57,10 +76,11 @@ export function estimateCardHeight(item) {
  * 那种「第一列塞满 10 张、第二列才开始第 11 张」的阅读断裂。
  * @param {any[]} items 已按业务顺序排好的卡片
  * @param {number} count 列数（1 = 单列，直接原样返回）
- * @param {(item:any)=>number} estimate 单卡高度预估
+ * @param {(item:any, options?:object)=>number} estimate 单卡高度预估
+ * @param {object} options 透传给 estimate 的上下文（如 clampRows）
  * @returns {any[][]} 每列一个数组，列内保持原顺序
  */
-export function distributeIntoColumns(items, count, estimate = estimateCardHeight) {
+export function distributeIntoColumns(items, count, estimate = estimateCardHeight, options = {}) {
   const list = Array.isArray(items) ? items : [];
   if (!Number.isInteger(count) || count <= 1) return [list];
 
@@ -73,7 +93,7 @@ export function distributeIntoColumns(items, count, estimate = estimateCardHeigh
       if (heights[i] < heights[target]) target = i;
     }
     columns[target].push(item);
-    heights[target] += estimate(item);
+    heights[target] += estimate(item, options);
   }
   return columns;
 }

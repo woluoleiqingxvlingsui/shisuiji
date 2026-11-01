@@ -120,12 +120,25 @@ try {
   await viewport(1440, 1050);
   await navigate();
   assert.equal(await evaluate(`document.querySelectorAll('.idea-card').length`), 4);
-  // M20 任务 E：双列瀑布流（不再是等宽 CSS Grid）。断言列数与「两列高度不同」
-  // ——后者正是 masonry 相对 grid 的核心收益：矮卡下方不再留整行空白。
+  // 「沉淀到知识库」只在电脑端：电脑端随记卡片必须带这个按钮
+  assert.ok(await evaluate(`document.querySelectorAll('.idea-card button[aria-label="沉淀到知识库"]').length > 0`), 'desktop idea card keeps 沉淀 button');
+  // M20 任务 E：双列瀑布流（不再是等宽 CSS Grid）。M22 任务 B 起，预估按「桌面端正文只显示 3 行」
+  // 校准过，夹具里那张长卡不再被高估成独占一列 —— 分列从 1/3 变成 2/2。
+  // 所以断言改成钉真正要保的东西：① 两列底部高度差很小（列间不留大片空白）
+  // ② 两列里第 2 张卡的纵向位置不同（真 masonry；CSS Grid 会按行对齐）。
   assert.equal(await evaluate(`document.querySelectorAll('.egg-list.masonry .masonry-col').length`), 2, 'desktop masonry renders 2 columns');
   const colFill = await evaluate(`[...document.querySelectorAll('.egg-list.masonry .masonry-col')].map(c => c.children.length)`);
   assert.ok(colFill.reduce((a, b) => a + b, 0) === 4, 'all 4 cards distributed: ' + JSON.stringify(colFill));
-  assert.notDeepEqual(colFill[0], colFill[1], 'masonry balances uneven cards across columns: ' + JSON.stringify(colFill));
+  const masonry = await evaluate(`(() => {
+    const cols = [...document.querySelectorAll('.egg-list.masonry .masonry-col')];
+    const info = cols.map((c) => {
+      const rects = [...c.children].map((k) => k.getBoundingClientRect());
+      return { count: rects.length, bottom: Math.max(...rects.map((r) => r.bottom)), tops: rects.map((r) => Math.round(r.top)) };
+    });
+    return { counts: info.map((i) => i.count), diff: Math.round(Math.abs(info[0].bottom - info[1].bottom)), tops: info.map((i) => i.tops) };
+  })()`);
+  assert.ok(masonry.diff <= 160, 'masonry keeps both columns balanced (bottom diff <= 160px): ' + JSON.stringify(masonry));
+  assert.notEqual(masonry.tops[0][1], masonry.tops[1][1], 'masonry columns are not row-aligned like a grid: ' + JSON.stringify(masonry.tops));
   console.log('✓ masonry distributes cards into two balanced columns');
   await checkLayout('desktop card layout');
   await screenshot('desktop-notes');
@@ -272,6 +285,95 @@ try {
   await checkLayout('desktop trash');
   console.log('✓ 回收站默认展开完整内容与贴图缩略图');
 
+  /* ---- M22 验收：花销「杂项」、双列分列平衡、长内容全屏页 ---- */
+  // A：类别多出「杂项」，且它是自动归类的兜底（标题不含任何已有关键词时默认选中它）
+  await navigate('expenses');
+  await evaluate(`document.querySelector('.create-button').click()`);
+  await eventually(() => evaluate(`!!document.querySelector('.chip-picks .chip-pick')`), 'expense editor');
+  const catChips = await evaluate(`[...document.querySelectorAll('.chip-picks .chip-pick')].map(b => b.textContent.trim())`);
+  assert.ok(catChips.some((t) => t.includes('杂项')), 'expense categories include 杂项: ' + JSON.stringify(catChips));
+  await evaluate(`(() => { const input = document.querySelector('.drawer-form input'); input.value = '接码 5 块（演示）'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await pause(150);
+  const autoCat = await evaluate(`[...document.querySelectorAll('.chip-picks .chip-pick')].filter(b => b.classList.contains('on')).map(b => b.textContent.trim())`);
+  assert.equal(autoCat.length, 1, 'exactly one category selected: ' + JSON.stringify(autoCat));
+  assert.ok(autoCat[0].includes('杂项'), 'keyword-free title defaults to 杂项: ' + JSON.stringify(autoCat));
+  // 花销编辑器保持右侧窄抽屉，不能被全屏化
+  const narrowDrawer = await evaluate(`(() => { const d = document.querySelector('.drawer'); const r = d.getBoundingClientRect(); return { w: Math.round(r.width), full: !!d.closest('.overlay.full') }; })()`);
+  assert.equal(narrowDrawer.full, false, 'expense editor stays a side drawer: ' + JSON.stringify(narrowDrawer));
+  assert.ok(narrowDrawer.w < 700, 'expense editor keeps the narrow drawer width: ' + JSON.stringify(narrowDrawer));
+  await evaluate(`document.querySelector('.drawer-head .btn.ghost').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close expense editor');
+  console.log('✓ 花销类别含「杂项」，无关键词标题默认归到杂项，花销编辑器仍是右侧抽屉');
+
+  // C：长内容进全屏页 —— 铺满窗口、正文完整；随记编辑器也铺满且正文框不再被高度卡住
+  await navigate('ideas');
+  await eventually(() => evaluate(`[...document.querySelectorAll('.idea-card')].some(c => c.querySelector('.idea-toggle'))`), 'idea 查看全文 button');
+  await evaluate(`(() => { const b = [...document.querySelectorAll('.idea-card')].map(c => c.querySelector('.idea-toggle')).find(Boolean); b.click(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.overlay.full .drawer .content-page-text')`), 'full content page');
+  const fullPage = await evaluate(`(() => {
+    const d = document.querySelector('.overlay.full .drawer');
+    const r = d.getBoundingClientRect();
+    return { w: Math.round(r.width), vw: innerWidth, h: Math.round(r.height), vh: innerHeight, len: d.querySelector('.content-page-text').textContent.length, ws: getComputedStyle(d.querySelector('.content-page-text')).whiteSpace };
+  })()`);
+  assert.ok(fullPage.w >= fullPage.vw - 2 && fullPage.h >= fullPage.vh - 2, 'content page fills the viewport: ' + JSON.stringify(fullPage));
+  assert.ok(fullPage.len > 100, 'content page shows the full body: ' + JSON.stringify(fullPage));
+  assert.equal(fullPage.ws, 'pre-wrap', 'content page body keeps its line breaks');
+  await evaluate(`document.querySelector('.overlay.full .drawer .drawer-head .btn[aria-label="关闭全文"]').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close content page');
+  // 从卡片进编辑器：编辑器也要铺满，正文输入框不再受 70vh 上限约束
+  await evaluate(`(() => { const card = [...document.querySelectorAll('.idea-card')].find(c => c.querySelector('.idea-toggle')); [...card.querySelectorAll('.card-actions button')].find(b => b.textContent.includes('编辑')).click(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.overlay.full .drawer .drawer-form')`), 'full idea editor');
+  const fullEditor = await evaluate(`(() => {
+    const d = document.querySelector('.overlay.full .drawer');
+    const r = d.getBoundingClientRect();
+    const ta = d.querySelector('textarea.tall');
+    return { w: Math.round(r.width), vw: innerWidth, taMax: ta ? getComputedStyle(ta).maxHeight : null };
+  })()`);
+  assert.ok(fullEditor.w >= fullEditor.vw - 2, 'idea editor fills the viewport: ' + JSON.stringify(fullEditor));
+  assert.equal(fullEditor.taMax, 'none', 'idea editor body input is no longer height-capped: ' + JSON.stringify(fullEditor));
+  await evaluate(`document.querySelector('.overlay.full .drawer .drawer-head .btn.ghost').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close idea editor');
+  console.log('✓ 长内容全屏页与随记编辑器铺满窗口，正文输入框不再被高度卡住');
+
+  // C（M22 补丁）：带贴图的随记进全屏页，贴图也要照常显示 —— 缩略图数量 = 贴图数，尺寸与卡片一致
+  const cpPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const cpUpload = await fetch(base + '/api/uploads?name=content-page-fixture.png', {
+    method: 'POST', headers: { 'Content-Type': 'image/png' }, body: cpPng,
+  });
+  assert.ok(cpUpload.ok, 'upload content page fixture image');
+  const cpImage = await cpUpload.json();
+  const cpTitle = '全屏页贴图验收（演示）';
+  const cpIdea = await fetch(base + '/api/ideas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title: cpTitle,
+      content: '全屏页贴图验收：' + '这段正文要够长，卡片上才会出现「查看全文」按钮。'.repeat(8),
+      images: [{ id: cpImage.id, name: 'content-page-fixture.png' }],
+    }),
+  });
+  assert.ok(cpIdea.ok, 'create content page fixture idea');
+  const cpIdeaBody = await cpIdea.json();
+  await navigate('ideas');
+  await eventually(() => evaluate(`[...document.querySelectorAll('.idea-card')].some(c => c.textContent.includes('${cpTitle}'))`), 'image idea card rendered');
+  await evaluate(`(() => { const card = [...document.querySelectorAll('.idea-card')].find(c => c.textContent.includes('${cpTitle}')); card.querySelector('.idea-toggle').click(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.overlay.full .drawer .content-page-body')`), 'content page opened');
+  const cpThumbs = await eventually(async () => {
+    const info = await evaluate(`(() => {
+      const imgs = [...document.querySelectorAll('.content-page-body .idea-imgs img')];
+      const r = imgs[0] ? imgs[0].getBoundingClientRect() : null;
+      return { count: imgs.length, w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0 };
+    })()`);
+    return info.count >= 1 ? info : null;
+  }, 'content page thumbnail rendered');
+  assert.equal(cpThumbs.count, 1, 'content page shows one thumbnail per image: ' + JSON.stringify(cpThumbs));
+  assert.equal(cpThumbs.w, 84, 'thumbnail width matches the card (84px): ' + JSON.stringify(cpThumbs));
+  assert.equal(cpThumbs.h, 84, 'thumbnail height matches the card (84px): ' + JSON.stringify(cpThumbs));
+  await evaluate(`document.querySelector('.overlay.full .drawer .drawer-head .btn[aria-label="关闭全文"]').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close content page');
+  // 用完即删：后面的离线用例要断言 ideas 仍是 5 条
+  assert.ok((await fetch(base + '/api/ideas/' + cpIdeaBody.id, { method: 'DELETE' })).ok, 'clean up content page fixture idea');
+  console.log('✓ 带贴图的随记进全屏页后缩略图照常显示（84px，与卡片一致）');
+
   await viewport(390, 844, true);
   await navigate('ideas');
   await checkLayout('phone 390px');
@@ -307,6 +409,27 @@ try {
   await evaluate(`(async () => { const { state } = await import('/js/state.js'); state.role = 'mobile'; state.sync.role = 'mobile'; })()`);
   await pause(100);
   assert.ok(await evaluate(`!!document.querySelector('.create-button')`), 'mobile can write notes');
+  // 手机端不给「沉淀」入口：把一条随记标成手机 origin（手机端可写），
+  // 卡片操作区照常显示（置顶 / 编辑 / 删除），但沉淀按钮必须消失
+  await evaluate(`(async () => { const { state } = await import('/js/state.js'); const idea = state.ideas[0]; if (idea) idea.origin = 'mobile'; })()`);
+  await pause(150);
+  assert.ok(await evaluate(`document.querySelectorAll('.idea-card .card-actions button').length > 0`), 'mobile writable idea still shows card actions');
+  assert.equal(await evaluate(`document.querySelectorAll('.idea-card button[aria-label="沉淀到知识库"]').length`), 0, 'mobile hides 沉淀 button');
+  // 兜底：手机端即使直接调沉淀入口，也不该打开知识库编辑器
+  await evaluate(`(async () => { const kb = await import('/js/boards/kb.js'); const { state } = await import('/js/state.js'); window.__deposit = kb.depositFromIdea; window.__idea = state.ideas[0]; })()`);
+  await evaluate(`window.__deposit(window.__idea)`);
+  await pause(150);
+  assert.equal(await evaluate(`!!document.querySelector('.drawer')`), false, 'mobile deposit does not open kb editor');
+  console.log('✓ 手机端随记不显示「沉淀到知识库」，沉淀入口也不开编辑器');
+  // C：手机角色下全屏阅读页只读 —— 能看，但不能凭空多出「编辑」这种管理入口
+  const phoneToggle = await evaluate(`(() => { const b = [...document.querySelectorAll('.idea-card')].map(c => c.querySelector('.idea-toggle')).find(Boolean); if (!b) return false; b.click(); return true; })()`);
+  assert.ok(phoneToggle, 'phone idea card offers 查看全文');
+  await eventually(() => evaluate(`!!document.querySelector('.overlay.full .drawer .content-page-text')`), 'phone content page');
+  const phoneBtns = await evaluate(`[...document.querySelectorAll('.overlay.full .drawer .drawer-head .btn')].map(b => b.textContent.trim())`);
+  assert.ok(!phoneBtns.some((t) => t.includes('编辑')), 'phone content page has no edit entry: ' + JSON.stringify(phoneBtns));
+  await evaluate(`document.querySelector('.overlay.full .drawer .drawer-head .btn[aria-label="关闭全文"]').click()`);
+  await eventually(() => evaluate(`!document.querySelector('.drawer')`), 'close phone content page');
+  console.log('✓ 手机角色下全屏阅读页只读，没有编辑入口');
   // M20 任务 B：手机端视角隐藏「文献」「网页」入口 —— 手机底部导航只剩 随记 / 知识库 / 更多
   const phoneNav = await evaluate(`[...document.querySelectorAll('.mobile-nav button')].map(b => b.textContent.trim())`);
   assert.ok(!phoneNav.some(t => t.includes('文献')), 'mobile nav hides 文献: ' + JSON.stringify(phoneNav));

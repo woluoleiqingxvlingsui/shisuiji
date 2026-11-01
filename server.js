@@ -122,7 +122,7 @@ const SITE_NOTE_FIELDS = [
 
 // 花销板块：按条目记账，金额单独按数字处理；category 只用于归纳展示
 const EXPENSE_FIELDS = ['title', 'date', 'notes', 'category'];
-const EXPENSE_CATEGORIES = ['plan', 'api', 'compute', 'ladder'];
+const EXPENSE_CATEGORIES = ['plan', 'api', 'compute', 'ladder', 'misc'];
 // 自动归类关键词（与 public/config.js 的 expenses.categories 同步）；梯子优先，
 // 必须先于套餐匹配，否则「机场订阅」会被「订阅」归到套餐；套餐其次，所以 token 包算套餐
 const EXPENSE_LADDER_KEYWORDS = ['梯子', '机场', 'vpn', '代理', '节点', 'clash', 'v2ray', '翻墙', '科学上网'];
@@ -644,14 +644,15 @@ function normalizeExpenseDate(raw) {
 }
 
 // 按标题猜类别：梯子关键词最先匹配（机场 / 代理 / VPN），再套餐优先（token 包、资源包算套餐），
-// 然后 API、算力租用，都没命中兜底套餐。前端 util/expense.js 的 guessExpenseCategory 同规则
+// 然后 API、算力租用，都没命中兜底「杂项」（套餐是个具体类别，当兜底会误导）。
+// 前端 util/expense.js 的 guessExpenseCategory 同规则
 function guessExpenseCategory(title) {
   const s = String(title || '').toLowerCase();
   if (EXPENSE_LADDER_KEYWORDS.some((k) => s.includes(k))) return 'ladder';
   if (EXPENSE_PLAN_KEYWORDS.some((k) => s.includes(k))) return 'plan';
   if (EXPENSE_API_KEYWORDS.some((k) => s.includes(k))) return 'api';
   if (EXPENSE_COMPUTE_KEYWORDS.some((k) => s.includes(k))) return 'compute';
-  return 'plan';
+  return 'misc';
 }
 
 function normalizeExpense(input, existing = {}) {

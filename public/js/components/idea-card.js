@@ -1,8 +1,10 @@
 /* ---------------- 组件：随记卡片 ---------------- */
 // 随记：一行点题 + 一段内容 + 贴图。origin 标明这条是从哪儿来的，
 // 手机记的能改，电脑记的在手机上只能看。
+// 「沉淀到知识库」只在电脑端：手机端知识库只读，不给沉淀入口。
 // 📱 来源标记只在手机端显示：电脑端是同步的落点，所有内容都是同步来的，标了也没意义。
-// 桌面端默认折叠 3 行：列表要能一屏扫完，细看再展开；手机端默认全展开：版面小，怕漏看。
+// 桌面端默认折叠 3 行：列表要能一屏扫完，细看进全屏页（content-page）；
+// 手机端默认全展开：版面小，怕漏看。
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { state } from '../state.js';
@@ -13,7 +15,7 @@ import { useImageUrls } from '../img-urls.js';
 const IdeaCard = {
   name: 'IdeaCard',
   props: { idea: { type: Object, required: true } },
-  emits: ['edit', 'remove', 'deposit', 'pin'],
+  emits: ['edit', 'remove', 'deposit', 'pin', 'openFull'],
   setup(props, { emit }) {
     const timeText = computed(() => formatDate(props.idea.updated_at || props.idea.created_at));
     // 手机可写随记，但电脑端 origin 的条目服务端会拒写，UI 也不给编辑/删除
@@ -25,6 +27,8 @@ const IdeaCard = {
     const images = computed(() => props.idea.images || []);
     // 📱 标记只在手机端出现，电脑端不显示（内容都是同步来的，标了没意义）
     const showMobileMark = computed(() => !isDesktop() && props.idea.origin === 'mobile');
+    // 沉淀（存进知识库）只在电脑端：知识库管理是重操作，手机端只读浏览，不给沉淀入口
+    const canDeposit = computed(() => isDesktop());
     // 贴图走 fetch→blob 通道（见 img-urls.js），解析出 objectURL 后才渲染 <img>
     const { urls: imgUrls } = useImageUrls(images);
 
@@ -73,7 +77,7 @@ const IdeaCard = {
     // 内容改了必须重测。列表按 id 复用同一个卡片，onMounted 不会因为编辑再跑一遍：
     // 留着旧的 clampable，就会出现「本来 2 行没按钮，改成 4 行后文字被截断却没有展开按钮」
     // （刷新页面能恢复就是这个原因），或者反过来「已经够短了却还挂着展开按钮」。
-    // measure 用的是绝对 3 行阈值而非 clientHeight 比值，所以展开/收起切换不必重测：
+    // measure 用的是绝对 3 行阈值而非 clientHeight 比值，所以不必因展开/收起重测：
     // 两种状态下算出来的答案一致，重测反而多余。
     watch(() => props.idea.content, async () => { await nextTick(); measure(); });
     const onResize = () => measure();
@@ -83,18 +87,17 @@ const IdeaCard = {
       window.addEventListener('resize', onResize);
     });
     onUnmounted(() => window.removeEventListener('resize', onResize));
-    function toggleExpand() {
-      expanded.value = !expanded.value;
-    }
 
     return {
-      timeText, writable, images, imgUrls, showMobileMark,
+      timeText, writable, images, imgUrls, showMobileMark, canDeposit,
       viewer, openViewer, stepViewer, closeViewer,
-      expanded, contentEl, clampable, toggleExpand,
+      expanded, contentEl, clampable,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
       emitDeposit: () => emit('deposit'),
       emitPin: () => emit('pin'),
+      // 长内容进全屏页看（应用内视图，不是新标签页）
+      emitOpenFull: () => emit('openFull'),
     };
   },
   template: `
@@ -107,8 +110,8 @@ const IdeaCard = {
     </div>
     <p class="idea-content" :class="{ clamped: !expanded }" ref="contentEl" v-if="idea.content">{{ idea.content }}</p>
     <p class="idea-content empty-content" v-else>还没写内容</p>
-    <button type="button" class="idea-toggle" v-if="idea.content && clampable" @click.stop="toggleExpand">
-      {{ expanded ? '收起 ⌃' : '展开 ⌄' }}
+    <button type="button" class="idea-toggle" v-if="idea.content && clampable" @click.stop="emitOpenFull">
+      查看全文 ⌄
     </button>
     <div class="idea-imgs" v-if="images.length" @click.stop>
       <template v-for="(im, i) in images" :key="im.id">
@@ -123,7 +126,7 @@ const IdeaCard = {
         <app-icon name="pin"></app-icon>{{ idea.pinned ? '取消置顶' : '置顶' }}
       </button>
       <button class="btn small ghost" @click="emitEdit"><app-icon name="edit"></app-icon>编辑</button>
-      <button class="btn small ghost" @click="emitDeposit" title="沉淀到知识库" aria-label="沉淀到知识库"><app-icon name="kb"></app-icon>沉淀</button>
+      <button class="btn small ghost" @click="emitDeposit" v-if="canDeposit" title="沉淀到知识库" aria-label="沉淀到知识库"><app-icon name="kb"></app-icon>沉淀</button>
       <button class="btn small danger" @click="emitRemove" title="删除记录" aria-label="删除记录"><app-icon name="trash"></app-icon></button>
     </div>
 

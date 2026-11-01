@@ -37,7 +37,11 @@ const MasonryList = {
     const columns = computed(() => {
       if (props.layout === 'list') return [props.items || []];
       const count = props.columns || masonryColumnCount(width.value);
-      return distributeIntoColumns(props.items, count, props.estimate || estimateCardHeight);
+      // 双列（视口 > MASONRY_BREAKPOINT，与 style.css 的断点同值）时桌面端正文是折叠态：
+      // .clamped 只显示 3 行，预估必须跟着截断，否则长文被高估 ~2.5 倍，
+      // 贪心会把它单独塞进一列、后面全被挤走，左半边持续空着。
+      // 断点知识只留在 util/masonry.js 一处，这里用「是否双列」表达折叠与否。
+      return distributeIntoColumns(props.items, count, props.estimate || estimateCardHeight, { clampRows: count > 1 });
     });
 
     const keyOf = (item) => {

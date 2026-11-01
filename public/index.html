@@ -119,7 +119,7 @@
     <masonry-list :items="filteredIdeas" :layout="layout" v-else v-slot="{ item: i }">
       <idea-card :idea="i"
                  @edit="openIdeaEditor(i)" @remove="removeIdea(i)" @deposit="depositFromIdea(i)"
-                 @pin="togglePin(i)">
+                 @pin="togglePin(i)" @open-full="openContentPage('ideas', i.id)">
       </idea-card>
     </masonry-list>
   </main>
@@ -163,7 +163,8 @@
         <h2 class="timeline-year-title"><span class="timeline-dot"></span>{{ g.year === '时间不明' ? g.year : g.year + ' 年' }}</h2>
         <masonry-list :items="g.items" :layout="layout" :columns="1" v-slot="{ item: a }">
           <achievement-card :achievement="a"
-                            @edit="openAchievementEditor(a)" @remove="removeAchievement(a)">
+                            @edit="openAchievementEditor(a)" @remove="removeAchievement(a)"
+                            @open-full="openContentPage('achievements', a.id)">
           </achievement-card>
         </masonry-list>
       </section>
@@ -200,7 +201,7 @@
 
     <masonry-list :items="filteredKb" :layout="layout" v-else v-slot="{ item: k }">
       <kb-card :entry="k"
-               @edit="openKbEditor(k)" @remove="removeKb(k)">
+               @edit="openKbEditor(k)" @remove="removeKb(k)" @open-full="openContentPage('kb', k.id)">
       </kb-card>
     </masonry-list>
   </main>
@@ -556,6 +557,14 @@
              @save="saveKb" @close="state.kbEditorOpen = false"></kb-editor>
 
   <kb-merge @resolve="resolveKbMerge"></kb-merge>
+
+  <!-- 长内容全屏页：随记 / 知识库 / 成果 的长正文都进这里读（电脑端还能就地编辑） -->
+  <content-page v-if="state.contentPage.open && contentPageItem"
+                :title="contentPageItem.title"
+                :content="contentPageItem.content"
+                :images="contentPageItem.images"
+                :meta="contentPageMeta"
+                @edit="editContentPage" @close="closeContentPage"></content-page>
 
   <pair-drawer></pair-drawer>
 

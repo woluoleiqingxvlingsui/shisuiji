@@ -82,6 +82,9 @@ const state = reactive({
   editingKb: null,
   kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
   kbMerge: null,         // 笔记更新 vs 手动调整过的知识库条目：合并层数据
+  // 长内容全屏页：只记「哪个板块的哪一条」，不存内容快照 ——
+  // 打开时按 id 去对应板块的 state 数组里取实时对象，编辑保存后回来看到的就是新内容
+  contentPage: { open: false, board: '', id: '' },
   // 回收站（M20 任务 D）：删除先进这里保留 30 天。仅电脑端，不进镜像不参与同步
   trash: [],
   trashLoaded: false,

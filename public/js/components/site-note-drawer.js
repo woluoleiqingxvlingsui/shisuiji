@@ -86,7 +86,7 @@ const SiteNoteDrawer = {
     };
   },
   template: `
-  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+  <div class="overlay full" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
     <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ editing ? (editing.id ? '✏️ 编辑笔记' : '📝 记一条笔记') : '📝 笔记' }}</h2>

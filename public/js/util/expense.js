@@ -8,7 +8,8 @@ import { formatMoney } from './money.js';
 import { platformHue } from './text.js';
 
 // 自动归类的匹配优先级：梯子必须最先（否则「机场订阅」会被套餐的「订阅」抢走）；
-// 其余类别按 config 里的显示顺序（plan → api → compute）。规则与 server.js 的 guessExpenseCategory 一致。
+// 其余类别按 config 里的显示顺序（plan → api → compute），都没命中兜底「杂项」。
+// 规则与 server.js 的 guessExpenseCategory 一致。
 const LADDER_CATEGORY = 'ladder';
 
 function guessExpenseCategory(title) {
@@ -22,7 +23,8 @@ function guessExpenseCategory(title) {
   for (const c of ordered) {
     if ((c.keywords || []).some((k) => s.includes(k))) return c.id;
   }
-  return cats[0].id;
+  // 兜底是「杂项」：显式写死，不写 cats[cats.length-1].id —— 顺序调整了就悄悄变味
+  return 'misc';
 }
 function expenseCategoryMeta(id) {
   return CONFIG.expenses.categories.find((c) => c.id === id) || CONFIG.expenses.categories[0];

@@ -88,7 +88,7 @@ const KbEditor = {
     };
   },
   template: `
-  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+  <div class="overlay full" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
     <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑知识' : (isDeposit ? '📚 沉淀到知识库' : '📚 记一条知识') }}</h2>

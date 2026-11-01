@@ -573,8 +573,12 @@ input, select, textarea { font: inherit; color: inherit; }
 .idea-img-add { display: inline-block; margin: 10px 0 0; }
 .idea-img-add input[type="file"] { display: none; }
 
-/* 全屏看图层 */
-.img-viewer {
+/* 全屏看图层
+ * 选择器写成 .overlay.img-viewer（特异性 0,2,0）而不是 .img-viewer（0,1,0）：
+ * 元素同时带两个类，而下面的 .overlay { z-index: 50 } 在文件里更靠后，
+ * 同特异性时后者胜出 —— 只写 .img-viewer 的话看图层实际会被压到 50，
+ * 卡片里开大图时被抽屉/遮罩盖住（手机端底部导航 40 同理会压住图的一角）。 */
+.overlay.img-viewer {
   display: flex; align-items: center; justify-content: center;
   background: rgba(8, 10, 14, .88); z-index: 60;
 }
@@ -849,6 +853,64 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .drawer-form textarea { resize: vertical; }
 .drawer-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
+/* ---------- 全屏形态（长内容的读写都进全屏页）----------
+ * 应用内全屏视图，不是浏览器新标签页：APK 里开真新标签会丢登录态与离线队列。
+ * 所以复用已有的 .overlay + .drawer，只加一个 full 形态铺满窗口，不新建路由。
+ * 挂 full 的是 .overlay（每个编辑器 / 抽屉各改一行），样式两种写法都认：
+ * .overlay.full .drawer 与 .drawer.full。
+ * 手机端 .drawer 本来就是满屏，这几条在那边等于没改（无副作用）。
+ */
+.overlay.full .drawer,
+.drawer.full {
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  border-radius: 0;
+  animation: full-in .18s ease;
+}
+@keyframes full-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 电脑端全屏：内容居中限宽，正文输入框不再被高度上限卡住。
+ * 只在 ≥761px 生效 —— 手机端保持原来的紧凑排版，别凭空多出管理能力。 */
+@media (min-width: 761px) {
+  .overlay.full .drawer-head,
+  .overlay.full .drawer-form,
+  .overlay.full .drawer-body {
+    padding-inline: max(28px, calc((100% - 880px) / 2));
+  }
+  /* 底栏不再向抽屉两侧出血（出血是为了贴在 560px 窄抽屉的两边，全屏下会露出栏） */
+  .overlay.full .drawer-foot { margin-inline: 0; }
+  /* 正文框随内容增高，滚动交给整个表单：
+   * 上限原本在基础规则（70vh）与桌面覆盖（50dvh）两处，这里一并放开。
+   * 不写 height:auto !important —— 那会把 JS autoGrow 写的内联高度顶掉，
+   * 老 WebView（不支持 field-sizing）就再也撑不开了。 */
+  .overlay.full .drawer-form textarea.tall {
+    max-height: none;
+  }
+  /* 有 autoGrow 的框（随记 / 知识）：高度由 JS 写内联高度驱动，随内容增高 */
+  .overlay.full .drawer-form textarea.tall.grow {
+    field-sizing: content;    /* Chromium 123+：框随内容自动增高 */
+  }
+  /* 没有 autoGrow 的框（成果正文）：用 field-sizing 随内容增高；
+   * 不支持的浏览器退回 rows 高度 + 框内滚动（不会更糟） */
+  .overlay.full .drawer-form textarea.tall:not(.grow) {
+    field-sizing: content;
+    min-height: 240px;
+  }
+}
+
+/* ---------- 长内容全屏阅读页 ---------- */
+.drawer-head .content-page-title {
+  flex: 1; min-width: 0;
+  font-size: 20px; font-weight: 650; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.content-page-meta { margin: 0 0 16px; font-size: 12.5px; color: var(--muted); }
+.content-page-text {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 15px; line-height: 1.95; color: var(--text);
+}
 
 /* ---------- 记蛋类型切换 ---------- */
 .seg {

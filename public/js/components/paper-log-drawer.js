@@ -93,7 +93,7 @@ const PaperLogDrawer = {
     };
   },
   template: `
-  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+  <div class="overlay full" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
     <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ editing ? (editing.id ? '✏️ 编辑阅读记录' : '📝 记一条阅读记录') : '📝 阅读记录' }}</h2>

@@ -175,7 +175,7 @@ const IdeaEditor = {
     };
   },
   template: `
-  <div class="overlay" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
+  <div class="overlay full" @mousedown="onOverlayMousedown" @mouseup="onOverlayMouseup">
     <aside v-dialog class="drawer">
       <header class="drawer-head">
         <h2>{{ initial ? '✏️ 编辑随记' : '📝 记条随记' }}</h2>
