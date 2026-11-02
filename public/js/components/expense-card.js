@@ -2,7 +2,7 @@
 import { computed } from '../vue-globals.js';
 
 import { canWrite } from '../perm.js';
-import { formatDate } from '../util/date.js';
+import { formatMonth } from '../util/date.js';
 import { expenseCategoryMeta } from '../util/expense.js';
 import { formatMoney } from '../util/money.js';
 
@@ -15,7 +15,7 @@ const ExpenseCard = {
     const category = computed(() => expenseCategoryMeta(props.expense.category));
     const writable = computed(() => canWrite('expenses'));
     return {
-      amountText, category, writable, formatDate,
+      amountText, category, writable, formatMonth,
       emitEdit: () => emit('edit'),
       emitRemove: () => emit('remove'),
     };
@@ -23,7 +23,7 @@ const ExpenseCard = {
   template: `
   <article class="card expense-card">
     <div class="card-head">
-      <span class="expense-date">🗓 {{ formatDate(expense.date) }}</span>
+      <span class="expense-date">🗓 {{ formatMonth(expense.date) }}</span>
       <span class="cat-chip" :style="{ '--h': category.hue }">{{ category.emoji }} {{ category.label }}</span>
       <h3 class="title">{{ expense.title }}</h3>
       <span class="expense-amount">{{ amountText }}</span>

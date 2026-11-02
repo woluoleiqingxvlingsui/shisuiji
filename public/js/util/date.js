@@ -20,6 +20,15 @@ function formatDate(str) {
   const date = `${d.getFullYear() === now.getFullYear() ? '' : d.getFullYear() + '-'}${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   return String(str).length > 10 ? `${date} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : date;
 }
+// 只记到月份的值（花销日期）：formatDate 会把「2026-11」当成 11 月 1 号显示成「11-01」，
+// 那是误导 —— 这里按月份本身显示（同年「11 月」，跨年「2026-11」）。
+function formatMonth(str) {
+  const s = String(str || '');
+  const m = /^(\d{4})-(\d{2})/.exec(s);
+  if (!m) return s;
+  const nowY = String(new Date().getFullYear());
+  return m[1] === nowY ? `${Number(m[2])} 月` : `${m[1]}-${m[2]}`;
+}
 function parseFlexibleDate(raw) {
   let s = String(raw || '').trim();
   if (!s) return null;
@@ -121,4 +130,4 @@ function todayStr() {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-export { pad2, parseStoredDate, formatDate, parseFlexibleDate, formatRemaining, computeUrgency, todayStr };
+export { pad2, parseStoredDate, formatDate, formatMonth, parseFlexibleDate, formatRemaining, computeUrgency, todayStr };

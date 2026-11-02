@@ -2,9 +2,9 @@
 import { reactive, ref, computed, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
-import { formatDate, todayStr } from '../util/date.js';
+import { formatMonth, todayStr } from '../util/date.js';
 import { guessExpenseCategory } from '../util/expense.js';
-import { formatMoney, parseAmountInput } from '../util/money.js';
+import { formatMoney, monthOf, parseAmountInput } from '../util/money.js';
 
 // 金额输入的统一提示（M21 任务 B：精度放宽到最多四位小数；与 money.js / server.js 文案口径一致）
 const AMOUNT_INPUT_HINT = '金额得是正数，可以写 1280、1280.5、¥1,280；非整数最多四位小数';
@@ -18,11 +18,13 @@ const ExpenseEditor = {
   emits: ['save', 'close'],
   setup(props, { emit }) {
     const titleInput = ref(null);
+    // 花销只记到月份：当前月 = YYYY-MM
+    const thisMonth = computed(() => monthOf(todayStr()));
 
     const form = reactive({
       title: props.initial?.title || '',
       amountText: props.initial ? String(props.initial.amount) : '',
-      date: props.initial?.date || props.defaultDate || todayStr(),
+      date: monthOf(props.initial?.date || props.defaultDate) || thisMonth.value,
       notes: props.initial?.notes || '',
       category: props.initial?.category || guessExpenseCategory(props.initial?.title || ''),
     });
@@ -37,10 +39,10 @@ const ExpenseEditor = {
       form.category = id;
     }
 
-    // 新记一笔且默认日期不是今天时，说明是按所选期间填的，提示一句免得以为写错了
+    // 新记一笔且默认月份不是本月时，说明是按所选期间填的，提示一句免得以为写错了
     const dateHint = computed(() => {
-      if (props.initial || !form.date || form.date === todayStr()) return '';
-      return `默认按你当前选的期间填了 ${formatDate(form.date)}，记不清具体哪天就留着`;
+      if (props.initial || !form.date || form.date === thisMonth.value) return '';
+      return `默认按你当前选的期间填了 ${formatMonth(form.date)}`;
     });
 
     // 边输边预览金额解析结果，省得保存后才发现写错
@@ -58,7 +60,7 @@ const ExpenseEditor = {
       const amount = parseAmountInput(form.amountText);
       if (amount === null) return alert(AMOUNT_INPUT_HINT);
       const date = form.date.trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return alert('日期写成 2026-09-10 这样');
+      if (!/^\d{4}-\d{2}$/.test(date)) return alert('日期写成 2026-09 这样（只记到月份）');
       emit('save', { title: form.title.trim(), amount, date, notes: form.notes.trim(), category: form.category });
     }
 
@@ -110,7 +112,7 @@ const ExpenseEditor = {
 
         <div class="row">
           <label>日期
-            <input type="date" v-model="form.date">
+            <input type="month" v-model="form.date">
             <span class="date-hint" v-if="dateHint">{{ dateHint }}</span>
           </label>
         </div>

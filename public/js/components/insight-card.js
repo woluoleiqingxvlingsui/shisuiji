@@ -3,7 +3,7 @@ import { reactive, computed, watch } from '../vue-globals.js';
 
 import { canWrite } from '../perm.js';
 import { CONFIG } from '../../config.js';
-import { formatDate } from '../util/date.js';
+import { formatMonth } from '../util/date.js';
 import { buildVerdictDraft, expenseCategoryMeta } from '../util/expense.js';
 import { formatMoney } from '../util/money.js';
 
@@ -58,7 +58,7 @@ const InsightCard = {
       tagLabel(id) {
         return (CONFIG.expenses.insightTags.find((t) => t.id === id) || CONFIG.expenses.insightDefaultTag).label;
       },
-      formatMoney, formatDate,
+      formatMoney, formatMonth,
       clear: () => emit('clear'),
     };
   },
@@ -76,15 +76,15 @@ const InsightCard = {
       <span class="cat-chip" v-for="c in catSplits" :key="c.id" :style="{ '--h': c.meta.hue }">
         {{ c.meta.emoji }} {{ formatMoney(c.amount) }}
       </span>
-      <span class="insight-last">最近一笔 {{ formatDate(insight.lastDate) }}</span>
+      <span class="insight-last">最近一笔 {{ formatMonth(insight.lastDate) }}</span>
     </div>
 
     <div class="insight-quotes" v-if="insight.quotes.length">
       <p class="insight-label">📎 记录里的原话<sup v-if="insight.quoteTotal > insight.quotes.length">共 {{ insight.quoteTotal }} 句，显示最近的 {{ insight.quotes.length }} 句</sup></p>
       <div class="insight-quote" v-for="(q, i) in insight.quotes" :key="i"
-           :title="'来自：' + q.title + ' · ' + formatDate(q.date)">
+           :title="'来自：' + q.title + ' · ' + formatMonth(q.date)">
         <p class="quote-text"><span class="quote-tag">{{ tagLabel(q.tag) }}</span>“{{ q.sentence }}”</p>
-        <p class="quote-src">{{ formatDate(q.date) }} · {{ q.title }} · {{ formatMoney(q.amount) }}</p>
+        <p class="quote-src">{{ formatMonth(q.date) }} · {{ q.title }} · {{ formatMoney(q.amount) }}</p>
       </div>
     </div>
 

@@ -3,7 +3,7 @@
  */
 
 import { CONFIG } from '../../config.js';
-import { formatDate } from './date.js';
+import { formatMonth } from './date.js';
 import { formatMoney } from './money.js';
 import { platformHue } from './text.js';
 
@@ -148,8 +148,8 @@ function buildSubjectInsight(subject, expenses) {
 function buildVerdictDraft(insight) {
   if (!insight.count) return '';
   const head = `累计 ${formatMoney(insight.total)} / ${insight.count} 笔`
-    + (insight.lastDate ? `，最近 ${formatDate(insight.lastDate)}` : '') + '。';
-  const points = insight.quotes.slice(0, 4).map((q) => `- ${String(q.date).slice(5)}：${q.sentence}`);
+    + (insight.lastDate ? `，最近 ${formatMonth(insight.lastDate)}` : '') + '。';
+  const points = insight.quotes.slice(0, 4).map((q) => `- ${formatMonth(q.date)}：${q.sentence}`);
   return [head, ...points].join('\n');
 }
 

@@ -34,16 +34,18 @@ function monthOf(dateStr) {
 function periodLabel(period) {
   return period.mode === 'year' ? `${period.year} 年` : `${period.year} 年 ${period.month} 月`;
 }
+// 花销只记到月份，所以默认日期是「当前月」；按所选期间补记时给该期间的月份
 function defaultExpenseDate(period, today) {
   const t = today || todayStr();
-  if (!period) return t;
+  const thisMonth = t.slice(0, 7);
+  if (!period) return thisMonth;
   const ty = Number(t.slice(0, 4));
   const tm = Number(t.slice(5, 7));
   if (period.mode === 'year') {
-    return period.year === ty ? t : `${period.year}-01-01`;
+    return period.year === ty ? thisMonth : `${period.year}-01`;
   }
-  if (period.year === ty && period.month === tm) return t;
-  return `${period.year}-${pad2(period.month)}-01`;
+  if (period.year === ty && period.month === tm) return thisMonth;
+  return `${period.year}-${pad2(period.month)}`;
 }
 
 export { parseAmountInput, formatMoney, monthOf, periodLabel, defaultExpenseDate };

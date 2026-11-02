@@ -627,20 +627,21 @@ function parseAmount(raw) {
   return rounded;
 }
 
-// 日期规范：2026-9-10 / 2026/9/10 都补成 2026-09-10；非法或空回落今天
+// 日期规范：花销只记到月份（2026-11）。2026-11 / 2026/11 都补成 2026-11；
+// 老记录里精确到日的写法（2026-11-05）截断成 2026-11；非法或空回落本月。
 function normalizeExpenseDate(raw) {
-  const m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(String(raw || '').trim());
+  const s = String(raw || '').trim();
+  let m = /^(\d{4})[-/.](\d{1,2})$/.exec(s);
+  if (!m) {
+    // 兼容老数据：月份合法就截断到月，不校验日（已经不记日了）
+    m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(s);
+  }
   if (m) {
-    const y = Number(m[1]);
     const mo = Number(m[2]);
-    const d = Number(m[3]);
-    const probe = new Date(y, mo - 1, d);
-    if (probe.getFullYear() === y && probe.getMonth() === mo - 1 && probe.getDate() === d) {
-      return `${m[1]}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    }
+    if (mo >= 1 && mo <= 12) return `${m[1]}-${String(mo).padStart(2, '0')}`;
   }
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // 按标题猜类别：梯子关键词最先匹配（机场 / 代理 / VPN），再套餐优先（token 包、资源包算套餐），
