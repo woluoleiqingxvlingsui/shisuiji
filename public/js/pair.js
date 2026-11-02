@@ -4,6 +4,7 @@
  */
 
 import { setServerBase, setToken, getServerBase, getToken, joinApiUrl, withTimeout, HEALTH_TIMEOUT_MS } from './api.js';
+import { isClientOutdated } from './sync/net.js';
 
 /** host:port（可含主机名 / IPv6）——注意不能把 localhost:8642 当成自定义 scheme */
 const HOST_PORT_RE = /^(?:localhost|\[[0-9a-fA-F:]+\]|(?:\d{1,3}\.){3}\d{1,3}|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*):\d{1,5}$/i;
@@ -89,19 +90,38 @@ function isPaired() {
   return !!getServerBase();
 }
 
-/** 连通测试：GET {base}/api/health，可带口令 */
+/** 配对验证必须通过鉴权，health 只用于探活，不能证明口令有效。 */
 async function testPair(base, token) {
   const b = normalizePairBase(base);
   if (!b) {
     return { ok: false, status: 0, data: { error: '电脑地址不合法' } };
   }
+  if (!isAllowedPairBase(b)) {
+    return { ok: false, status: 0, data: { error: 'HTTP 明文只允许连局域网私网地址' } };
+  }
   const headers = {};
   const t = String(token || '').trim();
   if (t) headers['X-Danji-Token'] = t;
   try {
-    const res = await withTimeout(fetch(joinApiUrl('/api/health', b), { headers }), HEALTH_TIMEOUT_MS);
+    const res = await withTimeout(fetch(joinApiUrl('/api/pair/check', b), { headers }), HEALTH_TIMEOUT_MS);
     const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
+    if (res.status === 401) {
+      return { ok: false, status: 401, data: { error: '配对口令不正确或已更换，请在电脑重新生成二维码再扫码' } };
+    }
+    if (res.status === 404) {
+      return { ok: false, status: 404, data: { error: '电脑服务尚不支持配对验证，请先更新并重启电脑服务' } };
+    }
+    if (!res.ok) return { ok: false, status: res.status, data };
+    if (data.app !== 'shisuiji' || data.ok !== true) {
+      return { ok: false, status: res.status, data: { error: '这个地址未返回有效的拾穗集配对信息，请检查二维码' } };
+    }
+    if (!Number.isInteger(data.minClient) || data.minClient < 1 || data.apiVersion !== 1) {
+      return { ok: false, status: res.status, data: { error: '电脑与 App 的接口版本不兼容，请更新电脑服务和 App' } };
+    }
+    if (isClientOutdated(data.minClient)) {
+      return { ok: false, status: res.status, data: { error: 'App 需升级，请安装新版 APK 后重新扫码' } };
+    }
+    return { ok: true, status: res.status, data };
   } catch (err) {
     return { ok: false, status: 0, data: { error: (err && err.message) || '连不上电脑服务' } };
   }

@@ -31,87 +31,118 @@
 
 ## 环境要求
 
-- **Node.js ≥ 18**——没有的话去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版即可。服务端与网页本体只用 Node 标准库，`node server.js` **无需 npm install**；仅「🔗 配对码」二维码出图额外依赖 `qrcode`（见「手动启动」说明）
-- Windows（启动脚本/桌面提醒按 Windows 设计；`node server.js` 本体其他平台也能跑）
+- Windows，安装 **Node.js 18 或以上版本**（含 npm），下载入口：[Node.js 官网](https://nodejs.org/)。
+- 网页与服务端无需构建。仅电脑使用不需要安装 npm 依赖；Android 扫码配对需要 `qrcode`，首次引导会按需安装。
+- 自己编译 Android APK 另需 **Node.js 20+**；JDK / SDK / Gradle 由一键脚本准备，详见 [Android 说明](app/README.md)。`node server.js` 服务本体也可在其他平台运行，图形控制台与系统阅读器操作按 Windows 设计。
 
 ## 快速开始
 
-双击 **`start.bat`** 或桌面「拾穗集」快捷方式，会弹出一个**图形控制台窗口**：自动在后台启动服务并打开 `http://localhost:8642`。
+1. 下载并解压源码，或克隆本仓库，放到一个自己有写入权限的目录。
+2. 安装 Node.js 后，双击 **`start.bat`**；也可双击 **`launch.vbs`**，启动时不会闪出命令行窗口。
+3. **全新目录会弹出首次引导**：选择使用方式，端口通常保持 `8642`，点「完成设置并启动」。
+4. 引导完成后进入图形控制台，服务自动启动并打开电脑网页。首次页面为空，可填入示例数据体验。
 
-- 窗口里有状态灯和四个按钮：**🚀 打开网页 / 🔗 配对码 / ▶ 启动服务 / ⏹ 停止服务**，全程没有黑窗口
-- **关闭控制台窗口服务照常在后台运行**，网页不受影响；要真正停止请点「⏹ 停止服务」
-- 无黑框启动链路：桌面快捷方式 → `launch.vbs` → `control-ui.ps1`（图形窗口）
-- 也可以命令行操作：`powershell -File control.ps1 start|stop|status`；桌面快捷方式丢了就跑 `powershell -File make-shortcut.ps1` 重建
-- 快捷方式换了图标？右键快捷方式 → 属性 → 更改图标，选 `assets\icon.ico`
+| 你想怎么用 | 引导会完成什么 | 接下来做什么 |
+|---|---|---|
+| **仅电脑使用** | 创建仅监听本机的配置和随机口令，不安装额外依赖 | 直接在网页记内容 |
+| **电脑 + Android 同步** | 开启局域网监听、生成随机口令；缺少二维码依赖时自动联网安装 | 安装 APK，与电脑同一 Wi-Fi，扫控制台的配对码 |
 
-手动启动（前台运行，关窗口即停止）：
+引导只创建本机 `config.json`，默认文献目录为相对路径 `papers`。**已有配置会跳过，不会重置口令、文献路径或其他字段。** 如果缺配置但检测到旧数据、文献或本机设置，会要求先恢复原配置，避免把旧安装误当新安装。取消引导不会启动服务。
 
-```
+初始化会检查端口，遇到占用会让你换端口，不会结束其他程序。依赖安装失败会保留在引导中，按提示检查网络后重试；也可在项目目录手动执行 `npm ci`。引导不自动修改 Windows 防火墙：手机连不上时见下方常见问题。
+
+控制台提供 **打开网页 / 配对码 / 备份数据 / 启动服务 / 停止服务**。关闭控制台后，后台服务仍运行；真正停止要点「停止服务」。桌面快捷方式可用 `powershell -ExecutionPolicy Bypass -File make-shortcut.ps1` 创建；已有配置的日常启动不会重复引导。
+
+<details>
+<summary>手动启动与配置（进阶）</summary>
+
+```powershell
 node server.js
 ```
 
-- 服务端零依赖：只用到 Node.js 标准库，`node server.js` **无需 npm install** 即可跑网页本体
-- 仅「🔗 配对码」二维码出图（`tools/pair-qr-png.mjs` / `tools/print-pair-qr.mjs`）依赖 `qrcode`：`tools/qrcode-loader.mjs` 先找仓库根的 `node_modules/qrcode`，找不到再回落 `app/node_modules/qrcode`——在仓库根或 `app/` 目录任一处 `npm install` 都能出码（推荐在仓库根执行）
-- **没装 `qrcode` 就真的出不了码**：点「🔗 配对码」会弹「未能生成二维码图片」的提示，终端 ASCII 码走的是同一个依赖、同样出不来，控制台里只剩一段配对 JSON（也会顺手复制到剪贴板）。**App 只有扫码入口、没有手动粘贴框**，这段 JSON 用不上 → 装好 `qrcode` 再出码
-- 内存占用约 30MB，可以一直挂着
-- 配置：复制 `config.example.json` 为根目录 `config.json`（**已在 .gitignore，不会进仓库**）改端口/监听/论文库路径
-- **口令以本机 `config.json` 的 `sync.token` 为准**（该文件不入库）；读取优先级与服务端一致：config 优先、环境变量回落：
-  - `DANJI_TOKEN`：局域网访问口令（config 未设 `sync.token` 时的回落）
-  - `DANJI_HOST`：监听地址，局域网用 `0.0.0.0`（默认 `127.0.0.1`）
-  - `DANJI_PAPERS_DIR`：论文库绝对路径（覆盖 config）
-  - `DANJI_TLS_CERT` / `DANJI_TLS_KEY`：HTTPS 证书路径
-  - 本地可参考未跟踪的 `local.env.ps1`：`. .\local.env.ps1` 后再 `node server.js`
-- 临时覆盖端口：环境变量 `PORT`（如 `set PORT=9000 && node server.js`）
+前台窗口关闭即停止。手动启动不会弹首次引导：首次请复制 `config.example.json` 为本机 `config.json`，按需修改；只在电脑使用时也可直接用默认值。
 
-首次打开页面是空的，点「填入示例数据看看效果」可以快速体验。
+| 字段 | 含义 |
+|---|---|
+| `port` | 默认 `8642`；改成空闲端口 |
+| `host` | `127.0.0.1` 仅本机；手机访问用 `0.0.0.0` |
+| `papers_dir` | 文献库路径；相对路径相对项目根。已有文献库保留原路径 |
+| `sync.token` | 局域网访问口令。手动复制的示例为空，开放局域网前请设置；首次引导会自动生成 |
 
-## 首次使用流程（新机器从零到可用）
+`PORT`、`DANJI_HOST`、`DANJI_PAPERS_DIR` 可分别覆盖端口、监听和文献目录。口令是 config 的 `sync.token` 优先，`DANJI_TOKEN` 回落。HTTPS 由 `DANJI_TLS_CERT` / `DANJI_TLS_KEY` 控制；图形控制台还会加载可选 `local.env.ps1` 并探测根目录证书。
 
-1. **装 Node.js ≥ 18**——去 [nodejs.org](https://nodejs.org/) 装一个 LTS 版；服务端只用标准库，装完即用
-2. **复制配置**：把 `config.example.json` 复制为根目录 `config.json`（该文件不入库，改的就是本机这份）
-3. **按需要改 `config.json` 的字段**（不改就用默认值，也能跑）：
-   - `port`：服务端口，默认 `8642`，被占用就换一个
-   - `host`：监听地址，默认 `127.0.0.1`（仅本机）；**手机要访问就改成 `0.0.0.0`**
-   - `papers_dir`：论文库目录，相对路径相对项目根（如 `papers`），也可以填绝对路径
-   - `sync.token`：手机访问口令，留空 = 不校验（只靠监听地址保护）；建议设一个
-4. **改完必须重启服务才生效**（配置只在启动时读一次）：双击 `start.bat`，或依次执行 `powershell -File control.ps1 stop`、`powershell -File control.ps1 start`（`start` 不会重启已运行的服务）
-5. 浏览器打开 `http://localhost:8642`，确认页面能开、控制台状态灯变绿即完成
-6. （可选）手机与电脑同一 Wi-Fi，按「手机使用」章节配对；要离线冷启动再按「HTTPS 证书从哪来」配好证书
+配置只在启动时读取。修改后要先停再启动，`start` 不会重启已运行服务。命令行管理：`powershell -ExecutionPolicy Bypass -File control.ps1 start|stop|status`。相对路径 `node server.js` 启动的实例，请回原终端按 Ctrl+C 停止。
 
-## 手机使用（离线优先 + 只读浏览）
+二维码依赖使用仓库根的 `node_modules/qrcode`，其次回落 `app/node_modules/qrcode`；在根目录执行 `npm ci` 即可安装。App 没有粘贴配对 JSON 的入口，二维码中包含口令，请勿分享。
 
-### 电脑上怎么启动（推荐）
+</details>
 
-**方式 A：图形工作台（推荐）**
+## 手机使用
 
-1. 双击桌面「拾穗集」快捷方式，或项目里的 `start.bat`
-2. 控制台会**自动**加载 `local.env.ps1` 里的口令；若存在 `danji-cert.pem` / `danji-key.pem` 则自动 HTTPS
-3. 点 **🚀 打开网页（电脑）** → `http://localhost:8642`（或 https）
-4. 手机访问地址 = `http(s)://<电脑局域网IP>:8642`（图形控制台不显示这个地址；命令行 `powershell -File control.ps1` 的窗口里有「手机地址」）。用 App 的话直接点控制台的 **🔗 配对码** 扫码即可
-5. 手机首次访问填口令（`config.json` 的 `sync.token`）
+手机端可离线记随记（含图片），其余开放板块只读浏览。文献、网页、回收站和消息管理留在电脑端。
 
-**方式 B：命令行**
+### Android App（推荐路线）
 
-```powershell
-powershell -File start-with-env.ps1
-# 或已在图形控制台里点「启动服务」即可
-```
+浏览器 PWA 有硬伤：清浏览器数据就丢离线壳和未同步记录。原生 App（Capacitor 壳）没有这个问题：
 
-### 能力边界（请先读这段）
+| 场景 | PWA（浏览器） | 原生 App |
+|------|--------------|----------|
+| 清除**手机浏览器**数据 | ❌ 离线壳 + 未同步随记全丢 | ✅ 不受影响 |
+| 不与电脑同 Wi-Fi 时冷启动 | ❌ 打不开（除非已装离线壳且不清数据） | ✅ 能进、能记随记 |
+| 局域网 HTTP 直接可用 | ❌ SW 不注册，需 https（自签还要额外处理证书信任） | ✅ HTTP + 私网门禁 |
+
+**安装与配对（只做一次）：**
+
+1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或在 Android APK 的 Actions 构建成功后下载调试包；调试包只用于体验，长期使用建议固定签名的 Release 包
+2. APK 发到手机安装（允许未知来源）
+3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步。**App 只有扫码这一条入口**（没有手动输入 / 粘贴框）；首次选择 Android 同步时引导会安装二维码依赖；已有配置若缺依赖，在项目根运行 `npm ci`
+4. **二维码协议必须与实际服务一致**。原生 App 不接受自签 HTTPS；需要 HTTP 时，先在控制台停止服务（手动运行的服务在原终端按 Ctrl+C 停止），关闭旧控制台。保管好证书，不要删除。若已启用自签 HTTPS，推荐在项目目录另开一个新的 PowerShell 窗口，用下面命令启动 HTTP：
+
+   ```powershell
+   # 只清除此进程继承的 TLS 环境变量，不改本地配置或证书文件。
+   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
+   node server.js
+   ```
+
+   该窗口须保持运行；看到启动日志为 HTTP 后，再用新开的 PowerShell 生成与服务一致的二维码：
+
+   ```powershell
+   . .\lib.ps1
+   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
+   $pairBase = 'http://{0}:{1}' -f (Get-LanIPv4), (Get-AppConfig).port
+   # 明确使用 HTTP 出码；口令只在本机读取，请勿分享二维码。
+   node tools/print-pair-qr.mjs --base $pairBase --token (Get-EffectiveToken)
+   ```
+
+   先在手机浏览器访问二维码中的 HTTP 地址，确认能连接，再在 App 扫终端二维码。这个过程不使用控制台自动出码，因为它会探测根目录证书。之后仍须保持服务使用 HTTP；若重新用控制台启动且根目录有证书，服务会恢复 HTTPS，App 保存的 HTTP 配对随即失效。不要把“临时改协议配一次”当作持续可同步方案。没有证书、未设置 TLS 环境变量时，可直接使用图形控制台启动和出码。
+5. 首次引导的 Android 模式已配置局域网监听和随机口令。若是手动配置或从旧安装升级，请检查本机 `config.json` 的 `host` 与 `sync.token`，改后必须重启；示例配置的默认值仍是仅本机、空口令。现有配置不会被引导覆盖。本机回环免口令，手机配对则会实际验证口令与版本，验证失败保留原配对。
+6. **电脑 IP 变化后必须在控制台重新出码再扫**（旧二维码固化了旧 IP）；直接点「重新扫码配对」即可，不必先清除旧配对
+
+**边界：**
+
+- HTTP 明文只允许连**局域网私网地址**（192.168.x.x / 10.x.x.x / 172.16-31.x 等）；公网地址必须 https
+- 电脑若开了自签 HTTPS，App 连不上（壳内不做证书放行，`MainActivity.java` 没有放行自签证书的逻辑）——配对要走明文 HTTP，办法见上面第 4 步（先停服务，在新进程明确启动 HTTP 并按相同协议出码）；项目里**没有**协议切换按钮
+- 卸载 App / 清 App 数据仍会丢未同步记录——回到同一 Wi-Fi 让顶栏变「已同步」后再卸载，日常保持定期同网即可
+- 服务端升级 API 后，旧 APK 顶栏会提示「App 需升级」，重打安装新 APK 即可（数据保留）
+
+### 手机浏览器与 PWA（进阶）
+
+手机浏览器直接打开电脑的局域网地址，在同步栏填写口令；扫码配对只在原生 App 提供。浏览器若要离线冷启动，还需完成下面的 HTTPS 与 PWA 配置。
 
 | 场景 | 行为 |
 |------|------|
-| 手机与电脑**同一 Wi-Fi**，电脑服务已启动 | 可浏览各板块；**仅「随记」可写**（自动同步） |
+| 手机与电脑**同一 Wi-Fi**，电脑服务已启动 | 可浏览手机开放板块；**仅「随记」可写**（自动同步） |
 | **电脑未开机 / 服务未开** | 若已按下方装好 PWA / 装了 App：可打开应用并**离线记随记（含加图片，图片先存手机、联网后自动上传）**；服务恢复后自动同步 |
 | 未装 PWA 或未配 HTTPS | 电脑不可达时**打不开页面**（没有本地应用壳） |
-| 蛋 / 文献 / 网页 / 花销 / 消息 / 知识库 | 手机端**只读**（不显示编辑/删除/领取等按钮；消息也不标已读；知识库不提供「沉淀」入口） |
+| 蛋 / 花销 / 成果 / 知识库 | 手机端只读；随记可写，知识库不提供沉淀入口 |
+| 文献 / 网页 / 回收站 / 消息管理 | 手机端不提供入口，留在电脑管理 |
 
 > Service Worker 只在**安全上下文**（https 或 localhost）注册（`public/js/pwa.js`）。局域网 `http://IP:端口` 下直接跳过注册并打一条 console.warn，关掉浏览器再打开**无法**离线冷启动；**只有 SW 真的注册上了**（页面底部提示「离线壳已就绪」）再「添加到主屏幕」，才算装好离线壳——见「离线冷启动」一节。
 
 ### 日常（同网）
 
-1. 用图形工作台启动服务（见上「方式 A」）
-2. 手机与电脑同一 Wi-Fi，用 App 扫控制台的「🔗 配对码」，或用手机浏览器直接打开 `http://<电脑IP>:8642`
+1. 双击 `start.bat` 启动电脑服务
+2. 手机与电脑同一 Wi-Fi，用手机浏览器直接打开 `http://<电脑IP>:8642`
 3. 顶栏同步胶囊处填写 `config.json` 里的 `sync.token`
 4. 电脑本机请用控制台上的本机地址（`localhost` 免口令、完整功能）
 
@@ -167,50 +198,6 @@ powershell -File start-with-env.ps1
 >
 > **原生 App 壳内不做证书放行**：自签 HTTPS 的电脑在 App 里连不上（`MainActivity.java` 没有放行自签证书的逻辑）。所以 App 配对要走明文 HTTP，办法见「原生 App」一节——**没有「HTTP/HTTPS 模式」切换按钮**，控制台会自动探测证书，手动启动则由 TLS 环境变量决定。
 
-### 原生 App（Android APK，推荐替代 PWA）
-
-浏览器 PWA 有硬伤：清浏览器数据就丢离线壳和未同步记录。原生 App（Capacitor 壳）没有这个问题：
-
-| 场景 | PWA（浏览器） | 原生 App |
-|------|--------------|----------|
-| 清除**手机浏览器**数据 | ❌ 离线壳 + 未同步随记全丢 | ✅ 不受影响 |
-| 不与电脑同 Wi-Fi 时冷启动 | ❌ 打不开（除非已装离线壳且不清数据） | ✅ 能进、能记随记 |
-| 局域网 HTTP 直接可用 | ❌ SW 不注册，需 https（自签还要额外处理证书信任） | ✅ HTTP + 私网门禁 |
-
-**安装与配对（只做一次）：**
-
-1. 电脑上打包：`powershell -ExecutionPolicy Bypass -File app\build-apk.ps1`（正式签名包加 `-Release`，见 `app/README.md`），或从 GitHub Actions 下载 APK
-2. APK 发到手机安装（允许未知来源）
-3. 电脑控制台点 **🔗 配对码** → 手机 App 里「开始扫码」对准窗口里的二维码 → 提示「配对成功」；配对一次即可，之后同 Wi-Fi 自动同步。**App 只有扫码这一条入口**（没有手动输入 / 粘贴框）；二维码出图需要 `qrcode` 包（仓库根或 `app/` 目录 `npm install` 都行），没装就出不了码
-4. **二维码协议必须与实际服务一致**。原生 App 不接受自签 HTTPS；需要 HTTP 时，先在控制台停止服务（手动运行的服务在原终端按 Ctrl+C 停止），关闭旧控制台。保管好证书，不要删除。若已启用自签 HTTPS，推荐在项目目录另开一个新的 PowerShell 窗口，用下面命令启动 HTTP：
-
-   ```powershell
-   # 只清除此进程继承的 TLS 环境变量，不改本地配置或证书文件。
-   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
-   node server.js
-   ```
-
-   该窗口须保持运行；看到启动日志为 HTTP 后，再用新开的 PowerShell 生成与服务一致的二维码：
-
-   ```powershell
-   . .\lib.ps1
-   Remove-Item Env:DANJI_TLS_CERT, Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue
-   $pairBase = 'http://{0}:{1}' -f (Get-LanIPv4), (Get-AppConfig).port
-   # 明确使用 HTTP 出码；口令只在本机读取，请勿分享二维码。
-   node tools/print-pair-qr.mjs --base $pairBase --token (Get-EffectiveToken)
-   ```
-
-   先在手机浏览器访问二维码中的 HTTP 地址，确认能连接，再在 App 扫终端二维码。这个过程不使用控制台自动出码，因为它会探测根目录证书。之后仍须保持服务使用 HTTP；若重新用控制台启动且根目录有证书，服务会恢复 HTTPS，App 保存的 HTTP 配对随即失效。不要把“临时改协议配一次”当作持续可同步方案。没有证书、未设置 TLS 环境变量时，可直接使用图形控制台启动和出码。
-5. 监听地址与口令以本机 `config.json` 为准（`host` + `sync.token`）：**新克隆的默认配置是 `host: 127.0.0.1`（只监听本机回环，手机连不上）且 `sync.token` 为空（不校验口令）**。只有你在本机 `config.json` 里把 `host` 改成 `0.0.0.0`（或设 `DANJI_HOST=0.0.0.0`）**并且**设了 `sync.token`，才谈得上「局域网可达且带口令保护」；改完**必须重启服务**（配置只在启动时读一次）。本机回环访问永远免口令（`server.js` 按来源 IP 判定电脑端 / 手机端）
-6. **电脑 IP 变化后必须在控制台重新出码再扫**（旧二维码里固化了旧 IP，扫旧码必 timeout）
-
-**边界：**
-
-- HTTP 明文只允许连**局域网私网地址**（192.168.x.x / 10.x.x.x / 172.16-31.x 等）；公网地址必须 https
-- 电脑若开了自签 HTTPS，App 连不上（壳内不做证书放行，`MainActivity.java` 没有放行自签证书的逻辑）——配对要走明文 HTTP，办法见上面第 4 步（先停服务，在新进程明确启动 HTTP 并按相同协议出码）；项目里**没有**协议切换按钮
-- 卸载 App / 清 App 数据仍会丢未同步记录——回到同一 Wi-Fi 让顶栏变「已同步」后再卸载，日常保持定期同网即可
-- 服务端升级 API 后，旧 APK 顶栏会提示「App 需升级」，重打安装新 APK 即可（数据保留）
-
 ### 配置与隐私
 
 - 公开仓库只保留 `config.example.json`；本机 `config.json`、`local.env.ps1`、`*.pem` 均在 `.gitignore`
@@ -227,14 +214,12 @@ powershell -File start-with-env.ps1
 | 领到了 | 卡片上点「🧺 已领取」；用完了点「🏁 用完了」 |
 | 去活动页 | 填了链接的卡片有主按钮：待领取「🚀 去领取」、已领取「🔍 查用量」，点一下直达 |
 | 过了领取截止 | 填了明确截止时间的蛋，一过点会自动转入「已截止」并记一条消息；所有待领取的蛋卡片上都常驻「⏳ 已截止」，没到期也能随时手动结掉（误判可点卡片上的「✅ 其实领到了」改回） |
-| 看过期消息 | 赛博鸡蛋顶栏「💬 消息」（在 🔔 通知开关左边）：未读时按钮上有红点数字，点开消息即已读变灰，可单条删 / 全部已读 / 清空已读；点「→ 查看原蛋」跳到对应分类并高亮 |
+| 看过期消息 | 电脑侧栏的「消息」：可查看到期和同步回报，标记已读、单条删除、全部已读或清空已读；点「→ 查看原蛋」跳到对应分类并高亮 |
 | 紧急随记置顶 | 随记卡片上点「📌 置顶」（桌面悬停卡片出按钮，手机常显）：置顶条目排到列表最前并带 📌 标记与描边；多条置顶时按「最近动作」排——**刚编辑过的置顶随记会浮到置顶组最前**，没编辑过的按置顶时间；再点「📌 取消置顶」还原。手机上置顶/编辑离线也能操作，联网后自动同步到电脑 |
 
-### 桌面提醒
+### 页面内提醒
 
-右上角 🔔 是一个**真开关**：首次点击授予通知权限并开启；之后再点一下就关闭（图标变 🔕 变暗），再点一下重新开启。开关状态存在浏览器里，刷新不丢。
-
-开启状态下，只要页面开着，**领取截止前 24 小时内**（已领取的蛋：使用截止前 24 小时内）会弹系统通知；点击通知会自动跳到该蛋所在的分类标签页（待领取 / 已领取 / 已过期）并高亮。同一颗蛋只提醒一次（刷新页面也不会重复弹）。已领取的蛋一旦过了使用截止，会自动转入「已过期」；填了明确领取截止的待领取蛋一过点也会自动转入「已截止」。这两种自动流转除了弹系统通知，**还会各记一条到赛博鸡蛋顶栏「💬 消息」板块**，不怕通知一闪而过漏掉。想改提醒提前量，编辑 `public/config.js` 里的 `remind.hours`。
+电脑网页打开时，会按 `public/config.js` 的 `remind.hours` 提前量弹出应用内提醒，同一条截止提醒会去重。过期或已截止的活动会更新状态并进入电脑端消息中心。当前没有 Windows 系统通知铃铛；关闭网页后不承诺提醒。
 
 ### 字段说明
 
@@ -347,11 +332,11 @@ papers\
 所有数据存在 `data/` 下的纯文本 JSON，每个板块一个文件：`eggs.json`（赛博鸡蛋）、`papers.json`（文献）、`sites.json`（网页）、`expenses.json`（花销）、`insights.json`（体感评价）、`messages.json`（消息）、`ideas.json`（随记）、`achievements.json`（成果）、`kb.json`（知识库）、`trash.json`（回收站，各板块删除记录保留 30 天）；随记贴图原图在 `data/images/`。均可直接查看编辑：
 
 - **先停服务再动手**：备份、恢复、手改 JSON 之前，先点控制台的「⏹ 停止服务」（或 `powershell -File control.ps1 stop`）。服务启动时把整个 JSON 读进内存，每次保存都是**整份重写**（临时文件 + 改名），所以服务开着的时候改文件会被内存里的旧数据覆盖回去
-- **备份**：停服务后把整个 `data/` 目录复制走（各板块 JSON + `images/` 贴图原图，整个目录复制，别只挑 JSON）
+- **备份**：停服务后把整个 `data/` 目录复制走（各板块 JSON + `images/` 贴图原图，整个目录复制，别只挑 JSON）。嫌麻烦就用一键脚本：`powershell -ExecutionPolicy Bypass -File backup.ps1`（先停服务；输出到 `backups/danji-<时间戳>-<随机后缀>/`，该目录同样不入库）。可选 `-OutDir D:\备份` 换地方，仅对已确认属于本项目的运行中服务，可加 `-Force` 强制复制，但这不保证一致性；无法确认状态时仍拒绝。目录名带时间戳与随机后缀，复制后核对文件清单、字节数和 SHA-256。不要把输出位置放进 `data/` 内
 - **恢复**：在停服务状态下把备份的 `data/` **完整**还原回项目根目录（含 `images/`），确认文件齐了再启动服务
-- **迁移**：项目目录和 `data/` 一起拷走即可；但**文献库不在 `data/` 里**——论文原文件放在 `config.json` 的 `papers_dir` 指向的目录（可能在项目外），要**单独备份**。迁移到新机器时，除了拷项目目录，还要把文献目录拷过去，并核对新机器 `config.json` 的 `papers_dir`（或 `DANJI_PAPERS_DIR`）——**只复制项目文件夹带不走外置文献库**
+- **迁移**：除源码与完整 `data/`，还要单独保管本机 `config.json`、可选 `local.env.ps1`、证书与 Android 签名材料；**文献库不在 `data/` 里**——论文原文件放在 `config.json` 的 `papers_dir` 指向的目录（可能在项目外），要**单独备份**。迁移到新机器时，除了拷项目目录，还要把文献目录拷过去，并核对新机器 `config.json` 的 `papers_dir`（或 `DANJI_PAPERS_DIR`）——**只复制项目文件夹带不走外置文献库**
 - 列表排序用的 `last_read_at`（论文 = 最近一次点「📖 阅读」、网页 = 最近一次点「🌐 打开」的时间）就存在对应 JSON 里，可手动清空，清空后该条回落到按添加时间排
-- 写入采用「临时文件 + 重命名」，断电/崩溃不会写坏数据
+- 保存采用临时文件替换，请求中的写盘失败会报错并尝试恢复内存和本次文件变更。恢复也失败时会暂停数据接口，提示检查备份。该机制降低半写文件风险，但不保证多文件写入中途断电的一致性；定期备份仍有必要
 
 ## 想扩展功能？
 
@@ -362,14 +347,17 @@ papers\
 3. **加接口** → `server.js` 里的 `route()` 表，加一行就是一个新端点
 4. **数据字段变更** → `server.js` 里的 `normalizeActivity()` / `normalizePaper()` / `normalizeSite()` / `normalizeExpense()` 和 `migrate()`（配合 `schema_version` 做平滑迁移）
 
-一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、同局域网手机访问（默认只监听本机 `127.0.0.1`，设环境变量 `DANJI_HOST=0.0.0.0` 后重启即可——局域网访问需填口令 `DANJI_TOKEN`（见「配置与隐私」），仍建议仅在可信网络开放）、接入通知机器人、定时抓取活动页。
+一些顺理成章的扩展方向：统计面板（这个月白嫖了多少钱）、接入通知机器人、定时抓取活动页。
 
 ## 常见问题
 
 | 现象 | 处理 |
 |---|---|
 | 提示「端口被占用」/ 打不开 8642 | 拾穗集可能已经在运行了，直接访问 `http://localhost:8642`；确实要换端口就改 `config.json` 的 `"port"`（控制台会跟着变），或临时设环境变量 `PORT` |
-| 双击脚本报「无法加载文件……执行策略」 | 管理员 PowerShell 跑一次 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`；或者直接 `node server.js` |
+| 双击脚本报「无法加载文件……执行策略」 | 使用 `start.bat` / `launch.vbs`，或临时运行 `powershell -ExecutionPolicy Bypass -File control-ui.ps1`，无需修改系统长期执行策略 |
+| 手机配对连不上 | 检查同一 Wi-Fi、服务绿灯和新二维码；检查防火墙是否允许 Node 在专用网络通信。不要关闭整个防火墙；校园网设备隔离可改用手机热点。HTTP/HTTPS 必须与二维码一致 |
+| 配对提示口令错误 / App 需升级 | 电脑重新出码，或先更新并重启电脑服务、安装同签名新版 APK，再扫码 |
+| 首次引导提示检测到旧数据 | 恢复原本机配置，再启动；不要删除旧数据来绕过检查 |
 | 页面显示「无法连接拾穗集服务」 | 后台服务没在运行：双击 `start.bat` 启动，然后点页面上的「重试」 |
 | 记了内容保存没反应 | 看按钮：显示「⏳ 保存中…」是在等网络；弹出「无法连接服务」说明服务停了，重启服务后再保存，已填内容不会丢 |
 
@@ -390,11 +378,19 @@ papers\
 
 ## 技术栈
 
-Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端 `public/` 约 1.4 万行（不含 vendor 里的 Vue / 扫码库）、后端 `server.js` 约 2600 行，全部代码人类可读，适合随手改。
+Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端 `public/` 约 1.2 万行、后端 `server.js` 约 2900 行，业务代码使用原生 JavaScript，适合按需修改。
+
+第三方组件：随仓库内置在 `public/vendor/`，运行时不联网加载。
+
+- `vue.global.prod.js` —— Vue 3.5.13，MIT，版权归 Yuxi (Evan) You 及 Vue 贡献者所有；完整许可见 [vue.LICENSE.txt](public/vendor/vue.LICENSE.txt)。
+- 二维码生成包 `qrcode` 通过 npm 安装，许可随依赖分发。扫码使用 App 内原生 ML Kit，不再加载浏览器扫码库。
+
+项目本体同样以 MIT 发布，见 `LICENSE`。
 
 ### 同步回归验证
 
-- `npm test`：同步判定、回报队列、电脑收件箱、服务启动及报告去重。
+- `npm test`：语法、首次配置、写盘失败恢复、备份、配对鉴权、同步逻辑、API 与进程归属回归（Windows）。
+- `npm run test:setup:ui`：在独立临时目录验证首次引导窗口、两种模式、错误提示与取消；输出示例预览到 `output/`。
 - `npm run test:sync:flow`：用 Edge 和真实 IndexedDB 验证在线同步、离线热启动/冷启动、旧账本恢复、上传冲突与服务重启。原生桥由持久化测试桩模拟。
 - `npm run test:sync:native`：用本机 JDK 验证 APK 快照写入器，覆盖 UTF-8 内容、写入失败、替换失败及旧快照保留。可用 `JAVA_HOME` 指定 JDK。
 - `npm run test:ui`：验证电脑与手机布局、表单键盘操作及离线随记保存。
@@ -404,6 +400,13 @@ Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构�
 手机诊断可运行 `adb logcat -v time -s DanjiSync chromium`，对照原生 `cycle=… stage=snapshot-saved`、JS `[danji-snap] applied` 和 `[danji-sync]` 阶段记录；相同数据用 `boot` 与版本号对应。消息保留 `sync_source`、`sync_cycle`、`sync_stage` 等诊断字段。日志不记录内容正文和配对口令。
 
 失败回报只尝试即时发送，网络恢复后不补发旧失败；成功回报保留重试。断网告警仍保存在手机本地消息中。升级旧 APK 后先联网同步一次，可修复旧版本留下的空 `boot_id` 账本。服务端重启导致进程标识变化时，暂不跨进程导入快照，需联网同步建立新基线，避免旧快照覆盖新数据。
+
+## 源码提交与更新
+
+- GitHub 源码只包含程序、示例配置和演示截图。`config.json`、`local.env.ps1`、`data/`、`papers/`、`backups/`、证书和 Android 签名材料均不应提交；不要用整目录压缩包代替源码发布。
+- 更新前先停服务并备份，保留本机配置和文献路径。更新源码后重新启动；改了 `public/` 或原生代码，要重新构建并安装 APK。
+- 长期安装请保管 `app/android/danji-release.keystore` 与 `keystore.properties`，后续复用同一签名覆盖安装。切换签名不能直接覆盖，卸载前先同步，避免丢未同步记录。
+- 仓库 Actions 分别配置了 Windows 测试与 Android 调试构建。配置存在不等于远程执行已经通过，发布时以实际运行结果为准；手机锁屏、省电和相机行为仍需真机确认。
 
 ## License
 

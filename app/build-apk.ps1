@@ -12,6 +12,14 @@
 param([switch]$Release)
 
 $ErrorActionPreference = 'Stop'
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw '构建 APK 需要先安装 Node.js 20 或以上版本（含 npm）' }
+$buildNodeMajor = 0
+$buildNodeVersion = (& node --version | Out-String).Trim()
+$buildNodeMatch = [regex]::Match($buildNodeVersion, '^v(\d+)\.')
+if ($LASTEXITCODE -ne 0 -or -not $buildNodeMatch.Success -or
+    -not [int]::TryParse($buildNodeMatch.Groups[1].Value, [ref]$buildNodeMajor) -or $buildNodeMajor -lt 20) {
+  throw 'Capacitor 7 构建 APK 需要 Node.js 20 或以上版本，请升级 Node 后重试；电脑服务最低版本仍为 18'
+}
 $AppRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $AppRoot
 $AndroidDir = Join-Path $AppRoot 'android'

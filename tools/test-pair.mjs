@@ -11,6 +11,7 @@ import {
   clearPair,
   isPaired,
   parsePairPayload,
+  testPair,
 } from '../public/js/pair.js';
 import { getServerBase, getToken, SERVER_BASE_KEY, TOKEN_KEY } from '../public/js/api.js';
 
@@ -150,6 +151,36 @@ ok('parsePairPayload：公网 http 配对码拒绝', () => {
   const r = parsePairPayload('{"v":1,"base":"http://8.8.8.8:8642","token":"x"}');
   assert.equal(r.ok, false);
 });
+
+const originalFetch = globalThis.fetch;
+try {
+  const good = { ok: true, app: 'shisuiji', apiVersion: 1, minClient: 2 };
+  for (const [name, status, body, expected] of [
+    ['配对检查：正确口令与兼容服务通过', 200, good, true],
+    ['配对检查：错误口令拒绝', 401, { needToken: true }, false],
+    ['配对检查：旧服务缺少验证接口拒绝', 404, {}, false],
+    ['配对检查：其他产品拒绝', 200, { ...good, app: 'other' }, false],
+    ['配对检查：返回无效 JSON 信息拒绝', 200, {}, false],
+    ['配对检查：App 过旧拒绝', 200, { ...good, minClient: 3 }, false],
+    ['配对检查：协议版本不兼容拒绝', 200, { ...good, apiVersion: 2 }, false],
+    ['配对检查：网络错误拒绝', 0, {}, false],
+  ]) {
+    store.clear();
+    applyPair({ base: 'http://10.0.0.8:8642', token: 'keep-old' });
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'http://10.0.0.9:8642/api/pair/check');
+      assert.equal(init.headers['X-Danji-Token'], 'probe');
+      if (!status) throw new Error('network failed');
+      return { ok: status === 200, status, json: async () => body };
+    };
+    const result = await testPair('http://10.0.0.9:8642', 'probe');
+    ok(name, () => {
+      assert.equal(result.ok, expected);
+      assert.equal(getServerBase(), 'http://10.0.0.8:8642');
+      assert.equal(getToken(), 'keep-old');
+    });
+  }
+} finally { globalThis.fetch = originalFetch; }
 
 if (process.exitCode) {
   console.error(`\n✗ test-pair：有失败（通过 ${passed}）`);

@@ -19,6 +19,25 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
 
+const { createJsonTransactions } = require('./lib/json-transactions');
+const jsonStore = createJsonTransactions({
+  read: (file) => fsp.readFile(file),
+  write: async (file, text) => {
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const tmp = file + '.tmp';
+    await fsp.writeFile(tmp, text, 'utf8');
+    await fsp.rename(tmp, file);
+  },
+  remove: (file) => fsp.unlink(file),
+  capture: () => JSON.stringify([db, paperDb, siteDb, expenseDb, insightDb,
+    messageDb, ideaDb, achievementDb, kbDb, trashDb]),
+  restore: (snapshot) => {
+    [db, paperDb, siteDb, expenseDb, insightDb, messageDb, ideaDb,
+      achievementDb, kbDb, trashDb] = JSON.parse(snapshot);
+  },
+});
+
+
 // 共用配置：根目录 config.json（port/host）。优先级：环境变量 > config.json > 内置默认。
 // lib.ps1 读同一份文件，保证图形控制台与服务端端口一致。
 function validPort(n) {
@@ -192,10 +211,7 @@ async function loadData() {
 
 // 原子写入：先写临时文件再改名，避免写一半损坏数据
 async function saveDataNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = DATA_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(db, null, 2), 'utf8');
-  await fsp.rename(tmp, DATA_FILE);
+  await jsonStore.save(DATA_FILE, JSON.stringify(db, null, 2));
 }
 function saveData() {
   return queueWrite(saveDataNow);
@@ -262,6 +278,12 @@ route('GET', '/api/health', async (ctx) => ctx.json({
   server_time: new Date().toISOString(),
 }));
 
+// Unlike health, this route passes the normal token gate. No personal data.
+route('GET', '/api/pair/check', async (ctx) => ctx.json({
+  ok: true, app: 'shisuiji', role: ctx.role,
+  apiVersion: API_VERSION, minClient: MIN_CLIENT,
+}));
+
 route('GET', '/api/activities', async (ctx) => ctx.json(db.activities));
 
 route('POST', '/api/activities', async (ctx) => {
@@ -308,10 +330,7 @@ async function loadPapers() {
 }
 
 async function savePapersNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = PAPERS_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(paperDb, null, 2), 'utf8');
-  await fsp.rename(tmp, PAPERS_FILE);
+  await jsonStore.save(PAPERS_FILE, JSON.stringify(paperDb, null, 2));
 }
 function savePapers() {
   return queueWrite(savePapersNow);
@@ -398,10 +417,7 @@ async function loadSites() {
 }
 
 async function saveSitesNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = SITES_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(siteDb, null, 2), 'utf8');
-  await fsp.rename(tmp, SITES_FILE);
+  await jsonStore.save(SITES_FILE, JSON.stringify(siteDb, null, 2));
 }
 function saveSites() {
   return queueWrite(saveSitesNow);
@@ -605,10 +621,7 @@ async function loadExpenses() {
 }
 
 async function saveExpensesNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = EXPENSES_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(expenseDb, null, 2), 'utf8');
-  await fsp.rename(tmp, EXPENSES_FILE);
+  await jsonStore.save(EXPENSES_FILE, JSON.stringify(expenseDb, null, 2));
 }
 function saveExpenses() {
   return queueWrite(saveExpensesNow);
@@ -767,7 +780,13 @@ async function filePaper(fileName, prevCategory, targetStatus, targetCategory) {
     n += 1;
   }
   try {
-    await fsp.rename(source, path.join(targetDir, name));
+    const destination = path.join(targetDir, name);
+    await fsp.rename(source, destination);
+    // A later JSON failure must also undo the already completed paper move.
+    jsonStore.onRollback(async () => {
+      if (fs.existsSync(source)) throw new Error('原位置已有文件，未覆盖：' + source);
+      await fsp.rename(destination, source);
+    });
   } catch (err) {
     throw new Error(fsError(err, '移动文件到', targetDir));
   }
@@ -1228,10 +1247,7 @@ async function loadInsights() {
 }
 
 async function saveInsightsNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = INSIGHTS_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(insightDb, null, 2), 'utf8');
-  await fsp.rename(tmp, INSIGHTS_FILE);
+  await jsonStore.save(INSIGHTS_FILE, JSON.stringify(insightDb, null, 2));
 }
 function saveInsights() {
   return queueWrite(saveInsightsNow);
@@ -1301,10 +1317,7 @@ async function loadMessages() {
 }
 
 async function saveMessagesNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = MESSAGES_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(messageDb, null, 2), 'utf8');
-  await fsp.rename(tmp, MESSAGES_FILE);
+  await jsonStore.save(MESSAGES_FILE, JSON.stringify(messageDb, null, 2));
 }
 // M17:消息(含 bg-sync 回报、已读标记、清空、蛋到期消息)的落盘**不再走 queueWrite**——
 // queueWrite 会顺手 markDataChanged,而 dataVersion 是手机判断「电脑端改过数据」的唯一信号。
@@ -1440,8 +1453,9 @@ function addSyncReport(ctx) {
   const frame = `event: report\ndata: ${JSON.stringify({
     id: msg.id, ok, title: msg.title, body: msg.body, at,
   })}\n\n`;
-  broadcastFrame(frame);
-  return saveMessages().then(() => ctx.json(msg, 201));
+  return saveMessages()
+    .then(() => jsonStore.afterCommit(() => broadcastFrame(frame)))
+    .then(() => ctx.json(msg, 201));
 }
 
 route('PUT', '/api/messages/:id', async (ctx) => {
@@ -1508,16 +1522,13 @@ async function loadIdeas() {
 }
 
 async function saveIdeasNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = IDEAS_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(ideaDb, null, 2), 'utf8');
-  await fsp.rename(tmp, IDEAS_FILE);
+  await jsonStore.save(IDEAS_FILE, JSON.stringify(ideaDb, null, 2));
 }
 
 // 写盘串行化：同一集合并发写会共用同一个 .tmp 文件名，不排队会互相覆盖
 let ioQueue = Promise.resolve();
 function queueWrite(fn, onWritten = markDataChanged) {
-  const run = ioQueue.then(fn, fn).then(onWritten, onWritten);
+  const run = ioQueue.then(fn, fn).then(() => jsonStore.afterCommit(onWritten));
   ioQueue = run.catch(() => {}); // 出错不能把队列毒死
   return run;
 }
@@ -1749,10 +1760,22 @@ function sanitizeImages(raw) {
 }
 
 // 删掉不再被任何随记引用的图片文件（编辑移除/删除随记时调用），不留孤儿
+let storesLoaded = false;
+const startupPruneIds = new Set();
 async function pruneImageFiles(ids) {
+  if (!storesLoaded) {
+    for (const id of ids || []) startupPruneIds.add(id);
+    return;
+  }
+  return jsonStore.afterCommit(() => pruneImageFilesNow(ids));
+}
+async function pruneImageFilesNow(ids) {
   if (!ids || !ids.length) return;
   const used = new Set();
   for (const i of ideaDb.ideas) for (const im of i.images || []) used.add(im.id);
+  for (const entry of trashDb.items) {
+    for (const id of trashImageIds(entry)) used.add(id);
+  }
   const targets = ids.filter((id) => !used.has(id));
   if (!targets.length) return;
   let files = null;
@@ -1849,7 +1872,7 @@ route('PUT', '/api/ideas/:id', async (ctx) => {
   ideaDb.ideas[idx] = idea;
   await saveIdeas();
   // 编辑移除的图：不再被任何随记引用就删文件
-  pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+  await pruneImageFiles((prev.images || []).map((im) => im.id));
   ctx.json(idea);
 });
 
@@ -1892,10 +1915,7 @@ async function loadAchievements() {
 }
 
 async function saveAchievementsNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = ACHIEVEMENTS_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(achievementDb, null, 2), 'utf8');
-  await fsp.rename(tmp, ACHIEVEMENTS_FILE);
+  await jsonStore.save(ACHIEVEMENTS_FILE, JSON.stringify(achievementDb, null, 2));
 }
 
 function saveAchievements() {
@@ -2020,10 +2040,7 @@ async function loadKb() {
 }
 
 async function saveKbNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = KB_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(kbDb, null, 2), 'utf8');
-  await fsp.rename(tmp, KB_FILE);
+  await jsonStore.save(KB_FILE, JSON.stringify(kbDb, null, 2));
 }
 
 function saveKb() {
@@ -2195,10 +2212,7 @@ async function loadTrash() {
 }
 
 async function saveTrashNow() {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const tmp = TRASH_FILE + '.tmp';
-  await fsp.writeFile(tmp, JSON.stringify(trashDb, null, 2), 'utf8');
-  await fsp.rename(tmp, TRASH_FILE);
+  await jsonStore.save(TRASH_FILE, JSON.stringify(trashDb, null, 2));
 }
 
 /**
@@ -2232,7 +2246,7 @@ async function pushToTrash(source, record) {
     // 极端情况：只保留最新 TRASH_MAX_ITEMS 条，被挤出去的按到期处理（图片该删就删）
     const dropped = trashDb.items.splice(TRASH_MAX_ITEMS);
     const imageIds = dropped.flatMap(trashImageIds);
-    if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+    if (imageIds.length) await pruneImageFiles(imageIds);
   }
   await saveTrash();
   return true;
@@ -2245,7 +2259,7 @@ async function purgeTrashItem(entry) {
   trashDb.items.splice(idx, 1);
   await saveTrash();
   const imageIds = trashImageIds(entry);
-  if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  if (imageIds.length) await pruneImageFiles(imageIds);
   return true;
 }
 
@@ -2295,7 +2309,7 @@ route('DELETE', '/api/trash', async (ctx) => {
   trashDb.items = [];
   await saveTrash();
   const imageIds = entries.flatMap(trashImageIds);
-  if (imageIds.length) pruneImageFiles(imageIds).catch(() => {});
+  if (imageIds.length) await pruneImageFiles(imageIds);
   ctx.json({ ok: true, purged: entries.length });
 });
 
@@ -2405,7 +2419,7 @@ route('POST', '/api/sync/push', async (ctx) => {
   const results = [];
   let changed = false;
   for (const op of ops) {
-    const r = applyIdeaOp(op, ctx.role);
+    const r = await applyIdeaOp(op, ctx.role);
     results.push(r);
     if (r.applied) changed = true;
   }
@@ -2416,7 +2430,7 @@ route('POST', '/api/sync/push', async (ctx) => {
 // 返回五种 status，前端据此决定出队还是留队：
 // ok（含重放幂等）/ conflict（留队等用户选）/ missing（电脑端删了，弃掉）
 // forbidden（想改电脑端的）/ error（参数不对，重试也没用）
-function applyIdeaOp(op, role) {
+async function applyIdeaOp(op, role) {
   const id = uuidOrNull(op && op.id);
   if (!id) return { id: '', status: 'error', error: '缺少合法 id' };
   const idx = ideaDb.ideas.findIndex((i) => i.id === id);
@@ -2468,7 +2482,7 @@ function applyIdeaOp(op, role) {
       if (role === 'mobile') updated.origin = 'mobile';
       ideaDb.ideas[idx] = updated;
       // 先写回再清理：pruneImageFiles 会重扫引用集，仍被新版本引用的图不会被删
-      pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+      await pruneImageFiles((prev.images || []).map((im) => im.id));
       recordOpReceipt(id, key, digest, op, updated.updated_at);
       return { id, status: 'ok', applied: true, idea: updated };
     }
@@ -2491,13 +2505,13 @@ function applyIdeaOp(op, role) {
     // 手机删的也进回收站（反悔的余地与电脑端一致），返回语义不变
     ideaDb.ideas.splice(idx, 1);
     ideaDb.idea_history[id] ||= { seen: true };
-    pushToTrash('ideas', prev).catch(() => {});
+    await pushToTrash('ideas', prev);
     recordOpReceipt(id, key, digest, op, prev.updated_at);
     return { id, status: 'ok', applied: true, deleted: true };
   }
   const idea = normalizeIdea(op, prev, { keepClientTimes: true });
   ideaDb.ideas[idx] = idea;
-  pruneImageFiles((prev.images || []).map((im) => im.id)).catch(() => {});
+  await pruneImageFiles((prev.images || []).map((im) => im.id));
   recordOpReceipt(id, key, digest, op, idea.updated_at);
   return { id, status: 'ok', applied: true, idea };
 }
@@ -2756,13 +2770,26 @@ async function handleRequest(req, res) {
       r.keys.forEach((key, i) => { params[key] = match[i + 1]; });
       try {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
-        await r.handler({
-          req, res, params, body, query: url.searchParams, role,
-          json: (data, code = 200) => sendJson(res, code, data),
-        });
+        const context = { req, res, params, body, query: url.searchParams, role };
+        const direct = pathname === '/api/health' || pathname === '/api/pair/check'
+          || pathname === '/api/events' || pathname.startsWith('/api/images/');
+        if (direct) {
+          await r.handler({ ...context, json: (data, code = 200) => sendJson(res, code, data) });
+        } else {
+          // Readers wait for writes too: never expose a provisional in-memory edit.
+          const reply = await jsonStore.run(async () => {
+            let response;
+            await r.handler({ ...context, json: (data, code = 200) => {
+              response = { code, data: JSON.parse(JSON.stringify(data)) };
+            } });
+            return response;
+          });
+          if (reply) sendJson(res, reply.code, reply.data);
+        }
       } catch (err) {
         console.error('[shisuiji] 接口错误:', err.message);
-        sendJson(res, err.message.includes('JSON') || err.message.includes('过大') ? 400 : 500, { error: err.message });
+        sendJson(res, err.statusCode || (err.message.includes('JSON') || err.message.includes('过大') ? 400 : 500),
+          { error: err.message, ...(err.code ? { code: err.code } : {}) });
       }
       return;
     }
@@ -2825,7 +2852,10 @@ server.on('error', (err) => {
 
 Promise.all([
   loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(), loadAchievements(), loadKb(), loadTrash(),
-]).then(() => {
+]).then(async () => {
+  storesLoaded = true;
+  await pruneImageFiles([...startupPruneIds]);
+  startupPruneIds.clear();
   server.listen(PORT, HOST, () => {
     const scheme = USING_TLS ? 'https' : 'http';
     console.log(`\n  🧺 拾穗集 已启动（${USING_TLS ? 'HTTPS' : 'HTTP'} 监听 ${HOST}:${PORT}）`);

@@ -1,6 +1,9 @@
 # 个人运行数据（本地自动生成，不上传）
 data/
 
+# 一键备份产物（backup.ps1 生成，里面是 data/ 的副本，同样不上传）
+backups/
+
 # 本地配置与密钥：公开仓库只保留 config.example.json
 config.json
 local.env.ps1
@@ -11,8 +14,10 @@ danji-cert.pem
 # Android 签名材料（重打 APK 用，同样不入库）
 *.keystore
 *.jks
-# 环境变量文件（只匹配名为 .env 的文件；local.env.ps1 由上一行单独兜住）
+# 本地环境变量；模板可入库。
 .env
+.env.*
+!.env.example
 
 # 论文库：首次使用自动创建，里面是你的 PDF，不入库
 papers/

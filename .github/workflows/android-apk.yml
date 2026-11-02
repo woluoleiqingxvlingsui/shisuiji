@@ -33,7 +33,7 @@ jobs:
 
       - name: Install Capacitor deps
         working-directory: app
-        run: npm ci || npm install
+        run: npm ci
 
       - name: Sync web assets
         working-directory: app
@@ -41,14 +41,10 @@ jobs:
 
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > app/android/local.properties
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Build debug APK
         working-directory: app/android
-        run: gradle assembleDebug --no-daemon
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: bash ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -1,6 +1,8 @@
 ﻿# 拾穗集 图形控制台 —— 双击桌面快捷方式 / start.bat / launch.vbs 打开的就是这个窗口
 # 深色卡片风：状态灯每 2 秒自动刷新；纯按钮操作；关闭窗口不影响后台服务。
 # 启动会自动加载 local.env.ps1（口令）与目录下 HTTPS 证书（若有）。
+. (Join-Path $PSScriptRoot 'first-run.ps1')
+if (-not (Show-FirstRunSetup -ProjectRoot $PSScriptRoot)) { exit }
 . (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'lib.ps1')
 
 Add-Type -AssemblyName PresentationFramework
@@ -72,7 +74,15 @@ $xaml = @'
     </Border>
 
     <Button x:Name="BtnOpen" Content="🚀 打开网页（电脑）" Style="{StaticResource BtnBase}" Background="#4D6BFE" Margin="0,14,0,0"/>
-    <Button x:Name="BtnPairQr" Content="🔗 配对码（App 扫码）" Style="{StaticResource BtnBase}" Margin="0,14,0,0"/>
+    <Grid Margin="0,14,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="10"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Button x:Name="BtnPairQr" Grid.Column="0" Content="🔗 配对码（App 扫码）" Style="{StaticResource BtnBase}"/>
+      <Button x:Name="BtnBackup" Grid.Column="2" Content="💾 备份数据" Style="{StaticResource BtnBase}"/>
+    </Grid>
     <Grid>
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
@@ -100,6 +110,7 @@ $statusDetail = $win.FindName('StatusDetail')
 $envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
 $btnPairQr    = $win.FindName('BtnPairQr')
+$btnBackup    = $win.FindName('BtnBackup')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
 
@@ -302,6 +313,39 @@ $btnPairQr.Add_Click({
     try { if (Test-Path $png) { Remove-Item $png -Force -ErrorAction SilentlyContinue } } catch { }
   })
   $qrWin.ShowDialog() | Out-Null
+})
+
+# 一键备份：调 backup.ps1（服务在跑时它会拒绝，这里只负责把结果弹出来）
+$btnBackup.Add_Click({
+  $scriptFile = Join-Path $Base 'backup.ps1'
+  if (-not (Test-Path $scriptFile)) {
+    $statusDetail.Text = "没找到 backup.ps1（应在项目根目录）。"
+    return
+  }
+  $btnBackup.IsEnabled = $false
+  $statusDetail.Text   = "正在备份 data/…"
+  $done = ""
+  try {
+    $out  = & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptFile 2>&1
+    $code = $LASTEXITCODE
+    $text = ($out | Out-String).Trim()
+    if ($code -eq 0) {
+      $done = "备份完成，输出在项目根目录的 backups\"
+      [System.Windows.MessageBox]::Show($text, "拾穗集 备份",
+        [System.Windows.MessageBoxButton]::OK,
+        [System.Windows.MessageBoxImage]::Information) | Out-Null
+    } else {
+      $done = "备份没做成，看弹窗里的说明"
+      [System.Windows.MessageBox]::Show($text, "拾穗集 备份",
+        [System.Windows.MessageBoxButton]::OK,
+        [System.Windows.MessageBoxImage]::Warning) | Out-Null
+    }
+  } finally {
+    $btnBackup.IsEnabled = $true
+    # Update-Status 会自己写 statusDetail，所以先让它刷新再把结果盖上去
+    Update-Status
+    if ($done) { $statusDetail.Text = $done }
+  }
 })
 
 $btnStart.Add_Click({

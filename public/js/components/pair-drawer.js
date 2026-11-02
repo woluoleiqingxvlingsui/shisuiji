@@ -1,7 +1,7 @@
 /* 拾穗集 —— 手机 App 配对 / 设置抽屉
  * 单通道：扫控制台配对码（配对后同 Wi-Fi 自动同步，无需重扫）。
  * 原生壳走 ML Kit 插件（全屏原生预览+解码，WebView 零负载）；
- * 浏览器兜底 html5-qrcode（仅调试用）。
+ * 浏览器通过电脑地址访问；扫码只在原生 App 提供。
  */
 
 import { ref, computed, watch } from '../vue-globals.js';
@@ -32,19 +32,6 @@ function getNativeBarcodeScanner() {
   return null;
 }
 
-function loadHtml5Qrcode() {
-  if (typeof window !== 'undefined' && window.Html5Qrcode) {
-    return Promise.resolve(window.Html5Qrcode);
-  }
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = '/vendor/html5-qrcode.min.js';
-    s.onload = () => resolve(window.Html5Qrcode);
-    s.onerror = () => reject(new Error('扫码组件加载失败'));
-    document.head.appendChild(s);
-  });
-}
-
 const PairDrawer = {
   name: 'PairDrawer',
   setup() {
@@ -59,13 +46,11 @@ const PairDrawer = {
     const bgAvailable = bgSyncAvailable();
     const bgOn = ref(bgSyncWanted());
 
-    let scanner = null;
     // 一次性闸门：二维码在镜头前会被连续解码多帧，回调必须同步上闸，
     // 否则每帧都跑一遍 connectWith/notifyPaired → 同步风暴 + 界面卡顿
     let scanHandled = false;
     let nativeScanning = false;
     let nativeListener = null;
-    const SCAN_DOM_ID = 'pair-qr-region';
 
     async function stopNativeScan() {
       try { document.body.classList.remove('danji-scan-active'); } catch { /* ignore */ }
@@ -86,22 +71,7 @@ const PairDrawer = {
         await stopNativeScan();
         return;
       }
-      // 先摘引用再释放：即使 stop() 抛错/挂起，后面的 clear 和轨道兜底也必须执行，
-      // 否则旧相机流泄漏在后台，多次扫码后越用越卡
-      const s = scanner;
-      scanner = null;
-      if (!s) return;
-      try {
-        if (s.isScanning && s.isScanning()) await s.stop();
-      } catch { /* ignore */ }
-      try { s.clear(); } catch { /* ignore */ }
-      try {
-        const v = document.querySelector('#' + SCAN_DOM_ID + ' video');
-        if (v && v.srcObject && v.srcObject.getTracks) {
-          v.srcObject.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
-          v.srcObject = null;
-        }
-      } catch { /* ignore */ }
+
     }
 
     // 退后台立刻停相机：避免不可见时相机流+解码循环空耗，回来重按「开始扫码」即可
@@ -165,53 +135,7 @@ const PairDrawer = {
         await startNativeScan(nativeScanner);
         return;
       }
-      scanMsg.value = '正在启动相机…';
-      try {
-        const Html5Qrcode = await loadHtml5Qrcode();
-        scanner = new Html5Qrcode(SCAN_DOM_ID);
-        scanning.value = true;
-        await scanner.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 220, height: 220 },
-            // 低分辨率流：解码帧小，WebView 主线程压力大幅下降
-            videoConstraints: {
-              facingMode: 'environment',
-              width: { ideal: 640 },
-              height: { ideal: 480 },
-            },
-            // 配对码不含镜像内容，关掉水平翻转扫描省一半解码量
-            disableFlip: true,
-            experimentalFeatures: [
-              // WebView 支持原生 BarcodeDetector 时走系统解码（快），不支持自动回落 JS
-              { useBarCodeDetectorIfSupported: true },
-            ],
-          },
-          async (text) => {
-            if (scanHandled || busy.value) return;
-            scanHandled = true; // 同步上闸：后续帧回调全部丢弃
-            await stopScan();
-            const parsed = parsePairPayload(text);
-            if (!parsed.ok) {
-              error.value = parsed.error || '扫码内容无效';
-              scanMsg.value = '';
-              scanHandled = false; // 内容无效时放开，允许重新扫码
-              return;
-            }
-            scanMsg.value = '已识别，正在连接…';
-            await connectWith({ base: parsed.base, token: parsed.token });
-            scanMsg.value = '';
-          },
-          () => { /* 每帧忽略 */ },
-        );
-        scanMsg.value = '对准电脑控制台上的配对码';
-      } catch (e) {
-        scanning.value = false;
-        error.value = ((e && e.message) || '无法启动相机') + '，请检查相机权限后重试';
-        scanMsg.value = '';
-        stopScan();
-      }
+      error.value = '扫码需要安装原生 App；手机浏览器请直接打开电脑地址，并在同步栏填写口令。';
     }
 
     /**
@@ -298,7 +222,6 @@ const PairDrawer = {
       scanning,
       scanMsg,
       hasNativeScanner: !!getNativeBarcodeScanner(),
-      SCAN_DOM_ID,
       bgAvailable,
       bgOn,
       onStartScan,
@@ -316,13 +239,13 @@ const PairDrawer = {
         <h2>🔗 连接电脑上的拾穗集</h2>
       </header>
       <div class="drawer-form">
-        <p class="sync-hint" v-if="hasPair">已配对：{{ pairedBase }}。同一 Wi-Fi 下自动同步，无需重扫；电脑 IP 变了先「清除配对」再重扫。</p>
+        <p class="sync-hint" v-if="hasPair">已配对：{{ pairedBase }}。同一 Wi-Fi 下自动同步，无需重扫；电脑 IP 变了直接重新扫码；新码验证失败会保留原配对。</p>
         <p class="sync-hint" v-else>同一 Wi-Fi：扫电脑控制台「🔗 配对码」窗口里的二维码。跳过也可离线记想法。<br>电脑若开了自签 HTTPS，App 连不上（壳里不放行证书告警）——请按 README 的 HTTP 启动与出码步骤操作，服务和二维码协议必须一致。</p>
 
-        <div v-if="!hasNativeScanner" :id="SCAN_DOM_ID" style="width:100%;min-height:180px;background:#111;border-radius:10px;overflow:hidden"></div>
+        <p class="sync-hint" v-if="!hasNativeScanner">扫码仅在原生 App 提供。手机浏览器请直接访问电脑地址，并在同步栏填写口令。</p>
         <div class="scan-ui">
           <p class="sync-hint" v-if="scanMsg">{{ scanMsg }}</p>
-          <button type="button" class="btn primary" :disabled="busy || scanning" @click="onStartScan">
+          <button type="button" class="btn primary" :disabled="busy || scanning || !hasNativeScanner" @click="onStartScan">
             {{ scanning ? '扫码中…' : (hasPair ? '重新扫码配对' : '开始扫码') }}
           </button>
           <button type="button" class="btn ghost" v-if="scanning" @click="stopScan">停止扫码</button>
@@ -331,7 +254,7 @@ const PairDrawer = {
 
         <label class="sync-hint bg-sync-row" v-if="hasPair && bgAvailable">
           <input type="checkbox" :checked="bgOn" :disabled="busy" @change="onToggleBg">
-          <span>后台同步：熄屏后约每 15 分钟自动同步一次</span>
+          <span>后台同步：熄屏后尝试自动同步</span>
         </label>
         <p class="sync-hint bg-sync-sub" v-if="hasPair && bgAvailable && bgOn">
           长时间没同步？请在系统设置里允许本应用「自启动」，并把省电策略设为「无限制」——部分国产系统会强杀后台应用。

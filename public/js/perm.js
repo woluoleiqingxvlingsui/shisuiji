@@ -31,9 +31,9 @@ function mobileReadOnlyHint() {
   // 原生壳：本地已内置应用，不谈 HTTPS / PWA 离线壳。
   // M20 任务 A 起手机端各板块都能离线读，只有「记」仍限随记
   if (isNativePlatform()) {
-    return 'App 模式：断网可读全部板块 · 可记随记';
+    return 'App 模式：可离线浏览 · 可记随记';
   }
-  const base = '手机端可浏览全部板块 · 随记可离线记';
+  const base = '手机端可浏览开放板块 · 随记可离线记';
   if (!isSecurePwaContext()) {
     return base + ' · 未配 HTTPS：关掉浏览器后不能冷启动';
   }

@@ -160,6 +160,23 @@ try {
   await screenshot('desktop-editor');
   await evaluate(`const last = document.querySelector('.drawer button[type="submit"]'); last.focus(); last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))`);
   assert.equal(await evaluate(`document.activeElement === document.querySelector('.drawer button')`), true, 'focus cycles within dialog');
+  // Storage failure must keep the editor and draft; the real disk rollback is
+  // verified independently by test-storage-failure.mjs.
+  const draft = await evaluate(`({ title: document.querySelector('.drawer input').value, content: document.querySelector('.drawer textarea').value })`);
+  await evaluate(`window.__originalFetch = window.fetch; window.__saveRejected = false;
+    window.fetch = (url, init) => {
+      if (String(url).includes('/api/ideas') && init?.method === 'POST') {
+        window.__saveRejected = true;
+        return Promise.resolve(new Response(JSON.stringify({ error: '磁盘写入失败（隔离测试）', code: 'storage_write_failed' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
+      }
+      return window.__originalFetch(url, init);
+    };
+    document.querySelector('.drawer button[type="submit"]').click()`);
+  await eventually(() => evaluate(`window.__saveRejected && document.body.textContent.includes('保存失败')`), 'storage failure shown');
+  assert.deepEqual(await evaluate(`({ title: document.querySelector('.drawer input').value, content: document.querySelector('.drawer textarea').value })`), draft, 'failed save retains input');
+  assert.equal((await (await fetch(base + '/api/ideas')).json()).length, 4, 'failed save creates no record');
+  await evaluate(`window.fetch = window.__originalFetch; delete window.__originalFetch`);
+  console.log('✓ 保存失败保留编辑器与输入，用户可直接重试');
   await evaluate(`document.querySelector('.drawer input').focus(); for (let i = 0; i < 2; i++) document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }))`);
   await eventually(() => evaluate(`!document.querySelector('.drawer') && [...document.querySelectorAll('.idea-card')].some(card => card.textContent.includes('浏览器验收'))`), 'keyboard save');
   assert.notEqual(await evaluate(`getComputedStyle(document.body).overflow`), 'hidden');
@@ -460,6 +477,13 @@ try {
   assert.equal((await (await fetch(base + '/api/ideas')).json()).length, 5, 'offline note stays in local queue');
   console.log('✓ offline mobile note saves locally');
   await cdp('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await evaluate(`(async () => { const { openPair } = await import('/js/sync/engine.js'); openPair(); })()`);
+  await eventually(() => evaluate(`!!document.querySelector('.pair-drawer .scan-ui .btn.primary')`), 'browser pair information');
+  assert.equal(await evaluate(`document.querySelector('.pair-drawer .scan-ui .btn.primary').disabled`), true, 'browser does not offer unsupported camera scanning');
+  assert.ok(await evaluate(`document.querySelector('.pair-drawer').textContent.includes('浏览器请直接访问电脑地址')`), 'browser receives address access instructions');
+  assert.equal(await evaluate(`!!document.querySelector('script[src*="html5-qrcode"]')`), false, 'deleted QR library is not requested');
+  await evaluate(`(async () => { const { closePair } = await import('/js/sync/engine.js'); closePair(); })()`);
+  console.log('✓ 浏览器配对页明确引导地址访问，不再加载已删除的扫码库');
   assert.deepEqual(errors, [], 'no browser runtime errors');
   console.log('\n✓ 工作台浏览器验收通过（全部写入均在隔离实例）');
 } finally {
