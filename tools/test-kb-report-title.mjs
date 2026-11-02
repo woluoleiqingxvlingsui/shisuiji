@@ -16,6 +16,7 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -24,7 +25,16 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const TOKEN = 'kb-title-probe-token';
-const PORT = 8794;
+
+/** 随机空闲端口：CI 里多任务并行时固定端口会撞车（别的测试都用随机端口） */
+async function freePort() {
+  const socket = net.createServer();
+  await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
+  const port = socket.address().port;
+  await new Promise((resolve) => socket.close(resolve));
+  return port;
+}
+const PORT = Number(process.env.DANJI_TEST_PORT) || await freePort();
 
 let passed = 0;
 function ok(name, cond, extra = '') {
