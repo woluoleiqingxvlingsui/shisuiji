@@ -1,14 +1,18 @@
 /* 拾穗集 —— 瀑布流列表（M20 任务 E 图2 / 图3）
  *
- * 包裹各板块的卡片列表：把 items 按 util/masonry.js 的贪心算法分到 1~2 列。
- * 分列是 computed —— **只在 items 数组变化时重算**，卡片展开/收起、
- * 图片加载完这类纯高度变化都不会重新分列（这正是不用 CSS columns 的理由）。
+ * 包裹各板块的卡片列表：把 items 分到 1~2 列。
  *
- * 过渡动画按施工图 6.2.5 简化为列内淡入：跨列 move 动画在分列模型下没有意义
- * （卡片换列时 Vue 会直接重建节点），不再强行做。
+ * 分列依据：**卡片真实渲染高度**，不是预估。
+ *   首屏先用预估（或上次量过的高度）分一次，渲染完立刻量真实高度再重分一次；
+ *   两次都在同一个微任务里完成，浏览器只画一次，看不到中间态。
+ *   为什么不再只靠预估：估错会翻掉「两列谁更短」的判定，一次翻错会级联 ——
+ *   实际出现过 3/5 分列、短列空 340px，起因只是某个标题折行判错 28px。
+ *
+ * 仍然守住的规矩：只在 items / 列数 / 视口宽度变化时重分。
+ *   卡片展开 / 收起、图片加载完都不重分，卡片不会跨列乱跳。
  */
 
-import { computed, onMounted, onUnmounted, ref } from '../vue-globals.js';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from '../vue-globals.js';
 import { distributeIntoColumns, estimateCardHeight, masonryColumnCount } from '../util/masonry.js';
 
 const MasonryList = {
@@ -30,19 +34,15 @@ const MasonryList = {
   },
   setup(props) {
     const width = ref(typeof window === 'undefined' ? 1280 : window.innerWidth);
+    const listEl = ref(null);
+    // 量完之后 bump 一下，让 columns 拿真实高度重算
+    const rev = ref(0);
+    // item key -> 真实渲染高度。只用于「两列谁更短」的相对比较
+    const heightCache = new Map();
+
     const onResize = () => { width.value = window.innerWidth; };
     onMounted(() => window.addEventListener('resize', onResize, { passive: true }));
     onUnmounted(() => window.removeEventListener('resize', onResize));
-
-    const columns = computed(() => {
-      if (props.layout === 'list') return [props.items || []];
-      const count = props.columns || masonryColumnCount(width.value);
-      // 双列（视口 > MASONRY_BREAKPOINT，与 style.css 的断点同值）时桌面端正文是折叠态：
-      // .clamped 只显示 3 行，预估必须跟着截断，否则长文被高估 ~2.5 倍，
-      // 贪心会把它单独塞进一列、后面全被挤走，左半边持续空着。
-      // 断点知识只留在 util/masonry.js 一处，这里用「是否双列」表达折叠与否。
-      return distributeIntoColumns(props.items, count, props.estimate || estimateCardHeight, { clampRows: count > 1 });
-    });
 
     const keyOf = (item) => {
       if (!item || typeof item !== 'object') return String(item);
@@ -50,10 +50,66 @@ const MasonryList = {
       return field.split('.').reduce((acc, k) => (acc == null ? acc : acc[k]), item);
     };
 
-    return { columns, keyOf };
+    const count = computed(() => {
+      if (props.layout === 'list') return 1;
+      return props.columns || masonryColumnCount(width.value);
+    });
+    // 双列时桌面端正文是折叠态，预估要跟着截断（只影响首屏那一瞬）
+    const options = computed(() => ({ clampRows: count.value > 1 }));
+
+    // 量过就用真实高度，没量过才回落到预估
+    const estimate = (item, opts) => {
+      const measured = heightCache.get(keyOf(item));
+      if (typeof measured === 'number' && measured > 0) return measured;
+      return (props.estimate || estimateCardHeight)(item, opts);
+    };
+
+    const columns = computed(() => {
+      void rev.value; // 依赖：量完真实高度后重算
+      const list = props.items || [];
+      if (count.value <= 1) return [list];
+      return distributeIntoColumns(list, count.value, estimate, options.value);
+    });
+
+    // 渲染完把真实高度读回来；有变化就重分一次（同一个微任务里完成，不闪）
+    async function measure() {
+      if (count.value <= 1) return;
+      await nextTick();
+      const el = listEl.value;
+      if (!el) return;
+      const colEls = el.querySelectorAll('.masonry-col');
+      if (!colEls.length) return;
+      const snapshot = columns.value;
+      let changed = false;
+      for (let ci = 0; ci < colEls.length; ci++) {
+        const items = snapshot[ci] || [];
+        const kids = colEls[ci].children;
+        for (let j = 0; j < kids.length; j++) {
+          const item = items[j];
+          if (!item) continue;
+          const h = kids[j].getBoundingClientRect().height;
+          if (!h) continue;
+          const k = keyOf(item);
+          const prev = heightCache.get(k);
+          if (prev === undefined || Math.abs(prev - h) > 1) {
+            heightCache.set(k, h);
+            changed = true;
+          }
+        }
+      }
+      if (changed) rev.value++;
+    }
+
+    // 只在「条目变了 / 列数变了」时重分：展开收起、图片加载完都不会触发
+    watch([() => props.items, count], () => { measure(); });
+    // 视口宽度变了列宽也变，卡片高度会变 —— 缓存作废重新量
+    watch(width, () => { heightCache.clear(); measure(); });
+    onMounted(() => { measure(); });
+
+    return { columns, keyOf, listEl };
   },
   template: `
-    <div class="egg-list masonry" :class="'masonry-' + columns.length">
+    <div class="egg-list masonry" :class="'masonry-' + columns.length" ref="listEl">
       <div class="masonry-col" v-for="(col, ci) in columns" :key="ci">
         <slot v-for="item in col" :item="item" :key="keyOf(item)"></slot>
       </div>
