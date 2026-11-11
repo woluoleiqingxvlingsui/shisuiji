@@ -1,4 +1,5 @@
 /** 工作台的真实浏览器验收。独立临时服务、文献库和浏览器配置，不接触个人数据。 */
+import WebSocket from 'ws';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,7 +71,7 @@ try {
   }
   browser = spawn(browserPath, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', `--remote-debugging-port=${debugPort}`, `--user-data-dir=${path.join(tmp, 'browser-profile')}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   const target = await eventually(async () => (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find(t => t.type === 'page'), 'headless browser');
-  ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
   let sequence = 0;
   const pending = new Map(), errors = [];

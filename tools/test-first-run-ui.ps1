@@ -1,5 +1,7 @@
 ﻿# Real WPF controls, synthetic directories only. No service is started.
 $ErrorActionPreference = 'Stop'
+# Synthetic setup fixtures must not inherit the user's launch overrides. No service starts here.
+foreach ($name in @('PORT','DANJI_HOST','DANJI_TOKEN','DANJI_PAPERS_DIR','DANJI_TLS_CERT','DANJI_TLS_KEY')) { Remove-Item ('Env:' + $name) -ErrorAction SilentlyContinue }
 $repo = Split-Path -Parent $PSScriptRoot
 . (Join-Path $repo 'first-run.ps1')
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('danji-setup-ui-' + [Guid]::NewGuid().ToString('N'))
@@ -25,7 +27,7 @@ try {
     $watchdog.Interval = [TimeSpan]::FromSeconds(20)
     $state = @{ Error = ''; Window = $window; Watchdog = $watchdog; Case = $case; Port = $port; Repo = $repo }
     $watchdog.Add_Tick({
-      $state.Error = 'Wizard did not finish'
+      $state.Error = 'Wizard did not finish: ' + $state.Case + ' / ' + $state.Window.FindName('SetupStatus').Text
       $state.Watchdog.Stop()
       $state.Window.Dispatcher.InvokeShutdown()
     }.GetNewClosure())

@@ -7,6 +7,7 @@
  *
  * 用法：node tools/make-screenshots.mjs
  */
+import WebSocket from 'ws';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -130,7 +131,7 @@ try {
     'about:blank',
   ], { windowsHide: true, stdio: 'ignore' });
   const target = await eventually(async () => (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find((t) => t.type === 'page'), 'headless browser');
-  ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
   let sequence = 0;
   const pending = new Map();

@@ -177,7 +177,25 @@ function syncIsPhone() {
 
 function refreshPendingCount() {
   return listOutbox().then((ops) => {
+    // 「需要处理」的条目（图片被服务端永久拒收 / 服务端拒写）仍然留在队列里，
+    // 但它们不该被当成「还没同步完」而每 8 秒重传一遍。
+    const blockedOps = ops.filter((o) => o && o.blocked);
+    state.sync.blocked = blockedOps.map((o) => ({
+      id: o.id,
+      operation_id: o.operation_id,
+      op: o.op,
+      kind: o.blocked.kind || 'unknown',
+      reason: o.blocked.reason || '',
+      images: (o.blocked.images && o.blocked.images.length)
+        ? o.blocked.images
+        : ((o.payload && Array.isArray(o.payload.images)) ? o.payload.images : []),
+      title: (o.payload && o.payload.title) || '',
+      content: (o.payload && o.payload.content) || '',
+    }));
+    state.sync.blockedCount = state.sync.blocked.length;
     state.sync.pendingCount = ops.length;
+    // 可重试的条目数（不含需处理的）：轮询节奏只看这些。
+    state.sync.retryCount = ops.length - blockedOps.length;
     try { rearmInterval(); } catch { /* 尚未启动 interval 时忽略 */ }
     return ops.length;
   }).catch(() => 0);
@@ -432,7 +450,9 @@ function startInterval() {
   // 后台:不信任 pushLive —— WebView 冻结/断流时它仍是 true(假象),
   // 而后台兜底轮询是冻结之外所有场景的生命线,必须保留(见 docs/m14-bg-sync-recovery.md)。
   const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-  const want = pickIntervalMs(state.sync.pendingCount || 0, !!(state.sync && state.sync.pushLive), hidden);
+  // 快节奏只看「可重试」的条目：需处理的条目等用户处理，不该每 8 秒空转。
+  const retryable = state.sync.retryCount != null ? state.sync.retryCount : (state.sync.pendingCount || 0);
+  const want = pickIntervalMs(retryable, !!(state.sync && state.sync.pushLive), hidden);
   if (intervalTimer && intervalMs === want) return;
   stopInterval();
   intervalMs = want;
@@ -455,6 +475,82 @@ function disposeSync() {
   started = false;
 }
 
+/** 需要用户处理：给 outbox 条目打上 blocked 标记（仍在队列里，但不再自动重传）。
+ *  绝不覆盖用户在途的新编辑：操作身份对不上就放弃这次打标。 */
+async function markOutboxBlocked(entryId, blocked, expectedOperationId) {
+  const changed = await mutateOutbox(entryId, (current) => {
+    if (!current) return;
+    // 用户又改了（操作身份变了）→ 不打标：绝不覆盖用户在途的新编辑
+    if (expectedOperationId && current.operation_id !== expectedOperationId) return;
+    return { ...current, blocked };
+  });
+  return changed.changed ? changed.after : null;
+}
+
+/**
+ * 把被拒的随记「另存为新的手机随记」：新 UUID、新条目。
+ * 绝不用原 id 重建那条被拒的记录（服务端拒的是它，不该再自动提一次）。
+ */
+async function saveBlockedAsNewIdea(id) {
+  const entry = await getOutbox(id);
+  if (!entry || !entry.payload) return false;
+  const payload = entry.payload;
+  const images = (Array.isArray(payload.images) ? payload.images : [])
+    .map((im) => ({ id: im.id, name: im.name || '' }));
+  const newId = uuid();
+  await enqueueOutbox({
+    id: newId,
+    op: 'create',
+    payload: {
+      id: newId,
+      title: payload.title || '',
+      content: payload.content || '',
+      origin: 'mobile',
+      created_at: payload.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      images,
+    },
+    base_updated_at: '',
+    confirmed: false,
+    updated_at: new Date().toISOString(),
+    operation_id: uuid(),
+  });
+  // 旧条目：用户已明确把内容另存为新随记 → 队列里不再留它（也不再自动重传）
+  await dropOutboxEntry(id, { dropLocalImages: true, expectedOperationId: entry.operation_id });
+  return newId;
+}
+
+/** 用户明确放弃待发修改：丢掉队列项，并清理只被它引用的本地图（用户主动放弃才算数）。 */
+async function dropOutboxEntry(id, { dropLocalImages = false, expectedOperationId } = {}) {
+  const entry = await getOutbox(id);
+  if (!entry) return false;
+  const removal = await mutateOutbox(id, current => {
+    if (!current || !sameOutboxOperation(current, entry) || (expectedOperationId && current.operation_id !== expectedOperationId)) return;
+    return null;
+  });
+  if (!removal.changed || removal.after !== null) return false;
+  if (dropLocalImages) {
+    const localIds = localImageIds(entry.payload && entry.payload.images);
+    if (localIds.length) {
+      const rest = await listOutbox();
+      const stillUsed = new Set();
+      for (const o of rest) {
+        for (const im of localImageIds(o.payload && o.payload.images)) stillUsed.add(im);
+      }
+      const drop = localIds.filter((lid) => !stillUsed.has(lid));
+      if (drop.length) await deleteLocalImages(drop);
+    }
+  }
+  await refreshPendingCount();
+  await reloadIdeasDisplay();
+  return true;
+}
+
+/** 待处理条目：需要用户去编辑器里换图/移除，或另存为新随记 / 放弃修改。 */
+function listBlocked() {
+  return (state.sync.blocked || []).slice();
+}
+
 /** 按 push 结果处理单条：出队 / 留队 / 删本地 / 回滚 */
 async function applyPushResult(entry, result) {
   const status = result && result.status;
@@ -474,6 +570,20 @@ async function applyPushResult(entry, result) {
       }
       return;
     }
+    if (status === 'forbidden') {
+      // 服务端拒写（例：这条不是手机端记的）：**保留队列**，标记为需要处理。
+      // 用户可以查看原内容、另存为新的手机随记，或明确放弃。
+      // 用 current（队列里最新的那条）拼回去，绝不覆盖用户在途的新编辑。
+      action = 'blocked_forbidden';
+      return {
+        ...current,
+        blocked: {
+          kind: 'forbidden',
+          reason: (result && result.reason) || '这条随记在电脑端，手机上改不了',
+          at: new Date().toISOString(),
+        },
+      };
+    }
     if (status === 'missing' && (same || current.op === 'delete')) {
       action = 'dequeue_missing'; return null;
     }
@@ -481,7 +591,6 @@ async function applyPushResult(entry, result) {
       action = 'keep'; conflictEntry = current; return;
     }
     if (!same) { action = 'keep_superseded'; return; }
-    if (status === 'forbidden') { action = 'dequeue_forbidden'; return null; }
     action = 'dequeue_error'; return null;
   });
   if (conflictEntry) {
@@ -521,6 +630,7 @@ async function resolveOutboxLocalImages(ops) {
     if (!images || !hasLocalImages(images)) { out.push(entry); continue; }
     let superseded = false;
     let current = entry;
+    let permanent = null;
     await resolveOutboxImages(images, {
       onProgress: async partial => {
         const changed = await mutateOutbox(entry.id, latest => {
@@ -531,7 +641,23 @@ async function resolveOutboxLocalImages(ops) {
         current = changed.after;
         return true;
       },
+      onPermanent: async (fail) => { permanent = fail; },
     });
+    if (permanent) {
+      // 图片被服务端永久拒收：**不删 blob、不剔除 payload 里的任何一张图**。
+      // 这条随记进入「需要处理」：本轮不推（正文也不推，避免电脑缺图却显示成功），
+      // 用户在编辑器里换图/移除后保存，就恢复同步。
+      const marked = await markOutboxBlocked(entry.id, {
+        kind: 'image',
+        reason: `${permanent.name || '图片'}：${permanent.reason}`,
+        images: [{ id: permanent.id, name: permanent.name || '' }],
+        at: new Date().toISOString(),
+      }, entry.operation_id);
+      if (marked) {
+        toast('有一张图片传不上去，请到随记里换一张或移除', 'warn');
+      }
+      continue;   // 这条不进推送列表，其他条目照常推
+    }
     if (!superseded) out.push(current);
   }
   return out;
@@ -542,6 +668,13 @@ async function pruneDroppedLocalImages(prevEntry, nextEntry) {
   const prevIds = localImageIds(prevEntry && prevEntry.payload && prevEntry.payload.images);
   if (!prevIds.length) return;
   const keep = new Set(localImageIds(nextEntry && nextEntry.payload && nextEntry.payload.images));
+  // 只有「用户明确放弃」且「别的队列项也不再引用」时才删本机原图。
+  let others = [];
+  try { others = await listOutbox(); } catch { return; /* 无法确认引用时保留本地图 */ }
+  for (const o of others) {
+    if (!o || o.id === nextEntry?.id) continue;
+    for (const id of localImageIds(o.payload && o.payload.images)) keep.add(id);
+  }
   const dropped = prevIds.filter((id) => !keep.has(id));
   if (dropped.length) await deleteLocalImages(dropped);
 }
@@ -560,7 +693,10 @@ async function claimOutboxEntry(entry) {
 async function pushOnce() {
   // 冲突中且未解决的条目先不重复推，避免每 60 秒打一轮同样的 conflict
   const conflictIds = new Set((state.sync.conflicts || []).map((c) => c.id));
-  const ops = (await listOutbox()).filter((o) => !conflictIds.has(o.id));
+  // 「需要处理」的条目也不推：等用户处理（换图/另存/放弃）后再走。
+  // 判据直接看 outbox 记录上的 blocked 标记（与队列同一份事务数据）。
+  const ops = (await listOutbox())
+    .filter((o) => !conflictIds.has(o.id) && !(o && o.blocked));
   if (!ops.length) return { pushed: 0, results: [] };
   const resolved = await resolveOutboxLocalImages(ops);
   const opsResolved = [];
@@ -722,6 +858,9 @@ async function syncNow(opts = {}) {
     state.sync.offline = false;
     if (state.sync.conflicts.length) {
       setStatus('conflicts');
+    } else if ((state.sync.blocked || []).length) {
+      // 有条目需要用户处理：不能报「已同步」，也不能报「离线」
+      setStatus('attention');
     } else if (state.sync.pendingCount > 0) {
       setStatus('offline');
     } else {
@@ -821,6 +960,7 @@ async function resolveConflict(id, choice) {
   await refreshPendingCount();
   await reloadIdeasDisplay();
   if (state.sync.conflicts.length) setStatus('conflicts');
+  else if ((state.sync.blocked || []).length) setStatus('attention');
   else setStatus(state.sync.pendingCount > 0 ? 'offline' : 'synced');
   syncNow({ reason: 'conflict-resolved' });
   return true;
@@ -859,7 +999,10 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
         id: entryId,
         title: payload.title || '',
         content: payload.content || '',
-        origin: 'mobile',
+        // 来源只在新记录上标「手机端」；更新时不带 origin，
+        // 否则队列里的这条会把镜像里服务端的真实来源盖掉
+        // （电脑端记的随记会在手机上被误显示成可写）。
+        ...(op === 'create' ? { origin: 'mobile' } : {}),
         created_at: payload.created_at || now,
         updated_at: now,
         // 贴图与置顶必须随队列走，否则 push 时会把服务端已有的值冲掉
@@ -873,6 +1016,9 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
     confirmed,
     origin: 'mobile',
     updated_at: now,
+    // 用户又动手了（换图/移除图片/改文字）→ 解除「需要处理」标记，
+    // 这条重新参与推送；推送失败会重新标记。
+    blocked: null,
     // 操作身份：每次用户操作一个新 id。同一条队列项被重复 push（网络重试）时
     // 身份不变，服务端据此认出「同一次请求」，不会把旧请求当成新编辑再写一遍。
     operation_id: uuid(),
@@ -893,7 +1039,9 @@ async function enqueueIdeaLocal({ op, id, payload, baseUpdatedAt }) {
   if (!attempt) {
     setStatus('offline');
   } else if (state.sync.status !== 'syncing') {
-    setStatus(state.sync.conflicts.length ? 'conflicts' : (state.sync.pendingCount ? 'offline' : 'synced'));
+    setStatus(state.sync.conflicts.length ? 'conflicts'
+      : ((state.sync.blocked || []).length ? 'attention'
+        : (state.sync.pendingCount ? 'offline' : 'synced')));
   }
   // 能发请求就顺手推一把（原生已配对忽略 onLine）
   if (attempt) {
@@ -956,4 +1104,8 @@ export {
   syncIsPhone,
   shouldAttemptSync,
   rearmInterval,
+  listBlocked,
+  saveBlockedAsNewIdea,
+  dropOutboxEntry,
+  markOutboxBlocked,
 };

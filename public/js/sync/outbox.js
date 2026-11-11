@@ -33,6 +33,9 @@ function collapseOutboxOp(prev, next) {
     sent: next.sent != null ? !!next.sent : (prev ? !!prev.sent : false),
     sent_at: next.sent_at || (prev && prev.sent_at) || '',
     sent_operation_id: (prev && prev.sent_operation_id) || '',
+    // 需要用户处理的标记（图片被服务端永久拒收 / 服务端拒写）：
+    // 保留在队列里等用户处理，但不会被自动重传。新的用户操作可以清掉它。
+    blocked: next.blocked !== undefined ? next.blocked : (prev ? (prev.blocked || null) : null),
   };
 
   if (!prev) {

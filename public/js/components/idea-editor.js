@@ -5,7 +5,7 @@ import { CONFIG } from '../../config.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { uploadImage } from '../api.js';
-import { saveLocalImage, deleteLocalImage } from '../local-images.js';
+import { saveLocalImage, deleteLocalImage, inspectImageFile } from '../local-images.js';
 import { useImageUrls } from '../img-urls.js';
 
 const MAX_IMAGES = 9;
@@ -81,6 +81,13 @@ const IdeaEditor = {
       try {
         for (const file of files) {
           if (form.images.length >= MAX_IMAGES) { toast(`最多 ${MAX_IMAGES} 张，多余的没加`, 'warn'); break; }
+          // 选图前先校验（与服务端同一套：后缀白名单 + 可校验 MIME + 64MB 上限）。
+          // MIME 为空或 octet-stream 时靠魔数判别，不误拒合法图片。
+          const check = await inspectImageFile(file);
+          if (!check.ok) {
+            toast(check.reason || '这张图不能用', 'warn');
+            continue;
+          }
           // 已知离线：直接存本机，随记照常进 outbox，联网同步时 push 前自动上传
           if (offline.value) {
             if (await keepLocal(file)) localCount += 1;

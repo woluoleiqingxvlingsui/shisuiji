@@ -23,6 +23,66 @@ const TYPE_EXT = {
   'image/webp': 'webp',
 };
 
+// ---- 选图前校验（与服务端 handleUpload 同一套口径，不自动压缩）----
+// 后缀白名单 + 可校验 MIME + 64MB 上限 + 魔数（服务端还会再校验一次）
+const MAX_IMAGE_BYTES = 64 * 1024 * 1024;   // 与服务端 MAX_UPLOAD_BYTES 一致
+const ALLOWED_EXT = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+const ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/gif', 'image/webp'];
+// MIME 缺失或只是二进制流：靠魔数判别，不误拒合法图片
+const UNKNOWN_MIME = ['', 'application/octet-stream', 'binary/octet-stream'];
+
+/** 魔数校验：与服务端 imageMagicOk 逐条对齐 */
+function imageMagicOk(bytes) {
+  if (!bytes || bytes.length < 12) return false;
+  const b = bytes;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true;
+  const head6 = String.fromCharCode(...Array.from(b.slice(0, 6)));
+  if (head6 === 'GIF87a' || head6 === 'GIF89a') return true;
+  const head4 = String.fromCharCode(...Array.from(b.slice(0, 4)));
+  const head12 = String.fromCharCode(...Array.from(b.slice(8, 12)));
+  return head4 === 'RIFF' && head12 === 'WEBP';
+}
+
+/**
+ * 选图前校验：后缀白名单 + 可校验 MIME + 64MB 上限。
+ * 在「存本机」和「直传」之前都跑一遍——提前拦住服务端一定拒收的文件，
+ * 免得离线存了本机、联网后才发现传不上去。
+ * @returns {Promise<{ok:boolean, reason?:string, ext?:string, mime?:string}>}
+ */
+async function inspectImageFile(file) {
+  if (!file || typeof file.size !== 'number') {
+    return { ok: false, reason: '没有可保存的图片数据' };
+  }
+  const name = String(file.name || '图片');
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!ALLOWED_EXT[ext]) {
+    return { ok: false, reason: `「${name}」格式不支持：只收 png / jpg / jpeg / gif / webp` };
+  }
+  const type = String(file.type || '').toLowerCase();
+  if (type && !UNKNOWN_MIME.includes(type) && !ALLOWED_MIME.includes(type)) {
+    return { ok: false, reason: `「${name}」的类型（${type}）不是可校验的图片类型` };
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return { ok: false, reason: `「${name}」超过 64MB 上限（不自动压缩，请换一张）` };
+  }
+  try {
+    const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    if (!imageMagicOk(head)) {
+      return { ok: false, reason: `「${name}」的内容不是可校验的图片（服务端会拒收）` };
+    }
+  } catch {
+    // 读不到文件头就只按后缀 + MIME 判定，不误杀
+  }
+  return { ok: true, ext, mime: ALLOWED_MIME.includes(type) ? type : ALLOWED_EXT[ext] };
+}
+
 function isLocalImageId(id) {
   return typeof id === 'string' && id.startsWith(LOCAL_PREFIX);
 }
@@ -163,11 +223,15 @@ async function uploadLocalImage(id) {
 /**
  * push 前把 images 数组里的 local id 逐张上传替换成服务端 UUID。
  * @param {Array<{id:string,name?:string}>} images
- * @param {{ onProgress?: (nextImages: Array<{id:string,name?:string}>) => Promise<boolean|void> }} [opts]
+ * @param {{ onProgress?: (nextImages: Array<{id:string,name?:string}>) => Promise<boolean|void>,
+ *           onPermanent?: (fail: {id:string,name:string,reason:string}) => Promise<void>|void }} [opts]
  *   onProgress 在每张图上传成功后立刻回调，参数是「已替换 + 未处理」的完整数组；
  *   调用方据此把中间态写回 outbox——否则第二张失败重试时，第一张的本地记录已删、
  *   旧 payload 还指向 local id，会丢图。回调返回 false 表示外层已有更新的本地编辑
  *   没被覆盖，此时不删本地记录（留待下一轮按新 payload 处理）。
+ *   onPermanent 在某张图被服务端**永久拒收**时回调（格式/大小这类重试也没用的）。
+ *   永久拒收**不删本地 blob、也不从 payload 剔除**：图还在本机，
+ *   这条随记改由上层标记为「需要处理」，等用户在编辑器里换图/移除后再同步。
  * @returns {Promise<Array<{id:string,name?:string}>>} 全部替换后的 images
  */
 async function resolveOutboxImages(images, opts = {}) {
@@ -190,15 +254,25 @@ async function resolveOutboxImages(images, opts = {}) {
       up = await pushLocalImageToServer(im.id);
     } catch (err) {
       if (err && err.permanent) {
-        // 文件本身传不上去（格式不被接受/本地记录损坏）：丢图保随记，
-        // 否则队列会永远卡在这一条。关键信息保留在控制台，不静默。
-        console.warn('[danji-local-image] 本地图片无法上传，已从待同步随记里移除：'
-          + im.id + '（' + ((err && err.message) || err) + '）');
-        await deleteLocalImage(im.id);
+        // 永久拒收：**不删本地 blob、不从 payload 剔除任何一张图**。
+        // 这一张图保留原样（仍是 local:<uuid>），后面的图也原样保留，
+        // 整条随记交由上层标记为「需要处理」，等用户在编辑器里换图或移除。
+        const fail = {
+          id: im.id,
+          name: im.name || '',
+          reason: (err && err.message) || '图片被服务端拒收',
+        };
+        console.warn('[danji-local-image] 图片被服务端永久拒收，已保留本机原图待处理：'
+          + im.id + '（' + fail.reason + '）');
+        resolved.push({ id: im.id, name: im.name || '' });
+        for (const tail of rest) resolved.push({ id: tail.id, name: tail.name || '' });
         if (typeof opts.onProgress === 'function') {
-          await opts.onProgress([...resolved, ...rest]);
+          await opts.onProgress(resolved.slice());
         }
-        continue;
+        if (typeof opts.onPermanent === 'function') {
+          await opts.onPermanent(fail);
+        }
+        return resolved;
       }
       throw err;
     }
@@ -228,6 +302,9 @@ function hasLocalImages(images) {
 
 export {
   LOCAL_PREFIX,
+  MAX_IMAGE_BYTES,
+  ALLOWED_EXT,
+  ALLOWED_MIME,
   isLocalImageId,
   saveLocalImage,
   getLocalImage,
@@ -238,4 +315,6 @@ export {
   resolveOutboxImages,
   localImageIds,
   hasLocalImages,
+  inspectImageFile,
+  imageMagicOk,
 };

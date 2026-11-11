@@ -6,6 +6,7 @@ import { computed } from '../vue-globals.js';
 import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
+import { canWriteIdea } from '../perm.js';
 import { enqueueIdeaLocal } from '../sync/engine.js';
 
 function mobileSyncOn() {
@@ -73,6 +74,13 @@ async function persistIdea(payload) {
   const isEdit = !!state.editingIdea;
 
   if (mobileSyncOn()) {
+    // 手机端只改「明确是手机端记的」随记：电脑端记的、老数据里没写来源的都是只读。
+    // 服务端对非 mobile 来源一律回 forbidden，先在前端拦下，别让用户白改一场。
+    if (isEdit && !canWriteIdea(state.editingIdea)) {
+      toast('这条是电脑端记的，手机上改不了', 'warn');
+      state.ideaEditorOpen = false;
+      return;
+    }
     const id = isEdit ? state.editingIdea.id : null;
     // 乐观锁基线必须是「最后一次服务端时间」：优先 base_updated_at
     // （镜像∪队列叠加时写回），其次才是镜像/服务端 updated_at
@@ -123,6 +131,10 @@ async function togglePin(idea) {
   const next = !idea.pinned;
 
   if (mobileSyncOn()) {
+    if (!canWriteIdea(idea)) {
+      toast('这条是电脑端记的，手机上改不了', 'warn');
+      return;
+    }
     // 队列 payload 必须带全字段：push 时服务端按整条覆盖。
     // idea 是 Vue reactive Proxy，直接进 IndexedDB 会 DataCloneError，深拷贝成普通对象
     const plain = JSON.parse(JSON.stringify(idea));
@@ -164,6 +176,10 @@ async function removeIdea(idea) {
   if (!confirm(`确定删除「${name}」吗？`)) return;
 
   if (mobileSyncOn()) {
+    if (!canWriteIdea(idea)) {
+      toast('这条是电脑端记的，手机上删不了', 'warn');
+      return;
+    }
     await enqueueIdeaLocal({
       op: 'delete',
       id: idea.id,

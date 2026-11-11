@@ -111,5 +111,12 @@ try {
     assert.equal(result.status, 0, result.stderr); assert.deepEqual(await fs.readFile(configAt(root)), original);
   });
 } finally { if (path.dirname(path.resolve(temp)) !== path.resolve(os.tmpdir()) || !path.basename(temp).startsWith('danji-first-run-')) throw new Error('Unsafe test cleanup target');
+  // npm's local dependency is a Windows junction. Remove it before its target;
+  // otherwise Node 22 can stall recursively removing the resulting dangling junction.
+  if (process.platform === 'win32') {
+    await fs.rmdir(path.join(temp, 'npm-local', 'node_modules', 'qrcode')).catch(err => {
+      if (err.code !== 'ENOENT') throw err;
+    });
+  }
   await fs.rm(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 300 }); }
 console.log(`✓ ${passed} 项首次配置回归通过（仅临时目录）`);

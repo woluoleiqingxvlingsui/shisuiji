@@ -3,6 +3,7 @@
  * 用法：node tools/test-pair.mjs
  */
 import assert from 'node:assert/strict';
+import { CLIENT_VERSION } from '../public/js/sync/net.js';
 import {
   normalizePairBase,
   isPrivateHost,
@@ -154,14 +155,14 @@ ok('parsePairPayload：公网 http 配对码拒绝', () => {
 
 const originalFetch = globalThis.fetch;
 try {
-  const good = { ok: true, app: 'shisuiji', apiVersion: 1, minClient: 2 };
+  const good = { ok: true, app: 'shisuiji', apiVersion: 1, minClient: CLIENT_VERSION };
   for (const [name, status, body, expected] of [
     ['配对检查：正确口令与兼容服务通过', 200, good, true],
     ['配对检查：错误口令拒绝', 401, { needToken: true }, false],
     ['配对检查：旧服务缺少验证接口拒绝', 404, {}, false],
     ['配对检查：其他产品拒绝', 200, { ...good, app: 'other' }, false],
     ['配对检查：返回无效 JSON 信息拒绝', 200, {}, false],
-    ['配对检查：App 过旧拒绝', 200, { ...good, minClient: 3 }, false],
+    ['配对检查：App 过旧拒绝', 200, { ...good, minClient: CLIENT_VERSION + 1 }, false],
     ['配对检查：协议版本不兼容拒绝', 200, { ...good, apiVersion: 2 }, false],
     ['配对检查：网络错误拒绝', 0, {}, false],
   ]) {

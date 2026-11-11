@@ -32,10 +32,11 @@ const KbMerge = {
     <aside v-dialog class="drawer sync-conflict-drawer">
       <header class="drawer-head">
         <h2>📚 知识库合并</h2>
-        <button class="btn ghost small" @click="pick('manual')">✕</button>
+        <button class="btn ghost small" @click="pick('dismiss')">✕</button>
       </header>
       <div class="drawer-form">
         <p class="sync-hint">这条笔记又更新了，但知识库条目被你手动调整过——以哪边为准？</p>
+        <p class="sync-hint">选「用笔记版」之后会重新自动跟随；选「保留手动版」则只确认这一版笔记，下次笔记再更新还会再问你。关掉弹窗只是稍后处理，不算确认。</p>
         <div class="conflict-sides">
           <div class="conflict-side">
             <h3>📄 笔记最新版</h3>

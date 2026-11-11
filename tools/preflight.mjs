@@ -23,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectAndroidVersion } from './release-version.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NO_REMOTE = process.argv.includes('--no-remote');
@@ -76,7 +77,9 @@ const SENSITIVE_PATTERNS = [
   { re: /\.keystore$/i, why: 'Android 签名密钥' },
   { re: /\.jks$/i, why: 'Android 签名密钥' },
   { re: /keystore\.properties$/i, why: 'Android 签名口令' },
-  { re: /^local\.properties$/i, why: 'Android SDK 绝对路径' },
+  { re: /(?:^|\/)local\.properties$/i, why: 'Android SDK 绝对路径' },
+  { re: /^runtime-options\.json$/i, why: '本机启动偏好' },
+  { re: /\.(?:p12|pfx|key)$/i, why: '证书或签名密钥' },
   { re: /^\.env$/i, why: '环境变量（可能含密钥）' },
   { re: /^\.env\.(?!example)/i, why: '环境变量（可能含密钥）' },
 ];
@@ -98,21 +101,11 @@ const BENIGN_USER_NAMES = /^(RUNNER~?\d*|runner|ADMINISTRATOR|Administrator|SYST
 /**
  * 从命中结果里剔除明显无害的：
  *  - 用户名是 CI / 系统占位符
- *  - 出现在注释行里（示例路径，如 lib.ps1 里讲 8.3 短名的 C:\Users\RUNNER~1）
+ *  - 出现在注释行里（示例路径，如 lib.ps1 里讲 8.3 短名的 Windows CI runner）
  */
 function isBenignPathHit(rel, matchText) {
   const userMatch = /[A-Za-z]:\\Users\\([^\\\s"']+)/.exec(matchText);
   if (userMatch && BENIGN_USER_NAMES.test(userMatch[1])) return true;
-  // 逐行看：这个绝对路径所在行是不是注释
-  const needle = matchText.split('\\')[0] + '\\' + (matchText.split('\\')[1] || '');
-  try {
-    const lines = fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n');
-    for (const line of lines) {
-      if (!line.includes(matchText)) continue;
-      const t = line.trim();
-      if (t.startsWith('#') || t.startsWith('//') || t.startsWith('*') || t.startsWith(';')) return true;
-    }
-  } catch { /* ignore */ }
   return false;
 }
 
@@ -144,8 +137,30 @@ try {
   process.exit(1);
 }
 ok(`被跟踪文件 ${tracked.length} 个`);
+// 新增发布文件尚未进入 Git 索引时，也必须检查明确的发布清单。
+const manifestPath = path.join(ROOT, 'release-files.json');
+if (fs.existsSync(manifestPath)) {
+  const manifest = readJson('release-files.json');
+  if (!manifest || !Array.isArray(manifest.extraSourceFiles)) fail('发布清单无法读取');
+  else {
+    for (const rel of manifest.extraSourceFiles) {
+      if (typeof rel !== 'string' || path.isAbsolute(rel) || rel.includes('\\') || rel.split('/').includes('..')) {
+        fail('发布清单包含非法路径'); continue;
+      }
+      if (!fs.existsSync(path.join(ROOT, rel))) fail(`发布清单中的文件缺失：${rel}`);
+      if (!tracked.includes(rel)) tracked.push(rel);
+    }
+  }
+}
 
 const leaked = [];
+// Windows PowerShell 5.1 needs UTF-8 BOM for Chinese scripts; a second BOM
+// becomes executable content and can prevent the leading param() from working.
+for (const rel of tracked.filter((name) => name.endsWith('.ps1'))) {
+  if (!fs.existsSync(path.join(ROOT, rel))) continue;
+  const source = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  if (source.startsWith('\uFEFF\uFEFF')) fail(`${rel} 有重复 UTF-8 BOM，参数可能失效`);
+}
 for (const rel of tracked) {
   for (const p of SENSITIVE_PATTERNS) {
     if (p.re.test(rel)) { leaked.push({ rel, why: p.why }); break; }
@@ -285,13 +300,19 @@ if (!rootPkg || !rootLock || !appPkg || !appLock) {
     'app/package-lock.json': appLock.version,
     'app/package-lock.json packages[""]': appLock.packages?.['']?.version,
   };
-  const uniq = [...new Set(Object.values(versions).filter(Boolean))];
-  if (uniq.length === 1) {
+  const uniq = [...new Set(Object.values(versions))];
+  if (uniq.length === 1 && typeof uniq[0] === 'string' && uniq[0]) {
     ok(`六处版本号一致：${uniq[0]}`);
   } else {
     for (const [k, v] of Object.entries(versions)) {
       if (v !== uniq[0]) fail(`${k} = ${v}，与其他处不一致`);
     }
+  }
+  try {
+    const android = inspectAndroidVersion(ROOT);
+    ok(`Android 构建与根版本一致：${android.name} / versionCode ${android.code}`);
+  } catch (err) {
+    fail(err.message);
   }
   // CHANGELOG 是否包含当前版本
   let changelog = '';

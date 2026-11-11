@@ -1,6 +1,7 @@
 /** 出队竞态回归：隔离服务器 + Edge + 真实 IndexedDB + 真实同步引擎。
  * 场景：push 在途期间用户又编辑了同一条随记（同 id 覆盖写队列）。
  * 断言：新编辑不被删除、基线被推进、下一轮推送成功、界面始终显示用户刚写的内容。 */
+import WebSocket from 'ws';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -112,7 +113,7 @@ try {
     try { target = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find(t => t.type === 'page'); return !!target; }
     catch { return false; }
   }, 'Edge');
-  ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
   let id = 0;
   const pending = new Map();

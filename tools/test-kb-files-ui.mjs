@@ -11,6 +11,7 @@
  * 隔离：server.js + public/ + lib/ 复制到临时目录各自跑；DANJI_PAPERS_DIR 显式指向临时目录；
  * 端口随机；浏览器用独立 profile；child_process 换成记录桩（不真的弹窗口、不真的打开文件）。
  */
+import WebSocket from 'ws';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,7 +128,7 @@ try {
     `--user-data-dir=${path.join(tmp, 'browser-profile')}`, 'about:blank',
   ], { windowsHide: true, stdio: 'ignore' });
   const target = await eventually(async () => (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find((t) => t.type === 'page'), 'headless browser');
-  ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
   let sequence = 0;
   const pending = new Map();

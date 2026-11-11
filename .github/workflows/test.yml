@@ -25,6 +25,18 @@ jobs:
       # ESM 边界回归：public/ 下的 .js 必须在 Node 18 语义下也按 ESM 解析
       - run: node tools/test-esm-boundary.mjs
 
+  maintenance-and-packaging:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: 隔离备份恢复回归
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-maintenance.ps1
+      - name: 打包清单与运行时回归
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-portable.ps1
+
   # 需要真实 Windows GUI 的验收：Edge 跑前端界面 + WPF 跑图形控制台。
   # 单独一个 job：这两项要开窗口、无头会话下不稳，混进主矩阵会拖垮 3 个 node 版本。
   ui-and-console:
@@ -33,12 +45,14 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
       - run: npm ci
       # 知识库关联文件的真实浏览器验收（headless Edge，隔离临时目录）
       - name: 知识库文件 UI 验收
         run: node tools/test-kb-files-ui.mjs
+      - name: 同步拒收与本机内容保留验收
+        run: node tools/test-sync-preservation-ui.mjs
       # 图形控制台启动验收：窗口出现速度、耗时任务期间可响应、关窗后干净退出
       - name: 图形控制台启动验收
         run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File tools/test-control-startup.ps1

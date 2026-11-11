@@ -19,7 +19,8 @@ const SYNC_QUIET_RETRIES = 2;
 // v2：后台同步改为事件驱动。服务端推的聚合事件从 changed 改名 sync（旧壳只认 changed，
 //     配新服务端会一条推送都收不到、只剩 15 分钟兜底闹钟，正是「静默出错」），
 //     hello 帧也多了 pendingSince 字段。升到 2 让旧壳主动提示重装，而不是默默不同步。
-const CLIENT_VERSION = 2;
+// v3: rejected edits and images remain on device until the user handles them.
+const CLIENT_VERSION = 3;
 
 /** health.minClient 大于内置版本即为过旧；字段缺失（老服务）视为不过旧 */
 function isClientOutdated(minClient) {

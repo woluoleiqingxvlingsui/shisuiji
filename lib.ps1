@@ -7,6 +7,10 @@ if ($PSScriptRoot) { $Base = $PSScriptRoot }
 elseif ($MyInvocation.MyCommand.Path) { $Base = Split-Path -Parent $MyInvocation.MyCommand.Path }
 else { $Base = (Get-Location).Path }
 
+# 运行时（随包自带的 Node 优先）与本机偏好（协议）。缺了 runtime.ps1 也能用旧方式跑。
+$RuntimeScript = Join-Path $Base 'runtime.ps1'
+if (Test-Path -LiteralPath $RuntimeScript) { . $RuntimeScript }
+
 $AppCfg = $null
 $Port = 8642
 $Scheme = 'http'
@@ -72,6 +76,31 @@ function Get-UseTls {
   return ((Test-Path $cert) -and (Test-Path $key))
 }
 
+# 当前设置下应该用哪个协议：
+#   auto（有证书走 HTTPS，没证书走 HTTP）/ http（强制 HTTP，证书保留但不用）/ https
+function Get-DanjiEffectiveScheme {
+  $pref = 'auto'
+  try { $pref = [string](Get-DanjiSchemePreference -ProjectRoot $Base) } catch { $pref = 'auto' }
+  if ($pref -eq 'http') { return 'http' }
+  $tls = Get-UseTls
+  if ($pref -eq 'https') { if ($tls) { return 'https' } ; return 'http' }
+  if ($tls) { return 'https' }
+  return 'http'
+}
+
+# 实际协议：服务在跑就用它真实的协议（健康检查探出来的）；没在跑就用当前设置
+function Get-CurrentScheme {
+  if ($script:LiveScheme) { return [string]$script:LiveScheme }
+  return (Get-DanjiEffectiveScheme)
+}
+
+# 给界面看的一句话说明
+function Get-SchemeNote([string]$Scheme) {
+  if ($Scheme -eq 'https') { return 'HTTPS（自签证书，手机 App 不接受，配对请改用 HTTP）' }
+  if ($Scheme -eq 'http') { return 'HTTP（手机 App 可直接扫码连接）' }
+  return ''
+}
+
 function Get-LanIPv4 {
   try {
     $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -92,7 +121,7 @@ function Get-LanIPv4 {
 
 # App 配对载荷（P10 / M4）：{"v":1,"base":"http://IP:port","token":"..."}
 function Get-PairPayload {
-  $scheme = if (Get-UseTls) { 'https' } else { 'http' }
+  $scheme = Get-CurrentScheme
   $ip = Get-LanIPv4
   if (-not $ip) {
     $ip = '127.0.0.1'
@@ -108,9 +137,10 @@ function Get-PairPayload {
 function Show-PairQr {
   $json = Get-PairPayload
   $qrScript = Join-Path $Base 'tools\print-pair-qr.mjs'
-  if (Test-Path $qrScript) {
+  $nodeExe = Get-DanjiNodePath -ProjectRoot $Base
+  if ((Test-Path $qrScript) -and $nodeExe) {
     $parsed = $json | ConvertFrom-Json
-    & node $qrScript --base $parsed.base --token $parsed.token
+    & $nodeExe $qrScript --base $parsed.base --token $parsed.token
   } else {
     Write-Host '----- 配对 JSON -----'
     Write-Host $json
@@ -124,12 +154,13 @@ function New-PairQrPng {
   $json = Get-PairPayload
   $parsed = $json | ConvertFrom-Json
   $qrScript = Join-Path $Base 'tools\pair-qr-png.mjs'
-  if (-not (Test-Path $qrScript)) { return $null }
+  $nodeExe = Get-DanjiNodePath -ProjectRoot $Base
+  if ((-not (Test-Path $qrScript)) -or (-not $nodeExe)) { return $null }
   $out = Join-Path ([System.IO.Path]::GetTempPath()) ("danji-pair-{0}.png" -f ([Guid]::NewGuid().ToString('N')))
   try {
     $tokenArg = @()
     if ($parsed.token) { $tokenArg = @('--token', [string]$parsed.token) }
-    & node $qrScript --base ([string]$parsed.base) @tokenArg --out $out 2>$null | Out-Null
+    & $nodeExe $qrScript --base ([string]$parsed.base) @tokenArg --out $out 2>$null | Out-Null
     if ((Test-Path $out) -and ((Get-Item $out).Length -gt 0)) { return $out }
   } catch { }
   return $null
@@ -139,7 +170,7 @@ function New-PairQrPng {
 # 探活/启动这类高频路径不需要手机地址，跳过它才能让界面立刻可用。
 function Update-UrlFromEnv {
   param([switch]$SkipLan)
-  if (Get-UseTls) { $Scheme = 'https' } else { $Scheme = 'http' }
+  $Scheme = Get-CurrentScheme
   $Url = ("{0}://localhost:{1}" -f $Scheme, $Port)
   if ($SkipLan) {
     $PhoneUrl = $null
@@ -182,10 +213,11 @@ function Test-Up {
   Update-UrlFromEnv -SkipLan
   # HTTP / HTTPS 都探：只要有一个在服就算在跑
   $a = Test-UriOk ("http://127.0.0.1:{0}/api/health" -f $Port)
-  if ($a) { $script:LiveScheme = 'http'; return $true }
+  if ($a) { $script:LiveScheme = 'http'; Update-UrlFromEnv -SkipLan; return $true }
   $b = Test-UriOk ("https://127.0.0.1:{0}/api/health" -f $Port)
-  if ($b) { $script:LiveScheme = 'https'; return $true }
+  if ($b) { $script:LiveScheme = 'https'; Update-UrlFromEnv -SkipLan; return $true }
   $script:LiveScheme = $null
+  Update-UrlFromEnv -SkipLan
   return $false
 }
 
@@ -376,19 +408,108 @@ function Get-ServerPid {
   return $null
 }
 
+# —— 备份/恢复期间的独占锁 ——
+# 备份和恢复要整体换 data/，这段时间里不许别的启停动作插进来，避免互相踩。
+function Get-MaintenanceLockName {
+  $key = (ConvertTo-PathKey $Base)
+  $md5 = [System.Security.Cryptography.MD5]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$key)
+    $hash = [System.BitConverter]::ToString($md5.ComputeHash($bytes)).Replace('-', '')
+  } finally { $md5.Dispose() }
+  return ('Local\ShisuijiMaintenance_' + $hash)
+}
+
+# 拿到锁就返回 Mutex 对象；拿不到（别的备份/恢复正在跑）返回 $null
+function Enter-MaintenanceLock {
+  try {
+    $mutex = New-Object System.Threading.Mutex($false, (Get-MaintenanceLockName))
+  } catch { return $null }
+  $got = $false
+  try { $got = $mutex.WaitOne(0) }
+  catch [System.Threading.AbandonedMutexException] { $got = $true }
+  catch { $got = $false }
+  if (-not $got) { try { $mutex.Dispose() } catch { } ; return $null }
+  return $mutex
+}
+
+function Exit-MaintenanceLock($Mutex) {
+  if (-not $Mutex) { return }
+  try { $Mutex.ReleaseMutex() } catch { }
+  try { $Mutex.Dispose() } catch { }
+}
+
+# 是否有别的备份/恢复正在跑（当前进程自己持有锁时不算）
+function Test-MaintenanceBusy {
+  if ($global:DanjiMaintenanceOwned) { return $false }
+  try {
+    $mutex = New-Object System.Threading.Mutex($false, (Get-MaintenanceLockName))
+  } catch { return $false }
+  $got = $false
+  try { $got = $mutex.WaitOne(0) }
+  catch [System.Threading.AbandonedMutexException] { $got = $true }
+  catch { $got = $false }
+  if ($got) {
+    try { $mutex.ReleaseMutex() } catch { }
+    try { $mutex.Dispose() } catch { }
+    return $false
+  }
+  try { $mutex.Dispose() } catch { }
+  return $true
+}
+
 # 启动服务进程：用 server.js 的绝对路径当命令行标志，方便事后按命令行认出是自己人
 function Start-ServerProcess {
   $serverPath = Get-ProjectServerPath
   if (-not (Test-Path $serverPath)) { return $false }
+  $nodeExe = $null
+  try { $nodeExe = Get-DanjiNodePath -ProjectRoot $Base } catch { $nodeExe = $null }
+  if (-not $nodeExe) {
+    $systemNode = Get-Command node -ErrorAction SilentlyContinue
+    if ($systemNode) { $nodeExe = $systemNode.Source }
+  }
+  if (-not $nodeExe) {
+    $script:LastStartMessage = '没找到 Node.js 运行时。请安装 Node.js 18 以上版本，或使用自带运行时的免安装包。'
+    return $false
+  }
   $arg = '"' + $serverPath + '"'
+  # 协议要对齐：走 HTTP 时不把证书传给子进程（证书文件本身保留不动）
+  $scheme = Get-DanjiEffectiveScheme
+  $oldCert = $env:DANJI_TLS_CERT
+  $oldKey  = $env:DANJI_TLS_KEY
   try {
-    Start-Process -FilePath "node" -ArgumentList $arg -WorkingDirectory $Base -WindowStyle Hidden
+    if ($scheme -eq 'https') {
+      # 用户自己在 local.env.ps1 里指定的证书路径优先，不覆盖
+      if ((-not $oldCert) -or (-not $oldKey)) {
+        $cert = Join-Path $Base 'danji-cert.pem'
+        $key  = Join-Path $Base 'danji-key.pem'
+        if ((Test-Path -LiteralPath $cert) -and (Test-Path -LiteralPath $key)) {
+          $env:DANJI_TLS_CERT = $cert
+          $env:DANJI_TLS_KEY  = $key
+        }
+      }
+    } else {
+      Remove-Item Env:DANJI_TLS_CERT -ErrorAction SilentlyContinue
+      Remove-Item Env:DANJI_TLS_KEY  -ErrorAction SilentlyContinue
+    }
+    Start-Process -FilePath $nodeExe -ArgumentList $arg -WorkingDirectory $Base -WindowStyle Hidden
   } catch { return $false }
+  finally {
+    # 还原当前进程的 TLS 环境变量（只影响本进程，不动系统设置）
+    if ($null -eq $oldCert) { Remove-Item Env:DANJI_TLS_CERT -ErrorAction SilentlyContinue }
+    else { $env:DANJI_TLS_CERT = $oldCert }
+    if ($null -eq $oldKey) { Remove-Item Env:DANJI_TLS_KEY -ErrorAction SilentlyContinue }
+    else { $env:DANJI_TLS_KEY = $oldKey }
+  }
   return $true
 }
 
-function Start-Server {
+function Start-ServerCore {
   $script:LastStartMessage = ''
+  if (Test-MaintenanceBusy) {
+    $script:LastStartMessage = '正在做备份或恢复，请等它结束后再启动服务。'
+    return $false
+  }
   # 端口被别的程序占着：明确告知，绝不去结束它
   $owner = Get-PortOwner
   if ($owner.State -notin @('Free', 'Project')) {
@@ -418,8 +539,12 @@ function Start-Server {
   return $false
 }
 
-function Stop-Server {
+function Stop-ServerCore {
   $script:LastStopMessage = ''
+  if (Test-MaintenanceBusy) {
+    $script:LastStopMessage = '正在做备份或恢复，请等它结束后再停止服务。'
+    return $false
+  }
   $owner = Get-PortOwner
   if ($owner.State -eq 'Free') {
     $script:LastStopMessage = ("拾穗集当前没有在运行（端口 {0} 没有监听进程）。" -f $Port)
@@ -440,11 +565,42 @@ function Stop-Server {
   return $true
 }
 
+# Hold the same reentrant mutex for the complete start/stop transaction.
+function Start-Server {
+  $operationLock = Enter-MaintenanceLock
+  if (-not $operationLock) { $script:LastStartMessage = '正在备份、恢复或启停服务，请稍后再试。'; return $false }
+  try { return (Start-ServerCore) } finally { Exit-MaintenanceLock $operationLock }
+}
+function Stop-Server {
+  $operationLock = Enter-MaintenanceLock
+  if (-not $operationLock) { $script:LastStopMessage = '正在备份、恢复或启停服务，请稍后再试。'; return $false }
+  try { return (Stop-ServerCore) } finally { Exit-MaintenanceLock $operationLock }
+}
+
 # 最近一次启动/停止的说明（供 CLI 与图形控制台展示）
 $script:LastStopMessage  = ''
 $script:LastStartMessage = ''
 function Get-LastStopMessage  { return $script:LastStopMessage }
 function Get-LastStartMessage { return $script:LastStartMessage }
+
+# —— 备份/恢复用的服务控制（默认实现）——
+# 只碰「确认属于本项目」的实例；端口被别的程序占着就拒绝，不动无关进程。
+function Get-MaintenanceServiceProbe {
+  param([string]$ProjectRoot = '')
+  return (Get-PortOwner)
+}
+function Stop-MaintenanceService {
+  param([string]$ProjectRoot = '')
+  $ok = $false
+  try { $ok = Stop-Server } catch { $ok = $false }
+  return @{ Ok = [bool]$ok; Message = [string](Get-LastStopMessage) }
+}
+function Start-MaintenanceService {
+  param([string]$ProjectRoot = '')
+  $ok = $false
+  try { $ok = Start-Server } catch { $ok = $false }
+  return @{ Ok = [bool]$ok; Message = [string](Get-LastStartMessage) }
+}
 
 # —— 后台工作：把耗时动作放到独立运行空间里跑，界面线程只取结果 ——
 # 探活（curl）、端口归属（Get-NetTCPConnection 约 1.2 秒 + CIM 约 0.2 秒）、

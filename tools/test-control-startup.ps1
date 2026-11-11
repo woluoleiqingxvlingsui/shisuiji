@@ -95,7 +95,7 @@ New-Item -ItemType Directory -Path $temp | Out-Null
 $proc = $null
 try {
   # 合成一个"项目目录"：只有控制台需要的文件，故意不放 server.js
-  foreach ($name in @('lib.ps1', 'control-ui.ps1', 'first-run.ps1')) {
+  foreach ($name in @('lib.ps1', 'control-ui.ps1', 'first-run.ps1', 'runtime.ps1', 'maintenance.ps1', 'restore.ps1')) {
     Copy-Item -LiteralPath (Join-Path $repo $name) -Destination (Join-Path $temp $name)
   }
   $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)

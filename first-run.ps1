@@ -15,7 +15,7 @@ function Get-FirstRunXaml {
           <RadioButton x:Name="DesktopMode" GroupName="Mode" IsChecked="True" Content="仅电脑使用" FontWeight="Bold"/>
           <TextBlock Text="适合先体验。只允许本机访问，不需要安装额外依赖。" TextWrapping="Wrap" Margin="22,7,0,18" Foreground="#566079"/>
           <RadioButton x:Name="AndroidMode" GroupName="Mode" Content="电脑 + Android 同步" FontWeight="Bold"/>
-          <TextBlock Text="允许同一 Wi-Fi 的手机连接，自动生成口令；缺少二维码依赖时自动联网安装。手机端仍需安装 APK。" TextWrapping="Wrap" Margin="22,7,0,0" Foreground="#566079"/>
+          <TextBlock Text="允许同一 Wi-Fi 的手机连接，自动生成口令；随包已带二维码依赖时不用联网。手机端仍需安装 APK。" TextWrapping="Wrap" Margin="22,7,0,0" Foreground="#566079"/>
         </StackPanel>
       </Border>
       <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
@@ -41,6 +41,11 @@ function Get-FirstRunXaml {
 }
 
 function Resolve-FirstRunNode {
+  param([string]$ProjectRoot = '')
+  if (-not $ProjectRoot) { $ProjectRoot = $PSScriptRoot }
+  # 免安装包自带运行时：先用它，不用装 Node.js
+  $bundled = Join-Path $ProjectRoot 'runtime\node.exe'
+  if (Test-Path -LiteralPath $bundled -PathType Leaf) { return $bundled }
   $found = Get-Command node -ErrorAction SilentlyContinue
   if ($found) { return $found.Source }
   # 安装 Node 后不用重启整台电脑，也能从默认安装目录重新检测。
@@ -61,6 +66,12 @@ function New-FirstRunWindow {
   $ui.NodeResolver = ${function:Resolve-FirstRunNode}
   foreach ($name in @('DesktopMode', 'AndroidMode', 'PortInput', 'SetupStatus', 'SetupProgress', 'NodeWebsite', 'SetupCancel', 'SetupCreate')) {
     $ui[$name] = $window.FindName($name)
+  }
+  # 自带运行时的免安装包：不用装 Node.js
+  $bundledNode = Join-Path $ProjectRoot 'runtime\node.exe'
+  if (Test-Path -LiteralPath $bundledNode -PathType Leaf) {
+    $ui.NodeWebsite.Content = '打开 Node.js 官网'
+    $ui.SetupStatus.Text = '已找到随包自带的运行环境，不用安装 Node.js。配置仅保存在本机。'
   }
   $window.Tag = $false
   $timer = New-Object Windows.Threading.DispatcherTimer
@@ -93,9 +104,9 @@ function New-FirstRunWindow {
   }.GetNewClosure())
   $ui.SetupCreate.Add_Click({
     if ($ui.Busy) { return }
-    $nodePath = & $ui.NodeResolver
+    $nodePath = & $ui.NodeResolver $ui.Root
     if (-not $nodePath) {
-      $ui.SetupStatus.Text = '先点击「安装 Node.js」，安装官网提供的 LTS 版本，再回到这里重试。'
+      $ui.SetupStatus.Text = '没找到可用的 Node.js。请点「打开 Node.js 官网」安装 LTS 版后重试，或使用自带运行时的免安装包。'
       return
     }
     $portValue = 0

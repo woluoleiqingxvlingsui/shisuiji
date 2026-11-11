@@ -28,6 +28,9 @@ $script:LastProbeAt     = $null
 # 后台长任务：backup / qr
 $script:TaskKind        = $null
 $script:LibPath         = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'lib.ps1')
+$script:MaintPath       = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'maintenance.ps1')
+$script:RestorePath     = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'restore.ps1')
+$script:PendingRestore  = ''
 $script:ProbeWorker     = New-BackgroundWorker
 $script:TaskWorker      = New-BackgroundWorker
 
@@ -82,6 +85,7 @@ $xaml = @'
                      Foreground="#F2F4F8" VerticalAlignment="Center"/>
         </StackPanel>
         <TextBlock x:Name="StatusDetail" Text="" FontSize="12" Foreground="#8B93A5" Margin="20,7,0,0" TextWrapping="Wrap"/>
+        <TextBlock x:Name="ProtocolText" Text="" FontSize="12" Foreground="#9AA3B5" Margin="20,6,0,0" TextWrapping="Wrap"/>
         <TextBlock x:Name="EnvText" Text="" FontSize="11.5" Foreground="#667084" Margin="20,6,0,0" TextWrapping="Wrap"/>
       </StackPanel>
     </Border>
@@ -102,12 +106,24 @@ $xaml = @'
         <ColumnDefinition Width="10"/>
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
-      <Button x:Name="BtnStart" Grid.Column="0" Content="▶ 启动服务" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+      <Button x:Name="BtnRestore" Grid.Column="0" Content="📂 恢复备份" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
       <Button x:Name="BtnStop"  Grid.Column="2" Content="⏹ 停止服务" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
     </Grid>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="10"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Button x:Name="BtnStart" Grid.Column="0" Content="▶ 启动服务" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+      <Button x:Name="BtnHttp"  Grid.Column="2" Content="🌐 以 HTTP 启动（App 配对）" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
+    </Grid>
+    <Button x:Name="BtnAuto" Content="🔁 协议改回自动（有证书就用 HTTPS）" Style="{StaticResource BtnBase}" Margin="0,10,0,0"/>
 
     <TextBlock Text="启动时自动加载 local.env.ps1 口令；若目录有 danji-cert.pem / danji-key.pem 则走 HTTPS。关闭窗口不停服务。"
                FontSize="11.5" Foreground="#667084" Margin="2,16,0,0" TextWrapping="Wrap"/>
+    <TextBlock Text="手机 App 不接受自签 HTTPS 证书：扫码配对请用「以 HTTP 启动」。备份会先暂停服务，备份完自动恢复运行。"
+               FontSize="11.5" Foreground="#667084" Margin="2,6,0,0" TextWrapping="Wrap"/>
   </StackPanel>
 </Window>
 '@
@@ -120,12 +136,16 @@ $win          = [Windows.Markup.XamlReader]::Parse($xaml)
 $dot          = $win.FindName('Dot')
 $statusText   = $win.FindName('StatusText')
 $statusDetail = $win.FindName('StatusDetail')
+$protocolText = $win.FindName('ProtocolText')
 $envText      = $win.FindName('EnvText')
 $btnOpen      = $win.FindName('BtnOpen')
 $btnPairQr    = $win.FindName('BtnPairQr')
 $btnBackup    = $win.FindName('BtnBackup')
+$btnRestore   = $win.FindName('BtnRestore')
 $btnStart     = $win.FindName('BtnStart')
 $btnStop      = $win.FindName('BtnStop')
+$btnHttp      = $win.FindName('BtnHttp')
+$btnAuto      = $win.FindName('BtnAuto')
 
 # ---- 后台脚本（在独立运行空间里跑，界面线程不参与） ----
 
@@ -135,33 +155,131 @@ $script:ProbeScript = {
   . $libPath
   $up = $false
   try { $up = Test-Up } catch { }
+  $live = ''
+  try { if ($script:LiveScheme) { $live = [string]$script:LiveScheme } } catch { }
   $owner = @{ State = 'Unknown'; Pid = $null; Verdict = $null }
   try { $owner = Get-PortOwner } catch { }
+  $pref = 'auto'
+  try { $pref = [string](Get-DanjiSchemePreference -ProjectRoot $Base) } catch { }
+  $want = ''
+  try { $want = [string](Get-DanjiEffectiveScheme) } catch { }
+  $runtimeLabel = '没找到 Node 运行时'
+  try {
+    $rt = Get-DanjiRuntime -ProjectRoot $Base
+    if ($rt) { if ($rt.Bundled) { $runtimeLabel = '随包自带 Node' } else { $runtimeLabel = '系统 Node' } }
+  } catch { }
   [pscustomobject]@{
     Up              = [bool]$up
+    LiveScheme      = $live
     OwnerState      = [string]$owner.State
     OwnerPid        = $owner.Pid
     Verdict         = $owner.Verdict
     Url             = [string]$Url
     Scheme          = [string]$Scheme
+    Want            = $want
+    Pref            = $pref
+    Runtime         = $runtimeLabel
     Port            = [int]$Port
     TokenConfigured = [bool](Get-EffectiveToken)
     TlsEnabled      = [bool](Get-UseTls)
   }
 }
 
-# 备份：调 backup.ps1（服务在跑时它会拒绝，这里只负责把结果弹出来）
+# 备份：交给 maintenance.ps1 —— 先暂停确认属于本项目的服务，备份完再恢复运行
 $script:BackupScript = {
-  param($scriptFile)
-  $out  = & powershell -NoProfile -ExecutionPolicy Bypass -File $scriptFile 2>&1
-  $code = $LASTEXITCODE
-  [pscustomobject]@{ Code = [int]$code; Text = [string](($out | Out-String).Trim()) }
+  param($libPath, $maintPath, $projectRoot)
+  . $libPath
+  . $maintPath
+  $r = Invoke-MaintenanceBackup -ProjectRoot $projectRoot
+  [pscustomobject]@{
+    Ok         = [bool]$r.Ok
+    Message    = [string]$r.Message
+    Path       = [string]$r.BackupPath
+    Files      = [int]$r.Files
+    WasRunning = [bool]$r.ServiceWasRunning
+    Restarted  = [bool]$r.ServiceRestarted
+  }
+}
+
+# 恢复前：先检查这份备份能不能用（结构 / 图片 / 链接 / 越界路径）
+$script:RestoreCheckScript = {
+  param($libPath, $restorePath, $projectRoot, $backupDir)
+  . $libPath
+  . $restorePath
+  $c = Get-RestoreCandidate -Path $backupDir -ProjectRoot $projectRoot
+  [pscustomobject]@{
+    Ok        = [bool]$c.Ok
+    DataDir   = [string]$c.DataDir
+    Files     = [int]$c.Files
+    Bytes     = [double]$c.Bytes
+    Boards    = @($c.Boards)
+    ImageRefs = [int]$c.ImageRefs
+    Missing   = @($c.MissingImages)
+    Errors    = @($c.Errors)
+    Warnings  = @($c.Warnings)
+    Oldest    = [string]$c.Oldest
+    Newest    = [string]$c.Newest
+  }
+}
+
+# 恢复：停服务 → 安全备份 → 暂存校验 → 换名替换 → 出错回滚 → 恢复服务原状态
+$script:RestoreApplyScript = {
+  param($libPath, $maintPath, $projectRoot, $backupDir)
+  . $libPath
+  . $maintPath
+  $r = Invoke-MaintenanceRestore -ProjectRoot $projectRoot -BackupPath $backupDir
+  [pscustomobject]@{
+    Ok         = [bool]$r.Ok
+    Message    = [string]$r.Message
+    Safety     = [string]$r.SafetyBackupPath
+    WasRunning = [bool]$r.ServiceWasRunning
+    Restarted  = [bool]$r.ServiceRestarted
+  }
+}
+
+# 切换协议（http / auto）：先停掉确认属于本项目的服务，再改设置并重新启动
+$script:SchemeScript = {
+  param($libPath, $projectRoot, $target)
+  . $libPath
+  $out = [ordered]@{ Ok = $false; Message = ''; Started = $false }
+  $owner = @{ State = 'Unknown'; Pid = $null; Verdict = $null }
+  try { $owner = Get-PortOwner } catch { }
+  if ($owner.State -notin @('Free', 'Project')) {
+    $out.Message = Get-PortConflictMessage -OwnerPid $owner.Pid -Verdict $owner.Verdict
+    return [pscustomobject]$out
+  }
+  if ($owner.State -eq 'Project') {
+    $stopped = $false
+    try { $stopped = Stop-Server } catch { $stopped = $false }
+    if (-not $stopped) {
+      $out.Message = [string](Get-LastStopMessage)
+      return [pscustomobject]$out
+    }
+  }
+  try {
+    $null = Set-DanjiSchemePreference -Scheme $target -ProjectRoot $projectRoot
+  } catch {
+    $out.Message = ('没能保存协议设置：' + $_.Exception.Message)
+    return [pscustomobject]$out
+  }
+  $started = $false
+  try { $started = Start-Server } catch { $started = $false }
+  if ($started) {
+    $out.Ok = $true
+    $out.Started = $true
+    $out.Message = '已经按新协议启动服务。'
+  } else {
+    $out.Message = [string](Get-LastStartMessage)
+  }
+  return [pscustomobject]$out
 }
 
 # 配对码：生成载荷与二维码 PNG（失败时退回终端 ASCII 码）
 $script:QrScript = {
   param($libPath)
   . $libPath
+  # 先探一次活：服务在跑就用它真实的协议，二维码才不会和服务对不上
+  try { $null = Test-Up } catch { }
   $json = Get-PairPayload
   $png = $null
   try { $png = New-PairQrPng } catch { $png = $null }
@@ -169,9 +287,10 @@ $script:QrScript = {
   if (-not $png) {
     try {
       $qrScript = Join-Path $Base 'tools\print-pair-qr.mjs'
-      if (Test-Path $qrScript) {
+      $nodeExe = Get-DanjiNodePath -ProjectRoot $Base
+      if ((Test-Path $qrScript) -and $nodeExe) {
         $parsed = $json | ConvertFrom-Json
-        $ascii = [string]((& node $qrScript --base $parsed.base --token $parsed.token) -join "`n")
+        $ascii = [string]((& $nodeExe $qrScript --base $parsed.base --token $parsed.token) -join "`n")
       }
     } catch { $ascii = '' }
   }
@@ -191,13 +310,43 @@ function Refresh-AddressLabels {
   # 只读已经探好的结果，不再在界面线程上做端口/网卡查询
   if ($script:Probe) {
     $tok = if ($script:Probe.TokenConfigured) { "口令已配置（config.json 或 local.env.ps1）" } else { "未配置口令（建议 config.json 设置 sync.token）" }
-    $tls = if ($script:Probe.TlsEnabled) { "HTTPS 已启用 · SW 可注册" } else { "HTTP · 局域网下无离线冷启动（见 README）" }
-    $envText.Text = "$tok · $tls"
+    $rt  = [string]$script:Probe.Runtime
+    $envText.Text = "$tok · $rt"
     return
   }
   $tok = if (Get-EffectiveToken) { "口令已配置（config.json 或 local.env.ps1）" } else { "未配置口令（建议 config.json 设置 sync.token）" }
-  $tls = if (Get-UseTls) { "HTTPS 已启用 · SW 可注册" } else { "HTTP · 局域网下无离线冷启动（见 README）" }
-  $envText.Text = "$tok · $tls"
+  $rt = '没找到 Node 运行时'
+  try {
+    $r = Get-DanjiRuntime -ProjectRoot $Base
+    if ($r) { if ($r.Bundled) { $rt = '随包自带 Node' } else { $rt = '系统 Node' } }
+  } catch { }
+  $envText.Text = "$tok · $rt"
+}
+
+# 协议那一行：显示正在跑的实例实际用什么协议，并提醒和设置不一致
+function Get-ProtocolLine([string]$Live, [string]$Want) {
+  if (-not $Live) { return '' }
+  if ($Live -eq 'https') {
+    $t = '当前协议：HTTPS · 自签证书，手机 App 不接受（扫码配对请用 HTTP）'
+  } else {
+    $t = '当前协议：HTTP · 手机 App 可直接扫码配对'
+  }
+  if ($Want -and $Want -ne $Live) {
+    $t = $t + "`n设置里的协议是 " + $Want + "，和正在跑的实例不一致；想换过来请先停止服务再启动。"
+  }
+  return $t
+}
+
+function Test-MaintenanceTaskBusy {
+  return ($script:TaskKind -eq 'start' -or $script:TaskKind -eq 'backup' -or $script:TaskKind -eq 'restore-check' -or
+          $script:TaskKind -eq 'restore-apply' -or $script:TaskKind -eq 'scheme-http' -or
+          $script:TaskKind -eq 'scheme-auto')
+}
+
+function Format-SizeText([double]$Bytes) {
+  if ($Bytes -lt 1KB) { return ('{0:N0} 字节' -f $Bytes) }
+  if ($Bytes -lt 1MB) { return ('{0:N0} KB' -f ($Bytes / 1KB)) }
+  return ('{0:N1} MB' -f ($Bytes / 1MB))
 }
 
 Refresh-AddressLabels
@@ -207,45 +356,34 @@ try {
   if (Test-Path $iconPath) { $win.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([Uri] $iconPath) }
 } catch { }
 
+$script:StartScript = {
+  param($libPath)
+  . $libPath
+  $ok = Start-Server
+  [pscustomobject]@{ Ok = [bool]$ok; Message = [string](Get-LastStartMessage) }
+}
 function Start-ServerFire {
-  # $Owner / $Up 来自后台探活结果；没有结果时才同步查一次（仅命令行兜底路径）
   param($Owner, $Up)
-  $script:EnvInfo = Import-LocalEnv
-  Refresh-AddressLabels
-  if (-not $Owner) { $Owner = Get-PortOwner }
-  # 端口被别的程序占着：只提示，不结束它
-  if ($Owner.State -notin @('Free', 'Project')) {
-    $msg = Get-PortConflictMessage -OwnerPid $Owner.Pid -Verdict $Owner.Verdict
-    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
-    $dot.Fill        = ColorBrush '#F5A623'
-    $statusText.Text = "端口被其他程序占用"
-    $statusDetail.Text = $msg
-    $btnOpen.IsEnabled  = $true
-    $btnStart.IsEnabled = $true
-    $btnStop.IsEnabled  = $false
-    return
-  }
-  # 端口有残留但探活失败：只有即时核实确认是拾穗集自己的进程才停（HTTP→HTTPS 切换）。
-  # 探活结果是缓存，PID 可能已经被别的进程顶替，所以这里重新查一次命令行，不认识就不动它。
-  if (-not $Up -and $Owner.State -eq 'Project' -and $Owner.Pid) {
-    $verdict = Test-ProjectServerProcess -ProcessId ([int]$Owner.Pid)
-    if ($verdict.Confirmed) {
-      try { Stop-Process -Id ([int]$Owner.Pid) -Force -ErrorAction Stop } catch { }
-      Start-Sleep -Milliseconds 400
-    } else {
-      $script:LastNotice = @{ Text = [string]$verdict.Message; At = (Get-Date) }
-    }
-  }
-  if (-not (Start-ServerProcess)) {
-    $msg = ("启动失败：找不到 {0}。" -f (Get-ProjectServerPath))
-    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
-    $statusDetail.Text = $msg
-    $btnStart.IsEnabled = $true
-    $btnStop.IsEnabled  = $false
-    return
-  }
+  if ($script:TaskKind) { return }
+  $script:TaskKind = 'start'
   $script:LaunchPending = $true
   $script:StartAt = Get-Date
+  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:StartScript -Arguments @($script:LibPath))) {
+    $script:TaskKind = $null
+    $script:LaunchPending = $false
+    $script:LastNotice = @{Text='上一个任务还没结束，请稍后再试。';At=(Get-Date)}
+  }
+}
+function Complete-Start {
+  param($Result, $TaskError)
+  if (-not $Result -or -not $Result.Ok) {
+    $script:LaunchPending = $false
+    $script:AutoOpenPending = $false
+    $message = if ($TaskError) { $TaskError } elseif ($Result) { [string]$Result.Message } else { '服务启动失败' }
+    $script:LastNotice = @{Text=$message;At=(Get-Date)}
+    $statusDetail.Text = $message
+  }
+  $script:LastProbeAt = $null
 }
 
 function Get-NoticeText {
@@ -255,7 +393,7 @@ function Get-NoticeText {
   return $script:LastNotice.Text
 }
 
-function Update-Status {
+function Update-StatusCore {
   # 只根据后台探活结果刷新界面：这里不做任何网络/进程查询
   $p = $script:Probe
   if (-not $p) { return }
@@ -281,6 +419,7 @@ function Update-Status {
     $dot.Fill        = ColorBrush '#3DD68C'
     $statusText.Text = "服务运行中" + $(if ($srvPid) { " · PID $srvPid" } else { '' })
     $statusDetail.Text = "后台独立运行 · 启动时已加载 local.env / TLS（若有）"
+    $protocolText.Text = Get-ProtocolLine ([string]$p.LiveScheme) ([string]$p.Want)
     $btnOpen.IsEnabled  = $true
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = ($script:TaskKind -ne 'stop')
@@ -310,6 +449,7 @@ function Update-Status {
     $dot.Fill          = ColorBrush '#F5A623'
     $statusText.Text   = "正在启动服务…"
     $statusDetail.Text = "正在拉起 node server.js（含口令/HTTPS 环境）"
+    $protocolText.Text = '正在启动…'
     $btnOpen.IsEnabled  = $true
     $btnStart.IsEnabled = $false
     $btnStop.IsEnabled  = $false
@@ -335,11 +475,21 @@ function Update-Status {
   $dot.Fill          = ColorBrush '#FF5C5C'
   $statusText.Text   = "服务已停止"
   $statusDetail.Text = "点「启动服务」或「打开网页」都可以把它拉起来（会自动加载口令）"
+  $protocolText.Text = '服务没在跑 · 下次启动会用 ' + [string]$p.Want
   $notice = Get-NoticeText
   if ($notice) { $statusDetail.Text = $notice }
   $btnOpen.IsEnabled  = $true
   $btnStart.IsEnabled = $true
   $btnStop.IsEnabled  = $false
+}
+
+# 备份/恢复进行中：启停按钮先锁住，避免和换 data/ 撞车
+function Update-Status {
+  Update-StatusCore
+  if (Test-MaintenanceTaskBusy) {
+    $btnStart.IsEnabled = $false
+    $btnStop.IsEnabled  = $false
+  }
 }
 
 # 收后台结果 + 发起下一次后台探活。全部在界面线程上只做状态搬运。
@@ -374,7 +524,11 @@ function Update-Background {
     $taskError = Get-BackgroundTaskError -Worker $script:TaskWorker
     if ($kind -eq 'backup') { Complete-Backup -Result $taskResult -TaskError $taskError }
     elseif ($kind -eq 'qr') { Complete-Qr -Result $taskResult -TaskError $taskError }
+    elseif ($kind -eq 'start') { Complete-Start -Result $taskResult -TaskError $taskError }
     elseif ($kind -eq 'stop') { Complete-Stop -Result $taskResult -TaskError $taskError }
+    elseif ($kind -eq 'restore-check') { Complete-RestoreCheck -Result $taskResult -TaskError $taskError }
+    elseif ($kind -eq 'restore-apply') { Complete-RestoreApply -Result $taskResult -TaskError $taskError }
+    elseif ($kind -eq 'scheme-http' -or $kind -eq 'scheme-auto') { Complete-Scheme -Result $taskResult -TaskError $taskError }
   }
 }
 
@@ -484,39 +638,216 @@ function Complete-Backup {
     $msg = "备份没做成：$TaskError"
     $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
     $statusDetail.Text = $msg
+    Update-Status
     return
   }
-  $text = [string]$Result.Text
-  if ([int]$Result.Code -eq 0) {
-    $done = "备份完成，输出在项目根目录的 backups\"
+  if ([bool]$Result.Ok) {
+    $text = "备份完成。`n`n位置：$($Result.Path)`n文件：$($Result.Files) 个"
+    if ($Result.WasRunning) {
+      if ($Result.Restarted) { $text += "`n`n服务备份前是运行着的，已经重新启动。" }
+      else { $text += "`n`n服务备份前是运行着的，但没能自动重新启动，请手动点「启动服务」。" }
+    } else {
+      $text += "`n`n服务备份前是停着的，现在仍然是停着的。"
+    }
     [System.Windows.MessageBox]::Show($text, "拾穗集 备份",
       [System.Windows.MessageBoxButton]::OK,
       [System.Windows.MessageBoxImage]::Information) | Out-Null
+    $statusDetail.Text = '备份完成。'
   } else {
-    $done = "备份没做成，看弹窗里的说明"
-    [System.Windows.MessageBox]::Show($text, "拾穗集 备份",
+    [System.Windows.MessageBox]::Show([string]$Result.Message, "拾穗集 备份",
       [System.Windows.MessageBoxButton]::OK,
       [System.Windows.MessageBoxImage]::Warning) | Out-Null
+    $script:LastNotice = @{ Text = [string]$Result.Message; At = (Get-Date) }
+    $statusDetail.Text = [string]$Result.Message
   }
   Update-Status
-  if ($done) { $statusDetail.Text = $done }
 }
 
 $btnBackup.Add_Click({
   if ($script:TaskKind) { return }
-  $scriptFile = Join-Path $Base 'backup.ps1'
-  if (-not (Test-Path $scriptFile)) {
-    $statusDetail.Text = "没找到 backup.ps1（应在项目根目录）。"
+  if (-not (Test-Path -LiteralPath $script:MaintPath)) {
+    $statusDetail.Text = '没找到 maintenance.ps1（应在项目根目录）。'
     return
   }
   $btnBackup.IsEnabled = $false
-  $statusDetail.Text   = "正在备份 data/…"
+  $statusDetail.Text   = '正在备份 data/…（服务会先暂停一下，备份完自动恢复）'
   $script:TaskKind = 'backup'
-  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:BackupScript -Arguments @($scriptFile))) {
+  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:BackupScript `
+      -Arguments @($script:LibPath, $script:MaintPath, $Base))) {
     $script:TaskKind = $null
     $btnBackup.IsEnabled = $true
-    $statusDetail.Text = "上一个任务还没结束，请稍后再试。"
+    $statusDetail.Text = '上一个任务还没结束，请稍后再试。'
   }
+})
+
+# ———— 恢复备份 ————
+$btnRestore.Add_Click({
+  if ($script:TaskKind) { return }
+  if (-not (Test-Path -LiteralPath $script:RestorePath)) {
+    $statusDetail.Text = '没找到 restore.ps1（应在项目根目录）。'
+    return
+  }
+  # 选备份文件夹（备份目录，或它里面的 data 文件夹）
+  $picked = ''
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = '选择备份文件夹（备份目录，或它里面的 data 文件夹）'
+    $dlg.ShowNewFolderButton = $false
+    $defaultDir = Join-Path $Base 'backups'
+    if (Test-Path -LiteralPath $defaultDir) { $dlg.SelectedPath = $defaultDir }
+    try {
+      if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $picked = [string]$dlg.SelectedPath }
+    } finally { $dlg.Dispose() }
+  } catch {
+    $statusDetail.Text = ('选不了文件夹：' + $_.Exception.Message)
+    return
+  }
+  if (-not $picked) { return }
+  $script:PendingRestore = $picked
+  $btnRestore.IsEnabled = $false
+  $statusDetail.Text = '正在检查这份备份…'
+  $script:TaskKind = 'restore-check'
+  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:RestoreCheckScript `
+      -Arguments @($script:LibPath, $script:RestorePath, $Base, $picked))) {
+    $script:TaskKind = $null
+    $btnRestore.IsEnabled = $true
+    $statusDetail.Text = '上一个任务还没结束，请稍后再试。'
+  }
+})
+
+function Complete-RestoreCheck {
+  param($Result, $TaskError)
+  $btnRestore.IsEnabled = $true
+  if (-not $Result) {
+    $statusDetail.Text = "备份检查失败：$TaskError"
+    return
+  }
+  if (-not [bool]$Result.Ok) {
+    $lines = @()
+    foreach ($e in @($Result.Errors)) { $lines += ('· ' + [string]$e) }
+    $text = "这份备份不能用来恢复：`n`n" + ($lines -join "`n") + "`n`n当前数据没有任何改动。"
+    [System.Windows.MessageBox]::Show($text, "拾穗集 恢复备份",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Warning) | Out-Null
+    $statusDetail.Text = '这份备份没通过校验，当前数据没有任何改动。'
+    return
+  }
+  $boards = ((@($Result.Boards) | Sort-Object) -join '、')
+  $summary = "要用这份备份恢复吗？`n`n位置：$($Result.DataDir)`n文件：$($Result.Files) 个 · $(Format-SizeText ([double]$Result.Bytes))`n板块：$boards`n贴图：$($Result.ImageRefs) 张"
+  if ($Result.Oldest -and $Result.Newest) { $summary += "`n数据时间：$($Result.Oldest) ~ $($Result.Newest)" }
+  if (@($Result.Warnings).Count -gt 0) { $summary += "`n`n提醒：" + ((@($Result.Warnings)) -join '；') }
+  $summary += "`n`n恢复会用这份备份覆盖当前的 data\。config.json、文献库、证书都不受影响。`n恢复前会自动把当前数据备份一份到 backups\。"
+  $ans = [System.Windows.MessageBox]::Show($summary, "拾穗集 恢复备份",
+    [System.Windows.MessageBoxButton]::YesNo,
+    [System.Windows.MessageBoxImage]::Question)
+  if ($ans -ne [System.Windows.MessageBoxResult]::Yes) {
+    $statusDetail.Text = '已取消，当前数据没有任何改动。'
+    return
+  }
+  $btnRestore.IsEnabled = $false
+  $statusDetail.Text = '正在恢复…（请不要关窗口）'
+  $script:TaskKind = 'restore-apply'
+  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:RestoreApplyScript `
+      -Arguments @($script:LibPath, $script:MaintPath, $Base, $script:PendingRestore))) {
+    $script:TaskKind = $null
+    $btnRestore.IsEnabled = $true
+    $statusDetail.Text = '上一个任务还没结束，请稍后再试。'
+  }
+}
+
+function Complete-RestoreApply {
+  param($Result, $TaskError)
+  $btnRestore.IsEnabled = $true
+  if (-not $Result) {
+    $statusDetail.Text = "恢复没做成：$TaskError"
+    return
+  }
+  if ([bool]$Result.Ok) {
+    $text = "恢复完成。`n`n"
+    if ($Result.Safety) { $text += "恢复前的数据留了一份：`n$($Result.Safety)`n`n" }
+    if ($Result.WasRunning) {
+      if ($Result.Restarted) { $text += '服务已经重新启动。' }
+      else { $text += '服务没能自动重新启动，请手动点「启动服务」。' }
+    } else {
+      $text += '服务现在是停着的（和恢复前一样）。'
+    }
+    [System.Windows.MessageBox]::Show($text, "拾穗集 恢复备份",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Information) | Out-Null
+    $statusDetail.Text = '恢复完成。'
+  } else {
+    [System.Windows.MessageBox]::Show([string]$Result.Message, "拾穗集 恢复备份",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Warning) | Out-Null
+    $script:LastNotice = @{ Text = [string]$Result.Message; At = (Get-Date) }
+    $statusDetail.Text = [string]$Result.Message
+  }
+  Update-Status
+}
+
+# ———— 协议切换 ————
+function Start-SchemeTask([string]$Target, [string]$ConfirmText) {
+  if ($script:TaskKind) { return }
+  $p = $script:Probe
+  $up = ($p -and [bool]$p.Up -and [string]$p.OwnerState -eq 'Project')
+  $live = ''
+  if ($up) { $live = [string]$p.LiveScheme }
+  if ($up -and $live -eq 'http' -and $Target -eq 'http') {
+    [System.Windows.MessageBox]::Show('服务已经在用 HTTP，手机 App 可以直接扫码配对。', "拾穗集 协议",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Information) | Out-Null
+    return
+  }
+  if ($up) {
+    $ans = [System.Windows.MessageBox]::Show($ConfirmText, "拾穗集 协议",
+      [System.Windows.MessageBoxButton]::YesNo,
+      [System.Windows.MessageBoxImage]::Question)
+    if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+  }
+  $btnHttp.IsEnabled = $false
+  $btnAuto.IsEnabled = $false
+  $statusDetail.Text = '正在按新协议启动服务…'
+  $script:TaskKind = if ($Target -eq 'http') { 'scheme-http' } else { 'scheme-auto' }
+  if (-not (Start-BackgroundTask -Worker $script:TaskWorker -Script $script:SchemeScript `
+      -Arguments @($script:LibPath, $Base, $Target))) {
+    $script:TaskKind = $null
+    $btnHttp.IsEnabled = $true
+    $btnAuto.IsEnabled = $true
+    $statusDetail.Text = '上一个任务还没结束，请稍后再试。'
+  }
+}
+
+function Complete-Scheme {
+  param($Result, $TaskError)
+  $btnHttp.IsEnabled = $true
+  $btnAuto.IsEnabled = $true
+  if (-not $Result) {
+    $statusDetail.Text = "切换协议失败：$TaskError"
+    return
+  }
+  if ([bool]$Result.Ok) {
+    $statusDetail.Text = '已按新协议启动服务。'
+    $script:LastNotice = @{ Text = '已按新协议启动服务。'; At = (Get-Date) }
+  } else {
+    $msg = [string]$Result.Message
+    [System.Windows.MessageBox]::Show($msg, "拾穗集 协议",
+      [System.Windows.MessageBoxButton]::OK,
+      [System.Windows.MessageBoxImage]::Warning) | Out-Null
+    $script:LastNotice = @{ Text = $msg; At = (Get-Date) }
+    $statusDetail.Text = $msg
+  }
+  Update-Status
+}
+
+$btnHttp.Add_Click({
+  $text = "当前运行中的实例用的是 HTTPS。`n`n手机 App 不接受自签 HTTPS 证书。要先停止拾穗集，再以 HTTP 重新启动吗？"
+  Start-SchemeTask -Target 'http' -ConfirmText $text
+})
+
+$btnAuto.Add_Click({
+  $text = "当前运行中的实例用的是 HTTP。`n`n改回自动后：有证书就用 HTTPS，没有就用 HTTP。手机 App 不接受自签 HTTPS 证书。`n`n要现在停止并重新启动吗？"
+  Start-SchemeTask -Target 'auto' -ConfirmText $text
 })
 
 $btnStart.Add_Click({

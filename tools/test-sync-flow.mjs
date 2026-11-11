@@ -1,4 +1,5 @@
 /** 完整同步接线回归：隔离服务器 + Edge + 真实 IndexedDB；原生桥用可持久化桩代替。 */
+import WebSocket from 'ws';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -108,7 +109,7 @@ try {
     try { target = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find(t => t.type === 'page'); return !!target; }
     catch { return false; }
   }, 'Edge');
-  ws = new WebSocket(target.webSocketDebuggerUrl);
+  ws = new WebSocket(target.webSocketDebuggerUrl, { perMessageDeflate: false });
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
   let id = 0;
   const pending = new Map();

@@ -82,6 +82,7 @@ const state = reactive({
   editingKb: null,
   kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
   kbMerge: null,         // 笔记更新 vs 手动调整过的知识库条目：合并层数据
+  kbEditorConfirmRef: '', // 「自己合并」保存时携带：这一版源笔记已处理
   // 关联本地文件的状态（只电脑端）：id -> available | missing | unavailable | checking
   // 这是临时状态：不落盘、不参与同步，刷新时重新查
   kbFileStatus: {},
@@ -108,8 +109,12 @@ const state = reactive({
     needUpgrade: false, // 原生壳版本低于 health.minClient：提示重装最新 APK
     pairOpen: false, // 配对表单是否打开（未配对默认开）
     offline: false, // health 不可达时的离线优先模式
-    status: 'idle', // idle | offline | syncing | synced | conflicts | need_token | error
+    status: 'idle', // idle | offline | syncing | synced | conflicts | attention | need_token | error
     pendingCount: 0,
+    retryCount: 0,     // 可重试的待同步条数（不含需处理的）
+    // 需要用户处理的条目（图片被拒 / 服务端拒写）：仍在队列里，但不会被自动重传
+    blocked: [],
+    blockedCount: 0,
     pushLive: false,   // SSE 推送是否连着（push.js 维护）：连着就不轮询
     conflicts: [], // [{ id, op, entry, server, local }]
     lastSyncAt: null,

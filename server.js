@@ -111,7 +111,8 @@ const API_VERSION = 1;
 // minClient=2：后台同步改为事件驱动后，推送事件名从 changed 变成 sync、hello 帧多了
 // pendingSince。v1 旧壳只认 changed，配上这台服务会一条推送都收不到，只剩 15 分钟兜底
 // 闹钟——从外面看就是「同步时好时坏」，属于典型静默出错，必须提示重装而不是默默不同步。
-const MIN_CLIENT = 2;
+// v3 preserves rejected edits/images and exposes persistent attention actions.
+const MIN_CLIENT = 3;
 const STATUSES = ['pending', 'claimed', 'used', 'expired', 'closed'];
 // 老数据里的状态名 → 现在的名字，遇到就顺手升级，别把它当非法值打回 pending
 const LEGACY_STATUS = { missed: 'closed' };
@@ -2175,10 +2176,33 @@ function normalizeKbSource(input, existing) {
   return out;
 }
 
+/**
+ * 知识卡「是否被手动加工过」——服务端与前端 public/js/util/kb-guard.js 同一套口径：
+ *  1) manual_protected === true  → 受保护（用户明确保留手动版 / 自己合并过）；
+ *  2) manual_protected === false → 明确恢复自动跟随（用户选过「用笔记版」）；
+ *  3) 有 auto 基线且当前正文与基线不同 → 受保护（用户改过正文）；
+ *  4) 旧卡（既无基线也无标记）但有 manual_at → 保守当作受保护（不覆盖手工卡）；
+ *  5) 其余 → 未受保护，允许源笔记自动同步直接覆盖。
+ */
+function kbManualProtected(k) {
+  if (!k || typeof k !== 'object') return false;
+  if (k.manual_protected === true) return true;
+  const auto = k.auto && typeof k.auto === 'object' ? k.auto : null;
+  if (auto && auto.baseline && typeof auto.baseline === 'object') {
+    return String(k.title || '') !== String(auto.baseline.title || '')
+      || String(k.content || '') !== String(auto.baseline.content || '');
+  }
+  if (k.manual_protected === false) return false;
+  return !!k.manual_at;
+}
+
 function normalizeKb(input, existing = {}) {
   const k = { ...existing };
+  // 「保留手动版」：正文一个字节都不动，**不信客户端传没传 title/content**。
+  const keepBody = input.auto_sync === true && input.auto_mode === 'manual';
   for (const field of KB_FIELDS) {
     if (!(field in input)) continue;
+    if (keepBody && (field === 'title' || field === 'content')) continue;
     k[field] = input[field] === null || input[field] === undefined ? '' : String(input[field]).trim();
   }
   for (const field of KB_FIELDS) if (k[field] === undefined) k[field] = '';
@@ -2191,6 +2215,8 @@ function normalizeKb(input, existing = {}) {
   } else if (!Array.isArray(k.tags)) {
     k.tags = [];
   }
+  // 「保留手动版」时标签也不动（标签与正文同属用户手工加工的那一份）
+  if (keepBody && Array.isArray(existing.tags)) k.tags = existing.tags.slice();
   if ('source' in input) k.source = normalizeKbSource(input.source, k.source);
   if (!k.source || typeof k.source !== 'object') k.source = { type: 'manual' };
   // 关联本地文件：**只保存路径字符串**。
@@ -2198,7 +2224,7 @@ function normalizeKb(input, existing = {}) {
   //   - file_path 是空串           → 显式解除关联
   //   - file_path 是合法路径      → 规范化后保存（只校验格式，允许先保存失效路径）
   //   - 路径不合法                → 400，提示说清楚为什么
-  if ('file_path' in input && input.file_path !== null && input.file_path !== undefined) {
+  if ('file_path' in input && input.file_path !== null && input.file_path !== undefined && !keepBody) {
     const raw = String(input.file_path).trim();
     if (!raw) {
       k.file_path = '';
@@ -2214,15 +2240,44 @@ function normalizeKb(input, existing = {}) {
     }
   }
   if (typeof k.file_path !== 'string') k.file_path = '';
-  // 自动沉淀 vs 手动调整：auto_sync 只更新 auto 标记（不动 manual_at）；
-  // 手动保存（编辑器/合并定稿）记 manual_at。前端据此决定"直接覆盖"还是"弹合并层"
-  if (input.auto_sync === true) {
+  // 自动沉淀 vs 手动调整（三段状态，与 kbManualProtected 同一口径）：
+  //  - auto_sync=true 且 auto_mode='auto'（默认）：源笔记自动同步的静默更新。
+  //    写进 auto.baseline（这次自动生成的 title/content），供以后判断用户改没改过。
+  //    受保护的卡不允许走这条路径（见 PUT /api/kb/:id 的 409）。
+  //  - auto_mode='note'：用户明确选了「用笔记版」→ 恢复自动跟随（manual_protected=false）。
+  //  - auto_mode='manual'：用户明确选了「保留手动版」→ 正文一个字不动，
+  //    只记下「这一版源笔记已确认」，下次源笔记更新仍会询问。
+  //  - 手动保存（编辑器 / 自己合并）：记 manual_at，并显式标记 manual_protected。
+  //  - confirm_ref：用户已确认过的源笔记版本（同一个版本不再重复问；下一个版本仍要问）。
+  const prevAuto = (k.auto && typeof k.auto === 'object') ? k.auto : {};
+  const autoMode = input.auto_sync === true
+    ? (input.auto_mode === 'note' || input.auto_mode === 'manual' ? input.auto_mode : 'auto')
+    : '';
+  if (autoMode) {
     k.auto = {
+      ...prevAuto,
       at: new Date().toISOString(),
       ref_updated_at: String(input.ref_updated_at || '').trim(),
     };
+    if (autoMode === 'auto') {
+      // 静默自动更新：基线 = 这次写进去的正文
+      k.auto.baseline = { title: k.title, content: k.content };
+    } else if (autoMode === 'note') {
+      // 用笔记版：基线也更新（内容就是笔记版），并恢复自动跟随
+      k.auto.baseline = { title: k.title, content: k.content };
+      k.manual_protected = false;
+    } else {
+      // autoMode === 'manual'：保留手动版
+      // 正文不动、基线不动（还是上次自动生成的那份），并继续保护
+      k.manual_protected = true;
+    }
   } else {
     k.manual_at = new Date().toISOString();
+    k.manual_protected = input.manual_protected === undefined ? true : !!input.manual_protected;
+  }
+  if (input.confirm_ref !== undefined) {
+    const ref = String(input.confirm_ref || '').trim();
+    k.auto = { ...(k.auto || {}), confirmed_ref: ref };
   }
   const incomingId = uuidOrNull(input.id);
   if (incomingId) k.id = incomingId;
@@ -2333,6 +2388,20 @@ route('PUT', '/api/kb/:id', async (ctx) => {
   const idx = kbDb.kb.findIndex((k) => k.id === ctx.params.id);
   if (idx === -1) return ctx.json({ error: '知识不存在', code: 'missing' }, 404);
   const prev = kbDb.kb[idx];
+  // 源笔记自动同步不得静默覆盖被手动加工过的知识卡：
+  // 受保护的卡只接受用户明确做出的决定：
+  //   auto_mode='note'   → 用笔记版（允许写正文）
+  //   auto_mode='manual' → 保留手动版（正文不动，只确认这一版源笔记）
+  // 其余 auto_sync 写法一律 409，交给前端弹合并层。
+  if (ctx.body && ctx.body.auto_sync === true
+      && ctx.body.auto_mode !== 'note' && ctx.body.auto_mode !== 'manual'
+      && kbManualProtected(prev)) {
+    return ctx.json({
+      error: '这条知识卡被手动加工过，源笔记更新需要先合并',
+      code: 'manual_protected',
+      server: prev,
+    }, 409);
+  }
   if (conflicted(prev, ctx.body)) {
     return ctx.json({ error: '这条知识在别处改过', code: 'conflict', server: prev }, 409);
   }
@@ -2716,7 +2785,9 @@ async function applyIdeaOp(op, role) {
         return { id, status: 'conflict', applied: false, server: prev };
       }
       // 新身份只证明是新操作，不证明用户见过当前版本。覆盖已存在记录必须有基线。
-      if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
+      if (role === 'mobile' && prev.origin !== 'mobile') {
+        return { id, status: 'forbidden', applied: false, reason: '这条随记不是手机端记的，手机上改不了' };
+      }
       // 乐观锁不能因为「走的是 create 分支」就被绕开：客户端带了基线就说明它知道
       // 服务端当前版本，对不上说明别的端在这期间改过这条——保留冲突让用户选，
       // 不能静默用手机内容盖掉电脑端的修改。基线为空（客户端不知道服务端版本）时
@@ -2742,7 +2813,11 @@ async function applyIdeaOp(op, role) {
     return { id, status: 'ok', applied: true, idea };
   }
   if (!prev) return { id, status: 'missing', applied: false };
-  if (role === 'mobile' && prev.origin !== 'mobile') return { id, status: 'forbidden', applied: false };
+  if (role === 'mobile' && prev.origin !== 'mobile') {
+    // 旧卡（没有 origin 字段）也归到这里：来源不明一律按「不是手机端记的」处理，
+    // 手机端只读。绝不猜来源、也不批量重写真实数据。
+    return { id, status: 'forbidden', applied: false, reason: '这条随记不是手机端记的，手机上改不了' };
+  }
   if (conflicted(prev, op)) {
     // 冲突优先于内容比对：基线对不上说明别的端改过这条，
     // 交给用户选择，手机与电脑谁的内容留下由人决定。

@@ -7,8 +7,7 @@
 // 手机端默认全展开：版面小，怕漏看。
 import { computed, ref, watch, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
-import { state } from '../state.js';
-import { canWrite, isDesktop } from '../perm.js';
+import { canWriteIdea, isDesktop } from '../perm.js';
 import { formatDate } from '../util/date.js';
 import { useImageUrls } from '../img-urls.js';
 
@@ -18,12 +17,10 @@ const IdeaCard = {
   emits: ['edit', 'remove', 'deposit', 'pin', 'openFull'],
   setup(props, { emit }) {
     const timeText = computed(() => formatDate(props.idea.updated_at || props.idea.created_at));
-    // 手机可写随记，但电脑端 origin 的条目服务端会拒写，UI 也不给编辑/删除
-    const writable = computed(() => {
-      if (!canWrite('ideas')) return false;
-      if (state.role === 'desktop') return true;
-      return props.idea.origin !== 'desktop';
-    });
+    // 手机可写随记，但只有**明确**是手机端记的（origin === 'mobile'）才能改。
+    // 电脑端记的、以及老数据里没写来源的，手机上只读：
+    // 服务端对非 mobile 来源的推送一律 forbidden，前端不能先让用户白改。
+    const writable = computed(() => canWriteIdea(props.idea));
     const images = computed(() => props.idea.images || []);
     // 📱 标记只在手机端出现，电脑端不显示（内容都是同步来的，标了没意义）
     const showMobileMark = computed(() => !isDesktop() && props.idea.origin === 'mobile');

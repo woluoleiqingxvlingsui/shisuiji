@@ -42,3 +42,10 @@ docs/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Portable runtime and local launch preferences
+runtime/
+runtime-options.json
+*.p12
+*.pfx
+*.key

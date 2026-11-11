@@ -20,6 +20,19 @@ function canWrite(board) {
   return board === 'ideas';
 }
 
+/**
+ * 某条随记能不能在手机上改：
+ * 只有**明确** origin === 'mobile' 的才可写。desktop 的、以及老数据里没写来源的
+ * （旧记录没有 origin 字段）一律当只读——不猜来源，也不改真实数据。
+ * 服务端对非 mobile 来源的推送会回 forbidden，前端口径必须一致，
+ * 否则用户在手机上改了半天，提交时才发现这条根本改不了。
+ */
+function canWriteIdea(idea) {
+  if (!canWrite('ideas')) return false;
+  if (isDesktop()) return true;
+  return !!(idea && idea.origin === 'mobile');
+}
+
 /** 消息中心：手机端只读，不标已读 */
 function canMarkMessages() {
   return isDesktop();
@@ -43,4 +56,4 @@ function mobileReadOnlyHint() {
   return base + ' · 离线壳已就绪';
 }
 
-export { isDesktop, canWrite, canMarkMessages, mobileReadOnlyHint };
+export { isDesktop, canWrite, canWriteIdea, canMarkMessages, mobileReadOnlyHint };

@@ -8,6 +8,7 @@ import { state } from '../state.js';
 import { toast } from '../toast.js';
 import { api } from '../api.js';
 import { isDesktop } from '../perm.js';
+import { kbMergeDecision } from '../util/kb-guard.js';
 import { NOTE_TEXT_FIELDS, NOTE_FIELD_LABEL } from '../util/paper-note.js';
 import { siteNoteFields, siteNoteFieldLabel } from '../util/site-note.js';
 import { kbFileName, refreshKbFileStatus, openLocalKbFile } from '../util/kb-file.js';
@@ -62,6 +63,7 @@ function openKbEditor(entry) {
     toast('知识库管理只在电脑端可用', 'warn');
     return;
   }
+  state.kbEditorConfirmRef = '';
   state.editingKb = entry ? { ...entry } : null;
   state.kbPrefill = null;
   state.kbEditorOpen = true;
@@ -75,6 +77,7 @@ function openKbWithPrefill(prefill) {
     return;
   }
   state.editingKb = null;
+  state.kbEditorConfirmRef = '';
   state.kbPrefill = prefill;
   state.kbEditorOpen = true;
 }
@@ -90,10 +93,12 @@ async function saveKb(payload) {
     return;
   }
   const isEdit = !!state.editingKb;
+  // 自己合并保存：带上 confirm_ref（这一版源笔记已处理，不再重复问）
+  const confirmRef = state.kbEditorConfirmRef || '';
   const url = isEdit ? `/api/kb/${state.editingKb.id}` : '/api/kb';
   const res = await api(url, {
     method: isEdit ? 'PUT' : 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, ...(confirmRef ? { confirm_ref: confirmRef } : {}) }),
   });
   const saved = await res.json().catch(() => ({}));
   if (res.status === 409) {
@@ -107,6 +112,7 @@ async function saveKb(payload) {
     .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
   state.kbEditorOpen = false;
   state.kbPrefill = null;
+  state.kbEditorConfirmRef = '';
   toast(isEdit ? '已保存 ✅' : '已沉淀进知识库 📚');
   // 关联的文件可能有变：刷新一次状态（后台，不阻塞）
   refreshKbFileStatus();
@@ -188,10 +194,6 @@ function siteNoteContent(site, log) {
     .join('\n');
 }
 
-function manualTouched(entry) {
-  return !!(entry.manual_at && (!entry.auto || !entry.auto.at || String(entry.manual_at) > String(entry.auto.at)));
-}
-
 async function autoSyncFromNote({ type, refId, label, title, content, noteUpdatedAt }) {
   if (!String(content || '').trim() || state.role !== 'desktop') return;
   const existing = state.kb.find((k) => k.source && k.source.ref_id === refId);
@@ -200,6 +202,7 @@ async function autoSyncFromNote({ type, refId, label, title, content, noteUpdate
     content,
     source: { type, ref_id: refId, label },
     auto_sync: true,
+    auto_mode: 'auto',
     ref_updated_at: noteUpdatedAt || '',
   };
   if (!existing) {
@@ -213,7 +216,13 @@ async function autoSyncFromNote({ type, refId, label, title, content, noteUpdate
     toast('📚 已自动沉淀到知识库');
     return;
   }
-  if (manualTouched(existing)) {
+  // 决策口径（见 public/js/util/kb-guard.js，与服务端一致）：
+  //  - skip：这一版源笔记用户已经定过稿（保留手动版只确认这一版）→ 不再问、不覆盖；
+  //  - ask：手动加工过 → 弹合并层让用户定稿（下一版源笔记仍会问）；
+  //  - auto：未被手动改动 → 静默自动更新。
+  const decision = kbMergeDecision(existing, noteUpdatedAt);
+  if (decision === 'skip') return;
+  if (decision === 'ask') {
     // 手动调整过：不覆盖，交给用户定稿；关掉底层笔记抽屉，合并层单独呈现
     state.kbMerge = {
       entry: { ...existing },
@@ -232,7 +241,21 @@ async function autoSyncFromNote({ type, refId, label, title, content, noteUpdate
       base_updated_at: existing.updated_at,
     }),
   });
-  if (res.status === 409) { loadKb(); return; }
+  if (res.status === 409) {
+    const err = await res.json().catch(() => ({}));
+    if (err.code === 'manual_protected') {
+      // 服务端判定为受保护（两边口径不一致时以服务端为准）：走合并层
+      state.kbMerge = {
+        entry: { ...existing },
+        incoming: { title: base.title, content },
+        noteUpdatedAt: noteUpdatedAt || '',
+      };
+      state.siteNoteOpen = false;
+      state.logOpen = false;
+      return;
+    }
+    loadKb(); return;
+  }
   if (!res.ok) return;
   const saved = await res.json();
   state.kb = state.kb.map((k) => (k.id === saved.id ? saved : k));
@@ -266,30 +289,48 @@ async function resolveKbMerge(choice) {
   const m = state.kbMerge;
   if (!m) return;
   state.kbMerge = null;
+  if (choice === 'dismiss') {
+    // 关闭弹窗只是「稍后处理」：不确认任何版本，不改任何东西。
+    // 下一版源笔记更新时仍会重新询问。
+    return;
+  }
   if (choice === 'edit') {
+    // 自己合并：打开编辑器改；保存时带上 confirm_ref（这一版源笔记已处理）
     state.editingKb = { ...m.entry };
     state.kbPrefill = null;
+    state.kbEditorConfirmRef = m.noteUpdatedAt || '';
     state.kbEditorOpen = true;
     return;
   }
-  const body = choice === 'note'
-    ? {
-      title: m.incoming.title,
-      content: m.incoming.content,
-      tags: m.entry.tags,
-      source: m.entry.source,
-    }
-    : {}; // 保留手动版：只更新 auto 基线，避免同一笔记版本反复弹
+  const body = {
+    source: m.entry.source,
+    // 标签与关联文件不因正文同步而丢失
+    tags: m.entry.tags,
+    base_updated_at: m.entry.updated_at,
+    confirm_ref: m.noteUpdatedAt || '',
+    ref_updated_at: m.noteUpdatedAt || '',
+  };
+  if (choice === 'note') {
+    // 用笔记版：恢复自动跟随（之后的源笔记更新不再询问）
+    body.title = m.incoming.title;
+    body.content = m.incoming.content;
+    body.auto_sync = true;
+    body.auto_mode = 'note';
+  } else {
+    // 保留手动版：正文与标签、关联文件一个字节都不动
+    body.auto_sync = true;
+    body.auto_mode = 'manual';
+  }
   const res = await api(`/api/kb/${m.entry.id}`, {
     method: 'PUT',
-    body: JSON.stringify({
-      ...body,
-      auto_sync: true,
-      ref_updated_at: m.noteUpdatedAt,
-      base_updated_at: m.entry.updated_at,
-    }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) return toast('合并保存失败：' + res.status, 'warn');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return toast(err.error || ('合并保存失败：' + res.status), 'warn');
+  }
+  const saved = await res.json();
+  state.kb = state.kb.map((k) => k.id === saved.id ? saved : k);
   toast(choice === 'note' ? '📚 已采用笔记版本' : '📚 已保留手动版本');
   loadKb();
 }
