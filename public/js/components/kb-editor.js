@@ -2,6 +2,8 @@
 import { reactive, ref, onMounted, onUnmounted, nextTick } from '../vue-globals.js';
 
 import { CONFIG } from '../../config.js';
+import { isDesktop } from '../perm.js';
+import { pickLocalFile } from '../util/kb-file.js';
 
 function splitTags(text) {
   // 支持中英文逗号、顿号、分号与换行；存盘格式仍是 string[]
@@ -27,8 +29,14 @@ const KbEditor = {
       title: base.title || '',
       content: base.content || '',
       tagsText: (base.tags || []).join(', '),
+      // 关联的本地文件：**只保存路径**（不复制、不上传、不解析内容）
+      filePath: base.file_path || '',
     });
     const source = base.source && base.source.label ? base.source : null;
+    // 文件选择只在电脑端（手机端知识库只读）
+    const desktopOnly = isDesktop();
+    const picking = ref(false);
+    let active = true;
 
     function autoGrow() {
       const el = contentArea.value;
@@ -51,13 +59,30 @@ const KbEditor = {
       form.tagsText = list.join(', ');
     }
 
+    // 弹系统窗口选文件：用户取消 / 出错 → 什么都不填（绝不回填错误数据）
+    async function chooseFile() {
+      if (picking.value) return;
+      const previousPath = form.filePath;
+      picking.value = true;
+      try {
+        const picked = await pickLocalFile();
+        if (active && picked && form.filePath === previousPath) form.filePath = picked;
+      } finally {
+        picking.value = false;
+      }
+    }
+
     function save() {
-      if (!form.title.trim() && !form.content.trim()) return alert('标题和内容至少写一个');
+      if (!form.title.trim() && !form.content.trim() && !form.filePath.trim()) {
+        return alert('标题、内容、关联文件至少写一个');
+      }
       emit('save', {
         title: form.title.trim(),
         content: form.content.trim(),
         tags: splitTags(form.tagsText),
         source: base.source || { type: 'manual' },
+        // 关联文件：省略 = 保留原关联，空串 = 解除关联（服务端按这个口径处理）
+        file_path: form.filePath.trim(),
         // 乐观锁：编辑时带上「我改之前看到的时间」
         base_updated_at: props.initial?.updated_at || '',
       });
@@ -70,7 +95,7 @@ const KbEditor = {
       titleInput.value && titleInput.value.focus();
       autoGrow();
     });
-    onUnmounted(() => window.removeEventListener('keydown', onKey));
+    onUnmounted(() => { active = false; window.removeEventListener('keydown', onKey); });
 
     let pressOnOverlay = false;
     const onOverlayMousedown = (e) => { pressOnOverlay = e.target === e.currentTarget; };
@@ -82,6 +107,7 @@ const KbEditor = {
     return {
       form, titleInput, contentArea, autoGrow, save, source, cfg,
       hasTag, toggleTag,
+      desktopOnly, picking, chooseFile,
       isDeposit: !!props.prefill && !props.initial,
       close: () => emit('close'),
       onOverlayMousedown, onOverlayMouseup,
@@ -105,6 +131,19 @@ const KbEditor = {
         </label>
         <label>🏷️ 标签
           <input v-model="form.tagsText" :placeholder="cfg.tagsPlaceholder">
+        </label>
+        <!-- 关联本地文件：只保存路径。手机上不做（知识库管理只在电脑端） -->
+        <label class="kb-file-field" v-if="desktopOnly">📎 关联本地文件（可选）
+          <div class="kb-file-row">
+            <input v-model="form.filePath" spellcheck="false" autocomplete="off"
+                   placeholder="粘贴文件完整路径，或点击右侧选择文件">
+            <button type="button" class="btn small" :disabled="picking" @click="chooseFile">
+              {{ picking ? '选择中…' : '选择文件…' }}
+            </button>
+          </div>
+          <small class="kb-file-hint">
+            只保存这个路径，<strong>不会复制、上传或读取文件内容</strong>。文件以后被移动了，可以在卡片上「更新文件」重新关联。
+          </small>
         </label>
         <!-- M21-B：复用输入过的标签。点一下加入输入框，已加入的再点一下移除 -->
         <div class="kb-tag-picks" v-if="knownTags.length">

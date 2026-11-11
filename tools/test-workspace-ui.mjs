@@ -391,6 +391,47 @@ try {
   assert.ok((await fetch(base + '/api/ideas/' + cpIdeaBody.id, { method: 'DELETE' })).ok, 'clean up content page fixture idea');
   console.log('✓ 带贴图的随记进全屏页后缩略图照常显示（84px，与卡片一致）');
 
+  /* ---- 侧边栏自适应：不同显示器/缩放/高度下不能有大片空白、按钮不能被压扁 ---- */
+  // 曾经的病：.sidebar-bottom 用 margin-top:auto 顶到屏幕底部，
+  // 「生活与成长」和「系统与工具」之间就会留出一大片空白；短屏时 flex 还会把按钮压扁。
+  async function checkSidebar(label, expectScroll) {
+    const info = await evaluate(`(() => {
+      const side = document.querySelector('.sidebar');
+      const navs = [...document.querySelectorAll('.sidebar-nav')];
+      const caption = [...document.querySelectorAll('.sidebar-bottom .nav-caption')].find(c => c.textContent.includes('系统'));
+      const buttons = [...document.querySelectorAll('.sidebar-nav button, .sidebar-message')];
+      const note = document.querySelector('.collection-note');
+      const rect = el => { const b = el.getBoundingClientRect(); return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) }; };
+      const sideRect = rect(side);
+      return {
+        groups: navs.length,
+        gap: caption ? Math.round(rect(caption).top - rect(navs[1]).bottom) : null,
+        minButton: buttons.length ? Math.min(...buttons.map(b => rect(b).h)) : 0,
+        buttonCount: buttons.length,
+        scrollable: side.scrollHeight > side.clientHeight + 1,
+        clientHeight: side.clientHeight,
+        scrollHeight: side.scrollHeight,
+        noteBottom: note ? rect(note).bottom : null,
+        sideBottom: sideRect.bottom,
+        sideTop: sideRect.top,
+      };
+    })()`);
+    assert.ok(info.groups >= 2, label + ': 侧栏分组缺失');
+    assert.ok(info.gap !== null, label + ': 缺少「系统与工具」分组');
+    assert.ok(info.gap <= 90, label + ': 「生活与成长」与「系统与工具」之间仍有大片空白 (' + info.gap + 'px)');
+    assert.ok(info.minButton >= 40, label + ': 侧栏按钮被压扁 (' + info.minButton + 'px)');
+    assert.ok(info.noteBottom === null || info.noteBottom <= (info.scrollable ? info.sideTop + info.scrollHeight : info.sideBottom) + 1, label + ': 统计卡跑出侧栏');
+    if (expectScroll) assert.ok(info.scrollable, label + ': 矮屏时侧栏应可滚动（scrollHeight=' + info.scrollHeight + ' client=' + info.clientHeight + '）');
+    console.log('✓ ' + label + ' ' + JSON.stringify(info));
+    return info;
+  }
+  for (const [w, h, needScroll, tag] of [[1920, 1080, false, '1920x1080'], [2560, 1440, false, '2560x1440'], [1536, 864, false, '125%等效 1536x864'], [1920, 720, true, '矮屏 1920x720'], [1280, 600, true, '很矮 1280x600']]) {
+    await viewport(w, h);
+    await navigate('ideas');
+    await checkSidebar('侧边栏 ' + tag, needScroll);
+  }
+  await viewport(1440, 1050);
+
   await viewport(390, 844, true);
   await navigate('ideas');
   await checkLayout('phone 390px');

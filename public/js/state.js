@@ -82,6 +82,10 @@ const state = reactive({
   editingKb: null,
   kbPrefill: null,       // 一键沉淀带来的预填内容（新条目）
   kbMerge: null,         // 笔记更新 vs 手动调整过的知识库条目：合并层数据
+  // 关联本地文件的状态（只电脑端）：id -> available | missing | unavailable | checking
+  // 这是临时状态：不落盘、不参与同步，刷新时重新查
+  kbFileStatus: {},
+  kbFileStatusAt: 0,
   // 长内容全屏页：只记「哪个板块的哪一条」，不存内容快照 ——
   // 打开时按 id 去对应板块的 state 数组里取实时对象，编辑保存后回来看到的就是新内容
   contentPage: { open: false, board: '', id: '' },

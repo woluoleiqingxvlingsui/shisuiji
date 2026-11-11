@@ -10,6 +10,7 @@ import { api } from '../api.js';
 import { isDesktop } from '../perm.js';
 import { NOTE_TEXT_FIELDS, NOTE_FIELD_LABEL } from '../util/paper-note.js';
 import { siteNoteFields, siteNoteFieldLabel } from '../util/site-note.js';
+import { kbFileName, refreshKbFileStatus, openLocalKbFile } from '../util/kb-file.js';
 import { loadBoardWithMirror } from '../offline.js';
 
 // paper-note 的标签表只覆盖三个基本字段，其余沉淀时用这份补全
@@ -25,6 +26,8 @@ async function loadKb() {
   });
   if (r.failed) toast('知识库加载失败', 'warn');
   state.kbLoaded = true;
+  // 文件状态单独查（只电脑端）：不阻塞卡片显示，失败了也不打扰用户
+  refreshKbFileStatus();
 }
 
 const filteredKb = computed(() => {
@@ -37,7 +40,9 @@ const filteredKb = computed(() => {
     if (!kw) return true;
     const tags = (k.tags || []).map((t) => String(t).toLowerCase());
     if (tags.includes(kw)) return true;              // 标签整词命中
-    return [k.title, k.content, tags.join(' '), (k.source && k.source.label) || '']
+    // 文件名也能被搜到（只搜文件名，不把整条路径塞进检索串）
+    const fileName = k.file_path ? kbFileName(k.file_path) : '';
+    return [k.title, k.content, tags.join(' '), (k.source && k.source.label) || '', fileName]
       .join(' ').toLowerCase().includes(kw);
   });
 });
@@ -52,6 +57,11 @@ const kbTagOptions = computed(() => {
 });
 
 function openKbEditor(entry) {
+  // 知识库管理（新增/编辑）只在电脑端：手机端只读浏览
+  if (!isDesktop()) {
+    toast('知识库管理只在电脑端可用', 'warn');
+    return;
+  }
   state.editingKb = entry ? { ...entry } : null;
   state.kbPrefill = null;
   state.kbEditorOpen = true;
@@ -74,6 +84,11 @@ function pickKbTag(tag) {
 }
 
 async function saveKb(payload) {
+  // 兜底：知识库的写入（尤其是关联本地文件）只在电脑端
+  if (!isDesktop()) {
+    toast('知识库管理只在电脑端可用', 'warn');
+    return;
+  }
   const isEdit = !!state.editingKb;
   const url = isEdit ? `/api/kb/${state.editingKb.id}` : '/api/kb';
   const res = await api(url, {
@@ -93,15 +108,30 @@ async function saveKb(payload) {
   state.kbEditorOpen = false;
   state.kbPrefill = null;
   toast(isEdit ? '已保存 ✅' : '已沉淀进知识库 📚');
+  // 关联的文件可能有变：刷新一次状态（后台，不阻塞）
+  refreshKbFileStatus();
 }
 
 async function removeKb(entry) {
+  if (!isDesktop()) {
+    toast('知识库管理只在电脑端可用', 'warn');
+    return;
+  }
   const name = entry.title || '这条知识';
   if (!confirm(`确定删除「${name}」吗？`)) return;
   const res = await api(`/api/kb/${entry.id}`, { method: 'DELETE' });
   if (!res.ok) return toast('删除失败：' + res.status, 'warn');
   state.kb = state.kb.filter((k) => k.id !== entry.id);
   toast('已删除 🗑');
+}
+
+/* ---- 打开关联的本地文件（只电脑端；手机端看不到这个入口） ---- */
+async function openKbFile(entry) {
+  if (!isDesktop()) {
+    toast('打开文件只在电脑端可用', 'warn');
+    return;
+  }
+  await openLocalKbFile(entry);
 }
 
 /* ---- 一键沉淀入口：从各板块把精华预填进知识库编辑器 ---- */
@@ -266,7 +296,8 @@ async function resolveKbMerge(choice) {
 
 export {
   loadKb, filteredKb, kbTagOptions,
-  openKbEditor, pickKbTag, saveKb, removeKb,
+  openKbEditor, pickKbTag, saveKb, removeKb, openKbFile,
+  refreshKbFileStatus,
   depositFromIdea, depositFromPaperLog, depositFromSiteNote,
   autoSyncFromPaperLog, autoSyncFromSiteNote, resolveKbMerge,
 };

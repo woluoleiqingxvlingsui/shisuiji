@@ -10,7 +10,7 @@
  *
  * 改了缓存策略或预缓存清单就把 VERSION +1，activate 会清掉所有旧缓存。
  */
-const VERSION = 'p12-v12';
+const VERSION = 'p12-v13';
 const STATIC_CACHE = `danji-static-${VERSION}`;
 const NAV_CACHE = `danji-nav-${VERSION}`;
 const OFFLINE_URL = '/index.html';
@@ -28,6 +28,8 @@ self.addEventListener('install', (event) => {
     const sw = await caches.open(STATIC_CACHE);
     await Promise.allSettled([
       sw.add(new Request('/style.css', { cache: 'reload' })),
+      sw.add(new Request('/kb-files.css', { cache: 'reload' })),
+      sw.add(new Request('/js/util/kb-file.js', { cache: 'reload' })),
       sw.add(new Request('/js/app.js', { cache: 'reload' })),
       sw.add(new Request('/js/workspace.js', { cache: 'reload' })),
       sw.add(new Request('/js/components/app-icon.js', { cache: 'reload' })),

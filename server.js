@@ -20,6 +20,14 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
 
 const { createJsonTransactions } = require('./lib/json-transactions');
+// 知识库「关联本地文件」：只保存路径字符串，不复制/上传/解析文件（逻辑都在 lib 里，可单测）
+const {
+  normalizeKbFilePath,
+  kbFileName,
+  statKbFile,
+  mapLimit,
+  openLocalFile,
+} = require('./lib/kb-files');
 const jsonStore = createJsonTransactions({
   read: (file) => fsp.readFile(file),
   write: async (file, text) => {
@@ -263,7 +271,52 @@ function route(method, pattern, handler) {
   const regex = new RegExp(
     '^' + pattern.replace(/:[^/]+/g, (m) => { keys.push(m.slice(1)); return '([^/]+)'; }) + '$'
   );
-  routes.push({ method, regex, keys, handler });
+  // 留一份原始 pattern：自检要按 pattern 找路由。
+  // 不能拿 regex.source 反推 —— RegExp.source 会把 '/' 转义成 '\/'，反推不出来。
+  routes.push({ method, pattern, regex, keys, handler });
+}
+
+/**
+ * 路由自检（启动时跑一次）。
+ *
+ * 两件事：
+ * 1) 关键路由必须都在 —— 防止有人重构时把知识库的文件接口改没了；
+ * 2) 相对顺序 —— 路由是「先注册先匹配」，带字面量的多段路径
+ *    （如 '/api/kb/files/pick'）必须排在同方法的通配多段路径
+ *    （如 '/api/kb/:id/open-file'）之前，否则会被抢匹配。
+ *
+ * 顺序被改乱时直接退出，不带着走错的分支开服务。
+ */
+const ROUTE_ORDER_RULES = [
+  { required: ['POST', '/api/kb/files/pick'] },
+  { required: ['GET', '/api/kb/files/status'] },
+  { required: ['POST', '/api/kb/:id/open-file'] },
+  { before: ['POST', '/api/kb/files/pick'], after: ['POST', '/api/kb/:id/open-file'] },
+];
+
+function assertRouteOrder() {
+  const indexOfRoute = (method, pattern) =>
+    routes.findIndex((r) => r.method === method && r.pattern === pattern);
+  for (const rule of ROUTE_ORDER_RULES) {
+    if (rule.required) {
+      const [method, pattern] = rule.required;
+      if (indexOfRoute(method, pattern) === -1) {
+        console.error(`[shisuiji] 路由自检失败：缺少路由 ${method} ${pattern}`);
+        process.exit(1);
+      }
+      continue;
+    }
+    const a = indexOfRoute(rule.before[0], rule.before[1]);
+    const b = indexOfRoute(rule.after[0], rule.after[1]);
+    if (a === -1 || b === -1) {
+      console.error('[shisuiji] 路由自检失败：找不到路由', a === -1 ? rule.before : rule.after);
+      process.exit(1);
+    }
+    if (a > b) {
+      console.error(`[shisuiji] 路由顺序错误：${rule.before[0]} ${rule.before[1]} 必须注册在 ${rule.after[0]} ${rule.after[1]} 之前`);
+      process.exit(1);
+    }
+  }
 }
 
 // 健康检查免口令（见 createServer）：手机要先能问「我是什么端、要不要口令」
@@ -2047,6 +2100,71 @@ function saveKb() {
   return queueWrite(saveKbNow);
 }
 
+// ---------- 知识库：关联本地文件（只保存路径） ----------
+// 铁律：只存**路径字符串** —— 不复制、不上传、不解析文件内容。
+// 状态单独查（GET /api/kb/files/status）：不写进记录、不 bump 数据版本、不参与同步。
+const KB_FILE_STATUS_TTL_MS = 5000;      // 同一路径 5 秒内复用结果（防抖动，不拖慢刷新）
+const KB_FILE_STATUS_BUDGET_MS = 3000;   // 单次状态查询的总预算（超出的回 checking）
+const KB_FILE_STATUS_MAX = 200;          // 单次最多检查多少个路径
+const KB_FILE_STAT_CONCURRENCY = 6;      // 同时进行的 stat 数量
+const KB_FILE_STAT_TIMEOUT_MS = 2500;    // 单个路径的 stat 超时（失效驱动器不会卡住服务）
+const KB_PICK_TIMEOUT_MS = 120000;       // 文件选择窗口最长等待 2 分钟
+
+// 选择文件的 PowerShell 脚本是**固定**的：用户路径绝不拼进代码里，只作为参数回传。
+// windowsHide 只藏控制台，OpenFileDialog 窗口照常可见（用户要自己挑文件）。
+const KB_PICK_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "Add-Type -AssemblyName System.Windows.Forms",
+  "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+  "$dialog.Title = '选择要关联的文件（只保存路径，不会复制文件）'",
+  "$dialog.Filter = '常用文件|*.pdf;*.doc;*.docx;*.txt;*.md;*.csv;*.ppt;*.pptx;*.xls;*.xlsx;*.epub;*.png;*.jpg;*.jpeg;*.webp;*.gif;*.mp3;*.mp4;*.zip|所有文件|*.*'",
+  "$dialog.Multiselect = $false",
+  "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+  "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }",
+].join('\n');
+
+const kbFileStatusCache = new Map();     // path -> { status, at, error }
+const kbFileStatusInFlight = new Map();  // path -> Promise（进行中的检查复用，不重复打盘）
+const KB_FILE_STATUS_CACHE_MAX = 500;    // 缓存上限：超出后淘汰最久未用的（Map 保持插入序）
+let kbFileStatusCursor = 0;
+let kbPickerRunning = false;             // 同时只允许一个选择器进程
+
+/**
+ * 写状态缓存。超过上限就淘汰最旧的条目，避免长期运行后无限增长。
+ * 命中已有键时先删后写，让 Map 的插入序始终等于「最近使用序」。
+ */
+function kbFileStatusCacheSet(filePath, record) {
+  if (kbFileStatusCache.has(filePath)) kbFileStatusCache.delete(filePath);
+  kbFileStatusCache.set(filePath, record);
+  while (kbFileStatusCache.size > KB_FILE_STATUS_CACHE_MAX) {
+    const oldest = kbFileStatusCache.keys().next().value;
+    if (oldest === undefined) break;
+    kbFileStatusCache.delete(oldest);
+  }
+}
+
+/** 查一个已保存路径的状态：缓存 + 进行中复用，避免失效驱动器反复卡住服务 */
+async function kbFileStatusOf(filePath, { fresh = false } = {}) {
+  const cached = kbFileStatusCache.get(filePath);
+  if (!fresh && cached && Date.now() - cached.at < KB_FILE_STATUS_TTL_MS) return cached;
+  let inflight = kbFileStatusInFlight.get(filePath);
+  if (!inflight) {
+    const p = statKbFile(filePath, KB_FILE_STAT_TIMEOUT_MS).then((res) => {
+      const rec = { status: res.status, at: Date.now(), error: res.error || '' };
+      kbFileStatusCacheSet(filePath, rec);
+      return rec;
+    });
+    kbFileStatusInFlight.set(filePath, p);
+    p.then(() => {
+      if (kbFileStatusInFlight.get(filePath) === p) kbFileStatusInFlight.delete(filePath);
+    }, () => {
+      if (kbFileStatusInFlight.get(filePath) === p) kbFileStatusInFlight.delete(filePath);
+    });
+    inflight = p;
+  }
+  return inflight;
+}
+
 function normalizeKbSource(input, existing) {
   const src = input && typeof input === 'object' ? input : {};
   const out = existing && typeof existing === 'object' ? { ...existing } : {};
@@ -2075,6 +2193,27 @@ function normalizeKb(input, existing = {}) {
   }
   if ('source' in input) k.source = normalizeKbSource(input.source, k.source);
   if (!k.source || typeof k.source !== 'object') k.source = { type: 'manual' };
+  // 关联本地文件：**只保存路径字符串**。
+  //   - 请求里没有 file_path      → 保留原关联（编辑标题/内容不会把关联弄丢）
+  //   - file_path 是空串           → 显式解除关联
+  //   - file_path 是合法路径      → 规范化后保存（只校验格式，允许先保存失效路径）
+  //   - 路径不合法                → 400，提示说清楚为什么
+  if ('file_path' in input && input.file_path !== null && input.file_path !== undefined) {
+    const raw = String(input.file_path).trim();
+    if (!raw) {
+      k.file_path = '';
+    } else {
+      const norm = normalizeKbFilePath(raw);
+      if (!norm.ok) {
+        const err = new Error(norm.error);
+        err.statusCode = 400;
+        err.code = norm.code;
+        throw err;
+      }
+      k.file_path = norm.path;
+    }
+  }
+  if (typeof k.file_path !== 'string') k.file_path = '';
   // 自动沉淀 vs 手动调整：auto_sync 只更新 auto 标记（不动 manual_at）；
   // 手动保存（编辑器/合并定稿）记 manual_at。前端据此决定"直接覆盖"还是"弹合并层"
   if (input.auto_sync === true) {
@@ -2094,6 +2233,84 @@ function normalizeKb(input, existing = {}) {
   k.updated_at = new Date().toISOString();
   return k;
 }
+
+// 选文件：只弹系统窗口让用户挑，服务器只拿到一个路径字符串。
+// 放在 /api/kb/:id 之前注册，路径匹配按注册顺序第一条命中。
+route('POST', '/api/kb/files/pick', async (ctx) => {
+  if (ctx.role !== 'desktop') {
+    return ctx.json({ error: '选择文件只在电脑端可用', code: 'forbidden' }, 403);
+  }
+  if (process.platform !== 'win32') {
+    return ctx.json({ error: '文件选择窗口目前只在 Windows 电脑端可用', code: 'unsupported' }, 400);
+  }
+  if (kbPickerRunning) {
+    return ctx.json({ error: '文件选择窗口已经开着了，请先完成上一次选择', code: 'busy' }, 409);
+  }
+  kbPickerRunning = true;
+  try {
+    // 异步 execFile、不经 shell：脚本是固定的，用户路径不会进代码
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-STA', '-Command', KB_PICK_SCRIPT], {
+      timeout: KB_PICK_TIMEOUT_MS,
+      windowsHide: true,     // 只藏控制台，文件选择窗口照常可见
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+    });
+    const picked = String(stdout || '').trim();
+    if (!picked) return ctx.json({ ok: true, path: '', canceled: true });  // 用户取消：正常空路径
+    const norm = normalizeKbFilePath(picked);
+    if (!norm.ok) return ctx.json({ ok: false, error: norm.error, code: norm.code }, 400);
+    return ctx.json({ ok: true, path: norm.path, name: norm.name });
+  } catch (err) {
+    if (err && (err.killed || err.signal)) {
+      return ctx.json({ error: '选择超时，已取消', code: 'timeout' }, 504);
+    }
+    console.error('[shisuiji] 文件选择失败:', err && err.message);
+    return ctx.json({ error: '没能打开文件选择窗口', code: 'pick_failed' }, 500);
+  } finally {
+    kbPickerRunning = false;
+  }
+});
+
+// 文件状态：只查**已保存**的路径，不接受任意路径查询。
+// 结果不进记录、不 bump 版本、不同步；缓存 5 秒，进行中的检查复用。
+route('GET', '/api/kb/files/status', async (ctx) => {
+  if (ctx.role !== 'desktop') {
+    return ctx.json({ error: '文件状态只在电脑端可用', code: 'forbidden' }, 403);
+  }
+  const entries = ctx.kbFileEntries.filter((k) => k && k.file_path);
+  const paths = [];
+  for (const entry of entries) {
+    if (!paths.includes(entry.file_path)) paths.push(entry.file_path);
+  }
+  const start = paths.length ? kbFileStatusCursor % paths.length : 0;
+  const checked = [...paths.slice(start), ...paths.slice(0, start)].slice(0, KB_FILE_STATUS_MAX);
+  kbFileStatusCursor = paths.length ? (start + checked.length) % paths.length : 0;
+  // fresh=1：跳过缓存重新查（打开失败后立即刷新状态用）
+  const fresh = ctx.query.get('fresh') === '1';
+  const deadline = Date.now() + KB_FILE_STATUS_BUDGET_MS;
+  const results = await mapLimit(checked, KB_FILE_STAT_CONCURRENCY, async (p) => {
+    const left = Math.max(0, deadline - Date.now());
+    if (!left) return { status: 'checking' };
+    let timer = null;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ status: 'checking' }), left);
+    });
+    try {
+      const res = await Promise.race([kbFileStatusOf(p, { fresh }), timeout]);
+      return res && res.status ? res : { status: 'checking' };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  });
+  const byPath = new Map();
+  checked.forEach((p, i) => byPath.set(p, results[i] || { status: 'checking' }));
+  const statuses = {};
+  for (const entry of entries) {
+    const rec = byPath.get(entry.file_path) || kbFileStatusCache.get(entry.file_path);
+    statuses[entry.id] = rec ? rec.status : 'checking';
+  }
+  ctx.json({ ok: true, statuses, checked_at: new Date().toISOString() });
+});
 
 route('GET', '/api/kb', async (ctx) => {
   ctx.json([...kbDb.kb].sort((a, b) =>
@@ -2132,6 +2349,36 @@ route('DELETE', '/api/kb/:id', async (ctx) => {
   await pushToTrash('kb', removed);
   await saveKb();
   ctx.json({ ok: true, deleted: removed.id });
+});
+
+// 打开关联的文件：路径只从**已保存的记录**里取，客户端不能指定路径。
+// 先重新确认文件还在、格式仍然合法，再用系统默认程序打开（不经 shell）。
+route('POST', '/api/kb/:id/open-file', async (ctx) => {
+  if (ctx.role !== 'desktop') {
+    return ctx.json({ error: '打开文件只在电脑端可用', code: 'forbidden' }, 403);
+  }
+  const entry = ctx.kbFileEntries.find((k) => k.id === ctx.params.id);
+  if (!entry) return ctx.json({ error: '知识不存在', code: 'missing' }, 404);
+  if (!entry.file_path) return ctx.json({ error: '这条知识没有关联文件', code: 'no_file' }, 400);
+  const norm = normalizeKbFilePath(entry.file_path);
+  if (!norm.ok) return ctx.json({ error: norm.error, code: norm.code }, 400);
+  const st = await statKbFile(norm.path, KB_FILE_STAT_TIMEOUT_MS);
+  if (st.status === 'missing') {
+    kbFileStatusCacheSet(norm.path, { status: 'missing', at: Date.now(), error: '' });
+    return ctx.json({ error: '文件不在原来的位置，可能被移动或删除了', code: 'missing_file' }, 404);
+  }
+  if (st.status !== 'available') {
+    kbFileStatusCacheSet(norm.path, { status: st.status, at: Date.now(), error: st.error || '' });
+    return ctx.json({ error: st.error || '暂时无法访问这个文件', code: 'unavailable_file' }, 400);
+  }
+  try {
+    await openLocalFile(norm.path, { spawn });
+  } catch (err) {
+    console.error('[shisuiji] 打开文件失败:', err && err.message);
+    return ctx.json({ error: '没能打开这个文件：' + (err && err.message ? err.message : '未知错误'), code: 'open_failed' }, 500);
+  }
+  kbFileStatusCacheSet(norm.path, { status: 'available', at: Date.now(), error: '' });
+  ctx.json({ ok: true, name: kbFileName(norm.path) });
 });
 
 // ---------- 回收站（M20 任务 D）----------
@@ -2771,7 +3018,15 @@ async function handleRequest(req, res) {
       try {
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
         const context = { req, res, params, body, query: url.searchParams, role };
-        const direct = pathname === '/api/health' || pathname === '/api/pair/check'
+        // File dialogs and disk checks must not hold the JSON transaction queue.
+        // Take a committed metadata snapshot briefly, then do external work outside it.
+        const kbFileAction = pathname === '/api/kb/files/pick' || pathname === '/api/kb/files/status'
+          || /^\/api\/kb\/[^/]+\/open-file$/.test(pathname);
+        if (kbFileAction && pathname !== '/api/kb/files/pick') {
+          context.kbFileEntries = await jsonStore.run(async () =>
+            kbDb.kb.map(({ id, file_path }) => ({ id, file_path })));
+        }
+        const direct = kbFileAction || pathname === '/api/health' || pathname === '/api/pair/check'
           || pathname === '/api/events' || pathname.startsWith('/api/images/');
         if (direct) {
           await r.handler({ ...context, json: (data, code = 200) => sendJson(res, code, data) });
@@ -2854,6 +3109,8 @@ Promise.all([
   loadData(), loadPapers(), loadMessages(), loadSites(), loadExpenses(), loadInsights(), loadIdeas(), loadAchievements(), loadKb(), loadTrash(),
 ]).then(async () => {
   storesLoaded = true;
+  // 路由顺序自检：顺序被改乱就直接退出，不带着走错的分支开服务
+  assertRouteOrder();
   await pruneImageFiles([...startupPruneIds]);
   startupPruneIds.clear();
   server.listen(PORT, HOST, () => {

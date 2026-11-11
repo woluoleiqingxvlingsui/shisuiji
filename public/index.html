@@ -12,6 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="拾穗集">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/kb-files.css">
   <script type="module" src="/js/pwa.js"></script>
 </head>
 <body>
@@ -201,7 +202,8 @@
 
     <masonry-list :items="filteredKb" :layout="layout" v-else v-slot="{ item: k }">
       <kb-card :entry="k"
-               @edit="openKbEditor(k)" @remove="removeKb(k)" @open-full="openContentPage('kb', k.id)">
+               @edit="openKbEditor(k)" @remove="removeKb(k)" @open-full="openContentPage('kb', k.id)"
+               @open-file="openKbFile(k)" @update-file="openKbEditor(k)">
       </kb-card>
     </masonry-list>
   </main>

@@ -24,3 +24,21 @@ jobs:
       - run: npm test
       # ESM 边界回归：public/ 下的 .js 必须在 Node 18 语义下也按 ESM 解析
       - run: node tools/test-esm-boundary.mjs
+
+  # 需要真实 Windows GUI 的验收：Edge 跑前端界面 + WPF 跑图形控制台。
+  # 单独一个 job：这两项要开窗口、无头会话下不稳，混进主矩阵会拖垮 3 个 node 版本。
+  ui-and-console:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # 知识库关联文件的真实浏览器验收（headless Edge，隔离临时目录）
+      - name: 知识库文件 UI 验收
+        run: node tools/test-kb-files-ui.mjs
+      # 图形控制台启动验收：窗口出现速度、耗时任务期间可响应、关窗后干净退出
+      - name: 图形控制台启动验收
+        run: powershell -NoProfile -STA -ExecutionPolicy Bypass -File tools/test-control-startup.ps1

@@ -16,7 +16,7 @@ import { loadInsights, setExpenseView, saveInsightVerdict, clearInsightVerdict, 
 import { loadTrash, restoreTrashEntry, purgeTrashEntry, emptyTrash, filteredTrash } from './boards/trash.js';
 import { loadIdeas, filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin } from './boards/ideas.js';
 import { loadAchievements, filteredAchievements, achievementTimeline, achievementCategories, achievementCategoryCounts, openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement } from './boards/achievements.js';
-import { loadKb, filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb, depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge } from './boards/kb.js';
+import { loadKb, filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb, openKbFile, refreshKbFileStatus, depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge } from './boards/kb.js';
 import { SyncStatus } from './components/sync-status.js';
 import { installSync, disposeSync } from './sync/engine.js';
 // 全局系统通知：与赛博鸡蛋的铃铛共用 Web Notification 通道，开关分开存
@@ -296,6 +296,7 @@ const app = createApp({
       ensureReportInbox();      // 通道可能早就被掐了
       ensureReportSweep();      // 角色判定有延迟时，兜底轮询可能压根没起来
       sweepReports();           // 期间漏掉的回报立刻补上
+      refreshKbFileStatus(true);    // 切回来就重新确认关联的文件还在不在
     }
     // M2：原生配对成功后补拉各板块（需在 setup 作用域，onUnmounted 才能解绑）
     function onPaired() {
@@ -336,6 +337,8 @@ const app = createApp({
       // 其他板块删完东西进站，回收站列表就变了 —— 进板块时重拉保证看到最新的，
       // 平时不做无谓的定时请求。
       watch(() => state.board, (board) => { if (board === 'trash' && isDesktop()) loadTrash(); });
+      // 切到知识库就重新确认关联文件的可用性（只电脑端；后台查，不阻塞显示）
+      watch(() => state.board, (board) => { if (board === 'kb') refreshKbFileStatus(true); });
 
       // P6/P9：先探测角色。手机端启用同步层；离线时跳过 REST，避免一串失败提示
       // M3.1：原生先落在「想法」，避免默认「蛋」板块空转
@@ -396,6 +399,8 @@ const app = createApp({
       tickTimer = setInterval(() => {
         state.now = Date.now();
         if (!(state.sync && state.sync.offline)) settleOverdue();
+        // 知识库显示期间每 30 秒复检一次：发现文件被移走/删掉
+        if (state.board === 'kb') refreshKbFileStatus();
       }, 30 * 1000);
       remindTimer = setInterval(checkReminders, CONFIG.remind.checkIntervalSec * 1000);
       // 兜底心跳：通道若因任何原因没能自愈，这里周期性地把它重新拉起来
@@ -448,7 +453,7 @@ const app = createApp({
       filteredIdeas, openIdeaEditor, saveIdea, removeIdea, togglePin,
       filteredAchievements, achievementTimeline, achievementCategories, achievementCategoryCounts,
       openAchievementEditor, pickAchievementCategory, saveAchievement, removeAchievement,
-      filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb,
+      filteredKb, kbTagOptions, openKbEditor, pickKbTag, saveKb, removeKb, openKbFile,
       depositFromIdea, depositFromPaperLog, depositFromSiteNote, resolveKbMerge,
       // 长内容全屏页（读 / 写都进全屏，应用内视图，不是新标签页）
       openContentPage, closeContentPage, editContentPage, contentPageItem, contentPageMeta,

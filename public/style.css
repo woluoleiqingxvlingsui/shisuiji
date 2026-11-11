@@ -1181,7 +1181,9 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .app-icon { width: 20px; height: 20px; flex: none; vertical-align: middle; }
 .skip-link { position: fixed; top: -60px; left: 16px; z-index: 100; padding: 10px 20px; background: var(--card); color: var(--accent-strong); border-radius: var(--radius); }
 .skip-link:focus { top: 12px; }
-.sidebar { position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w); z-index: 35; display: flex; flex-direction: column; padding: 34px 18px 20px; border-right: 1px solid var(--border); background: var(--card); overflow-y: auto; }
+.sidebar { position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w); z-index: 35; display: flex; flex-direction: column; padding: 34px 18px 20px; border-right: 1px solid var(--border); background: var(--card); overflow-y: auto; overflow-x: hidden; }
+/* 短屏/大字号时侧栏是滚动容器：子项不许被 flex 压扁（按钮会挤成一条线），改为整体滚动 */
+.sidebar > *, .sidebar-bottom > * { flex: 0 0 auto; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; background: none; color: var(--text); text-align: left; margin-bottom: 40px; }
 .brand-mark { display: grid; place-items: center; width: 44px; height: 48px; border-radius: 16px 16px 16px 4px; background: var(--accent); color: var(--on-accent); }
 .brand-mark .app-icon { width: 28px; height: 28px; }
@@ -1195,7 +1197,10 @@ button:disabled { cursor: wait; opacity: .55; transform: none; }
 .sidebar-nav button:hover, .sidebar-message:hover { background: var(--card-2); color: var(--text); }
 .sidebar-nav button.active, .sidebar-message.active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 650; }
 .sidebar-nav button.active small { background: var(--card); border-radius: 5px; }
-.sidebar-bottom { margin-top: auto; }
+/* 「系统与工具」这一组紧跟在「生活与成长」后面，不再被 margin-top:auto 顶到屏幕底部
+   （那会在两组之间留出大片空白）。底部只留签名与统计卡。 */
+.sidebar-bottom { display: contents; }
+.sidebar-bottom > .sidebar-signature { margin-top: auto; }
 .collection-note { display: flex; align-items: flex-start; gap: 9px; padding: 15px 12px; margin: 14px 0 0; background: var(--card-2); border-radius: 12px; color: var(--accent-strong); }
 .collection-note > .app-icon { margin-top: 3px; }
 .collection-note p { margin: 0; font-size: 12px; line-height: 1.8; }

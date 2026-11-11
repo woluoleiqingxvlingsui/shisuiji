@@ -135,12 +135,19 @@ function New-PairQrPng {
   return $null
 }
 
+# -SkipLan：跳过局域网 IP 查询。Get-NetIPAddress 首次调用要 3~4 秒（加载 NetTCPIP 模块），
+# 探活/启动这类高频路径不需要手机地址，跳过它才能让界面立刻可用。
 function Update-UrlFromEnv {
+  param([switch]$SkipLan)
   if (Get-UseTls) { $Scheme = 'https' } else { $Scheme = 'http' }
   $Url = ("{0}://localhost:{1}" -f $Scheme, $Port)
-  $lip = Get-LanIPv4
-  if ($lip) { $PhoneUrl = ("{0}://{1}:{2}" -f $Scheme, $lip, $Port) }
-  else { $PhoneUrl = $null }
+  if ($SkipLan) {
+    $PhoneUrl = $null
+  } else {
+    $lip = Get-LanIPv4
+    if ($lip) { $PhoneUrl = ("{0}://{1}:{2}" -f $Scheme, $lip, $Port) }
+    else { $PhoneUrl = $null }
+  }
   $Health = ("{0}://127.0.0.1:{1}/api/health" -f $Scheme, $Port)
   # 同步到脚本作用域，避免 UI 读到旧的 $Url
   $script:Scheme = $Scheme
@@ -172,7 +179,7 @@ function Test-UriOk([string]$uri) {
 }
 
 function Test-Up {
-  Update-UrlFromEnv
+  Update-UrlFromEnv -SkipLan
   # HTTP / HTTPS 都探：只要有一个在服就算在跑
   $a = Test-UriOk ("http://127.0.0.1:{0}/api/health" -f $Port)
   if ($a) { $script:LiveScheme = 'http'; return $true }
@@ -291,6 +298,16 @@ function Test-ProjectServerProcess([int]$ProcessId) {
   $verdict.Reason = 'not-project'
   $verdict.Message = ("PID {0}（{1}）无法确认属于当前目录的拾穗集。相对路径启动的服务请在原终端停止。" -f $ProcessId, $verdict.ProcessName)
   return $verdict
+}
+
+# 手机地址（局域网 IP）。首次调用要几秒（Get-NetIPAddress 冷启动），所以按需取、并且只取一次。
+function Get-PhoneUrl {
+  if (-not $script:PhoneUrlResolved) {
+    Update-UrlFromEnv
+    $script:PhoneUrlCache = $PhoneUrl
+    $script:PhoneUrlResolved = $true
+  }
+  return $script:PhoneUrlCache
 }
 
 # 端口占用情况：Free=没人监听 / Project=本项目服务 / Foreign=别的程序占用
@@ -429,8 +446,85 @@ $script:LastStartMessage = ''
 function Get-LastStopMessage  { return $script:LastStopMessage }
 function Get-LastStartMessage { return $script:LastStartMessage }
 
+# —— 后台工作：把耗时动作放到独立运行空间里跑，界面线程只取结果 ——
+# 探活（curl）、端口归属（Get-NetTCPConnection 约 1.2 秒 + CIM 约 0.2 秒）、
+# 备份、生成二维码这些都不能再占用界面线程，否则窗口会卡住。
+function New-BackgroundWorker {
+  $runspace = [runspacefactory]::CreateRunspace()
+  $runspace.Open()
+  $worker = @{
+    Runspace = $runspace
+    Shell    = [powershell]::Create()
+    Handle   = $null
+    Done     = $true
+    Output   = $null
+    Error    = ''
+    StartedAt = $null
+  }
+  $worker.Shell.Runspace = $runspace
+  return $worker
+}
+
+# 在后台运行空间里跑一段脚本。$Arguments 会按顺序绑定到脚本块的 param 上。
+function Start-BackgroundTask {
+  param($Worker, [scriptblock]$Script, [object[]]$Arguments = @())
+  if (-not $Worker) { return $false }
+  if (-not $Worker.Done) { return $false }
+  $shell = $Worker.Shell
+  try { $shell.Commands.Clear() } catch { }
+  try { $shell.Streams.Error.Clear() } catch { }
+  $null = $shell.AddScript([string]$Script)
+  foreach ($arg in $Arguments) { $null = $shell.AddArgument($arg) }
+  $Worker.Handle = $shell.BeginInvoke()
+  $Worker.Done = $false
+  $Worker.Output = $null
+  $Worker.Error = ''
+  $Worker.StartedAt = Get-Date
+  return $true
+}
+
+# 取后台结果；没跑完就返回 $false（不阻塞等待）
+function Test-BackgroundTaskDone {
+  param($Worker)
+  if (-not $Worker) { return $true }
+  if ($Worker.Done) { return $true }
+  $state = [string]$Worker.Shell.InvocationStateInfo.State
+  if ($state -ne 'Completed' -and $state -ne 'Failed' -and $state -ne 'Stopped') { return $false }
+  try { $Worker.Output = @($Worker.Shell.EndInvoke($Worker.Handle)) }
+  catch { $Worker.Error = $_.Exception.Message }
+  if (-not $Worker.Error -and $Worker.Shell.Streams.Error.Count -gt 0) {
+    $Worker.Error = (($Worker.Shell.Streams.Error | ForEach-Object { [string]$_ }) -join '; ')
+  }
+  $Worker.Done = $true
+  return $true
+}
+
+function Get-BackgroundTaskResult {
+  param($Worker)
+  if (-not $Worker -or -not $Worker.Done) { return $null }
+  if ($Worker.Error) { return $null }
+  if (-not $Worker.Output -or $Worker.Output.Count -eq 0) { return $null }
+  return $Worker.Output[0]
+}
+
+function Get-BackgroundTaskError {
+  param($Worker)
+  if (-not $Worker) { return '' }
+  return [string]$Worker.Error
+}
+
+# 释放后台运行空间：窗口关闭/异常退出时必须调用，否则线程会一直挂着
+function Close-BackgroundWorker {
+  param($Worker)
+  if (-not $Worker) { return }
+  try { if (-not $Worker.Done) { $Worker.Shell.Stop() } } catch { }
+  try { $Worker.Shell.Dispose() } catch { }
+  try { $Worker.Runspace.Dispose() } catch { }
+  $Worker.Done = $true
+}
+
 # 初始化配置与地址
 $AppCfg = Get-AppConfig
 $Port   = $AppCfg.port
 $null = Import-LocalEnv
-Update-UrlFromEnv
+Update-UrlFromEnv -SkipLan

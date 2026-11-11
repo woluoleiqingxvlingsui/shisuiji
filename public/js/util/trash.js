@@ -144,6 +144,7 @@ function achievementDetailRows(rows, p) {
 function kbDetailRows(rows, p) {
   pushRow(rows, '标题', p.title);
   pushRow(rows, '内容', p.content, true);
+  pushRow(rows, '关联文件', p.file_path, true);
   pushRow(rows, '标签', joinList(p.tags));
   const source = p.source && typeof p.source === 'object' ? p.source : null;
   if (source) {
