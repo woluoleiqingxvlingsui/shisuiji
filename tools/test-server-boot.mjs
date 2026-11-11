@@ -148,6 +148,20 @@ try {
     ok('手机端未带口令连 /api/events 被拒（不能匿名订阅改动）', anon.status === 401 || anon.status === 403, `status=${anon.status}`);
     const wrong = await readHead(`${lanBase}/api/events`, { 'X-Danji-Token': 'wrong-token' }, 4000);
     ok('手机端口令错误被拒', wrong.status === 401 || wrong.status === 403, `status=${wrong.status}`);
+
+    // 回归锁死：/api/images 曾接受 ?t=<口令> 查询参数旁路（担心 <img> 带不了请求头）。
+    // 前端取图早已统一走请求头（public/js/img-urls.js 用 api()），
+    // 那条旁路没有调用方却会把口令写进浏览器历史/日志，已移除。
+    const imgUrl = await fetch(`${lanBase}/api/images/00000000-0000-4000-8000-000000000000`, {
+      headers: auth,
+    });
+    ok('手机端带请求头能过图片路由的鉴权（不是被口令挡下）',
+      imgUrl.status !== 401 && imgUrl.status !== 403, `status=${imgUrl.status}`);
+    const viaQuery = await fetch(
+      `${lanBase}/api/images/00000000-0000-4000-8000-000000000000?t=${encodeURIComponent(TOKEN)}`
+    );
+    ok('手机端用 ?t= 口令旁路取图被拒（口令只认请求头）',
+      viaQuery.status === 401 || viaQuery.status === 403, `status=${viaQuery.status}`);
   }
   // 本机回环按设计免口令（clientRole 认 socket 回环地址），这里只验证本机确实能连
   const loopAnon = await readHead(`${base}/api/events`, {}, 3000);

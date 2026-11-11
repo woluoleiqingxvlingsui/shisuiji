@@ -2907,18 +2907,13 @@ function safeEqual(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-// 没配口令 = 不校验（保持原有行为，只靠监听地址保护）；配了则只有本机回环免口令
+// 没配口令 = 不校验（保持原有行为，只靠监听地址保护）；配了则只有本机回环免口令。
+// 口令只认请求头 X-Danji-Token。历史上有过「/api/images/?t=口令」旁路（当时担心
+// <img> 带不了请求头），但前端取图早已统一走 api() 带请求头（见 public/js/img-urls.js），
+// 那条旁路没有任何调用方，却会把口令写进浏览器历史、代理日志和 Referer，故移除。
 function tokenOk(req) {
   if (!APP_CONFIG.token) return true;
   if (clientRole(req) === 'desktop') return true;
-  // <img> 标签带不了请求头：仅图片回读路由额外接受 ?t= 口令，不扩散到其他 API
-  try {
-    const u = new URL(req.url, 'http://localhost');
-    if (u.pathname.startsWith('/api/images/')) {
-      const t = String(u.searchParams.get('t') || '');
-      if (t && safeEqual(t, APP_CONFIG.token)) return true;
-    }
-  } catch { /* ignore */ }
   return safeEqual(req.headers['x-danji-token'] || '', APP_CONFIG.token);
 }
 

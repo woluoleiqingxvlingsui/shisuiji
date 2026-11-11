@@ -386,7 +386,7 @@ papers\
 
 ## 技术栈
 
-Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端 `public/` 约 1.2 万行、后端 `server.js` 约 2900 行，业务代码使用原生 JavaScript，适合按需修改。
+Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构建步骤）+ 手写 CSS。前端 `public/` 约 1.3 万行、后端 `server.js` 约 3100 行，业务代码使用原生 JavaScript，适合按需修改。
 
 第三方组件：随仓库内置在 `public/vendor/`，运行时不联网加载。
 
@@ -405,6 +405,12 @@ Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构�
 
 所有服务测试使用临时副本、独立 `data/` 和显式临时 `DANJI_PAPERS_DIR`。浏览器测试需要本机 Edge，可用 `EDGE_PATH` 指定。
 
+### 发布前自检
+
+`npm run preflight` 一条命令回答「现在推到公开仓库会不会泄露隐私」：检查敏感文件是否被 git 跟踪、ignore 规则是否真的挡住它们、跟踪文件里是否混入本机绝对路径/密钥/手机号、提交邮箱是否统一为 noreply、git 历史里曾出现的敏感文件是否真含敏感内容、六处版本号是否一致、CHANGELOG 是否与版本对齐、本地 tag 是否齐、远端是否可连。
+
+全程只读——不改文件、不改配置、不动索引、不推送。有问题时退出码为 1。离线环境加 `--no-remote` 跳过联网检查。
+
 手机诊断可运行 `adb logcat -v time -s DanjiSync chromium`，对照原生 `cycle=… stage=snapshot-saved`、JS `[danji-snap] applied` 和 `[danji-sync]` 阶段记录；相同数据用 `boot` 与版本号对应。消息保留 `sync_source`、`sync_cycle`、`sync_stage` 等诊断字段。日志不记录内容正文和配对口令。
 
 失败回报只尝试即时发送，网络恢复后不补发旧失败；成功回报保留重试。断网告警仍保存在手机本地消息中。升级旧 APK 后先联网同步一次，可修复旧版本留下的空 `boot_id` 账本。服务端重启导致进程标识变化时，暂不跨进程导入快照，需联网同步建立新基线，避免旧快照覆盖新数据。
@@ -412,6 +418,7 @@ Node.js 标准库（http 服务 + JSON 存储）+ Vue 3（本地文件，无构�
 ## 源码提交与更新
 
 - GitHub 源码只包含程序、示例配置和演示截图。`config.json`、`local.env.ps1`、`data/`、`papers/`、`backups/`、证书和 Android 签名材料均不应提交；不要用整目录压缩包代替源码发布。
+- 提交前跑一次 `npm run preflight`（见「发布前自检」），确认没有本机路径、口令、签名材料被带进版本库，版本号与 CHANGELOG 也对齐。
 - 更新前先停服务并备份，保留本机配置和文献路径。更新源码后重新启动；改了 `public/` 或原生代码，要重新构建并安装 APK。
 - 长期安装请保管 `app/android/danji-release.keystore` 与 `keystore.properties`，后续复用同一签名覆盖安装。切换签名不能直接覆盖，卸载前先同步，避免丢未同步记录。
 - 仓库 Actions 分别配置了 Windows 测试与 Android 调试构建。配置存在不等于远程执行已经通过，发布时以实际运行结果为准；手机锁屏、省电和相机行为仍需真机确认。
