@@ -1,0 +1,85 @@
+/* 拾穗集 —— 知识库「关联本地文件」的独立样式
+ * 单独一个文件：不碰公共 style.css（避免和别的改动打架），
+ * 颜色全部走 CSS 变量，跟随现有主题。
+ */
+
+.kb-file-field {
+  display: block;
+}
+
+.kb-file-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.kb-file-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.kb-file-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.kb-file-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted, #7a8a80);
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+
+/* 卡片上的文件行 */
+.kb-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, #e3e8e4);
+  border-radius: 10px;
+  background: var(--soft, #f6f8f6);
+}
+
+.kb-file-name {
+  font-weight: 600;
+  font-size: 0.92em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-file-note {
+  color: var(--muted, #7a8a80);
+  font-size: 0.82em;
+}
+
+/* 失效 / 不可访问：显眼但不刺眼 */
+.kb-file-warn {
+  flex: 1 0 100%;
+  color: #b3261e;
+  background: rgba(179, 38, 30, 0.08);
+  border-left: 3px solid #b3261e;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.84em;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .kb-file {
+    gap: 6px;
+  }
+  .kb-file-name {
+    flex: 1 0 100%;
+    white-space: normal;
+    word-break: break-all;
+  }
+}
