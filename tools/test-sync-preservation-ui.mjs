@@ -153,6 +153,13 @@ try {
         message.error ? callback.reject(new Error(JSON.stringify(message.error))) : callback.resolve(message.result);
       }
     }
+    if (message.method === 'Fetch.requestPaused') {
+      // Exercise slow classic-script loading: polling must not import state.js
+      // before Vue exists, or the failed module stays cached for this document.
+      setTimeout(() => cdp('Fetch.continueRequest', {
+        requestId: message.params.requestId,
+      }).catch((err) => errors.push(err.message)), 300);
+    }
     if (message.method === 'Runtime.exceptionThrown') {
       errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
     }
@@ -179,14 +186,22 @@ try {
   await cdp('Runtime.enable');
   await cdp('DOM.enable');
   await cdp('Page.enable');
+  await cdp('Fetch.enable', { patterns: [{
+    urlPattern: '*/vendor/vue.global.prod.js', requestStage: 'Request',
+  }] });
 
   async function openApp() {
     await cdp('Page.navigate', { url: base + '/__seed.html' });
-    await eventually(() => evaluate('document.readyState === "complete"'), 'seed page');
+    await eventually(() => evaluate('location.pathname === "/__seed.html" && document.readyState === "complete"'), 'seed page');
     // 让 App 以手机身份访问电脑服务（服务端按口令识别这次请求为手机）
     await evaluate(`localStorage.setItem('danji.syncToken', ${JSON.stringify(MOBILE_TOKEN)});
       localStorage.setItem('danji.serverBase', ${JSON.stringify(base)});`);
     await cdp('Page.navigate', { url: base + '/?board=ideas&danji-mobile=1' });
+    // Wait for the app's own script ordering and mount before importing modules
+    // from CDP. Otherwise a slow Vue download poisons vue-globals.js's module cache.
+    await eventually(() => evaluate(`location.pathname === '/' &&
+      new URLSearchParams(location.search).get('danji-mobile') === '1' &&
+      !!document.querySelector('#app:not([v-cloak]) .container')`), 'app mounted');
     await eventually(() => evaluate(`(async () => {
       const { state } = await import('/js/state.js');
       return !!state.sync.enabled;
